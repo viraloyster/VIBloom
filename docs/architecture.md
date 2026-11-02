@@ -147,6 +147,11 @@ result is a reduced counterexample, not a minimal one.
 | Record evidence, including evidence that refutes a claim            | accept and propagate   |
 | Change a protected assumption or the meaning of a claim             | require human approval |
 
+The server sets the actor and the approval of every command. People send
+commands as `human`, runs are recorded as `engine`, the agent writes as
+`agent`; nothing in a request body can choose its own actor or approve itself.
+Commands are validated at runtime against a closed schema before the gate.
+
 Writes are atomic: validate, check the base revision, then append the event,
 update the projection and record the command id in one transaction. A command
 built on an old revision is rejected. Repeating a command id with the same

@@ -1,0 +1,19 @@
+{
+  "name": "@vibloom/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@vibloom/chem": "0.1.0",
+    "@vibloom/contracts": "0.1.0",
+    "@vibloom/engine": "0.1.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261019.1",
+    "wrangler": "4.151.3"
+  }
+}

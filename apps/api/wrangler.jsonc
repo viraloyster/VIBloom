@@ -1,0 +1,10 @@
+{
+  "name": "vibloom-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-10-01",
+  "durable_objects": {
+    "bindings": [{ "name": "PROJECT", "class_name": "ProjectObject" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ProjectObject"] }],
+  "limits": { "cpu_ms": 30000 },
+}
