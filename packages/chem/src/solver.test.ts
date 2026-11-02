@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import reference from "../fixtures/reference.json";
 import { jacobianMismatch } from "./jacobian";
-import { solve, type OdeSystem } from "./solver";
+import { resample, solve, type OdeSystem } from "./solver";
 
 const robertson: OdeSystem = {
   rhs: ([a = 0, b = 0, c = 0]) => [
@@ -60,6 +60,25 @@ describe("solve against SciPy Radau", () => {
     const errAt = (rtol: number) =>
       Math.abs((final(robertson, [1, 0, 0], 40, rtol)[0] ?? NaN) - (want[0] ?? NaN));
     expect(errAt(1e-9)).toBeLessThan(errAt(1e-5));
+  });
+});
+
+describe("resample", () => {
+  const tr = solve({ rhs: ([y = 0]) => [-y], jac: () => [[-1]] }, [1], 1, {
+    rtol: 1e-8,
+    atol: 1e-12,
+  });
+
+  it("samples a uniform grid", () => {
+    const s = resample(tr, 0, 0.25);
+    expect(s.t).toEqual([0, 0.25, 0.5, 0.75, 1]);
+    expect(s.v[4]).toBeCloseTo(Math.exp(-1), 6);
+  });
+
+  it("rejects arguments that would not terminate or do not exist", () => {
+    for (const dt of [0, -1, NaN, Infinity, 1e-9])
+      expect(() => resample(tr, 0, dt)).toThrow(RangeError);
+    for (const comp of [-1, 1, 0.5]) expect(() => resample(tr, comp, 0.1)).toThrow(RangeError);
   });
 });
 

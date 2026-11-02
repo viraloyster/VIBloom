@@ -194,10 +194,17 @@ function stepFactor(err: number, K: number) {
 }
 
 // Linear interpolation of one component on a uniform grid.
+export const MAX_SAMPLES = 10_000_000;
+
 export function resample(tr: Trajectory, comp: number, dt: number): { t: number[]; v: number[] } {
+  const end = tr.t[tr.t.length - 1] ?? 0;
+  if (!(Number.isFinite(dt) && dt > 0)) throw new RangeError("dt must be finite and positive");
+  if (!Number.isInteger(comp) || comp < 0 || comp >= (tr.y[0]?.length ?? 0)) {
+    throw new RangeError("comp is not a component of the trajectory");
+  }
+  if (end / dt + 1 > MAX_SAMPLES) throw new RangeError("too many samples");
   const t: number[] = [];
   const v: number[] = [];
-  const end = tr.t[tr.t.length - 1] ?? 0;
   let k = 0;
   for (let i = 0; i * dt <= end + 1e-12; i++) {
     const s = i * dt;
