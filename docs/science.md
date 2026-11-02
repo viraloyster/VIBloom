@@ -52,7 +52,7 @@ With the values of [2], `eps = 9.9e-3` and `eps_prime = 1.98e-5`.
 
 ## Initial conditions
 
-Initial conditions are premises of every claim. The reduced model has no `y`
+Initial conditions are assumptions of every claim. The reduced model has no `y`
 state; when both models are compared, the full model starts on the slow
 manifold, `y0 = s z0 / (q + x0)`. The named conditions are `far`
 (`x0 = z0 = 0.5`), `mid` (`x0 = 0.05, z0 = 0.2`) and `near` (1% above the fixed

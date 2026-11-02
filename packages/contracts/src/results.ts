@@ -23,4 +23,5 @@ export type RegionStatus =
     }
   | { status: "no_counterexample"; evaluated: number; inconclusive: number };
 
-export type Currency = "current" | "pending_review";
+// pending_review: an assumption changed. unsupported: one was switched off or refuted.
+export type Currency = "current" | "pending_review" | "unsupported";

@@ -2,10 +2,10 @@
 
 VIBloom turns hypotheses about chemical models into executable claims, tests them
 with reproducible computational experiments, and keeps every conclusion linked to
-the assumptions it depends on.
+the assumptions it depends on and the invariants it must respect.
 
 The interface is a guanacaste tree. The canopy shows what has been built. The
-roots are the map: a network of assumptions, parameters, sources and experiments.
+roots are the map: a network of assumptions, invariants, sources and experiments.
 When a root changes or breaks, the conclusions that depend on it are marked for
 review.
 
@@ -17,7 +17,8 @@ Status: under active development during the Meta Global AI Developer Hackathon
 1. A claim in natural language becomes a predicate the engine can execute.
 2. A deterministic engine runs the experiments and records the evidence.
 3. Claim status is derived from evidence; models propose, code decides.
-4. Changing a premise propagates through the dependency graph.
+4. The code enforces invariants; assumptions are tested and can be switched off.
+5. Changing an assumption propagates through the dependency graph.
 
 Meta models: Muse Spark (Meta Model API) investigates and explains; Muse Spark
 Open (open weights) scores uncertainty and pre-checks handwritten input.
