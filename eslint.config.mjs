@@ -43,4 +43,9 @@ export default tseslint.config(
   { files: ["**/*.mjs"], ...tseslint.configs.disableTypeChecked },
   { files: ["scripts/**/*.mjs"], languageOptions: { globals: globals.node } },
   ...boundaryRules,
+  {
+    // Numerical kernels index arrays inside loops bounded by their lengths.
+    files: ["packages/chem/src/**/*.ts", "packages/search/src/**/*.ts"],
+    rules: { "@typescript-eslint/no-non-null-assertion": "off" },
+  },
 );
