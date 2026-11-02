@@ -55,6 +55,14 @@ describe("vertical slice", () => {
     expect(v?.verdict).toBe("refuted");
 
     const result = svc.view().results[0]!;
+    // The numbers behind the verdict travel with the result.
+    expect(result.record.ic).toBe("far");
+    expect(result.record.comparison?.relativeError).toBeCloseTo(0.188, 2);
+    expect(result.record.comparison?.tolerance).toBe(0.05);
+    expect(result.record.measurements?.map((m) => [m.model, m.observation])).toEqual([
+      ["full", "oscillation"],
+      ["reduced", "oscillation"],
+    ]);
     expect(result.record.basis.map((b) => b.id)).toEqual(
       expect.arrayContaining(["field-parameters", "quasi-steady-bromide", "oregonator"]),
     );
@@ -108,6 +116,16 @@ describe("vertical slice", () => {
       false,
     );
     expect(forged).toMatchObject({ ok: false, code: "needs_approval" });
+  });
+
+  it("tests a claim only under its own initial condition", () => {
+    const svc = new ProjectService(new MemoryStore(), new MemoryInvestigations(), clock);
+    svc.seed();
+    demo(svc);
+    expect(
+      svc.run({ experiment: "reduction-keeps-period-runs", point: { s: 2.2 }, ic: "near" }),
+    ).toMatchObject({ ok: false, code: "invalid_input" });
+    expect(svc.view().results).toHaveLength(0);
   });
 
   it("rejects points outside the claim region", () => {

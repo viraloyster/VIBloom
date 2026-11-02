@@ -109,10 +109,33 @@ export interface ResultRecord {
   basis: Pin[];
   execution: Execution;
   observation?: Observation;
+  // The effective point (claim fixed values included) and initial condition.
   point?: Record<string, number>;
+  ic?: string;
+  // What each model showed, so explanations can cite numbers, not prose.
+  measurements?: Measurement[];
+  comparison?: PeriodComparison;
   outcome?: PointOutcome;
   region?: RegionStatus;
   violated?: { invariant: Pin; detail: string };
+}
+
+export interface Measurement {
+  model: string;
+  execution: Execution;
+  observation: Observation;
+  period?: number;
+  // Base horizon reached by the robust protocol, and runs it took.
+  horizon: number;
+  runs: number;
+}
+
+// relativeError = (reference - reduced) / reduced, defined only when both oscillate.
+export interface PeriodComparison {
+  reference: string;
+  reduced: string;
+  relativeError: number;
+  tolerance: number;
 }
 
 // Evidence links a concrete result to an exact claim version. Code derives

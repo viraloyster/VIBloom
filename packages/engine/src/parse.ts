@@ -9,6 +9,7 @@ import {
   int,
   isObj,
   list,
+  num,
   numbers,
   oneOf,
   pin,
@@ -127,6 +128,21 @@ const result = shape(
   {
     observation: oneOf("oscillation", "steady_state", "indeterminate"),
     point: numbers,
+    ic: str,
+    measurements: list(
+      shape(
+        {
+          model: str,
+          execution,
+          observation: oneOf("oscillation", "steady_state", "indeterminate"),
+          horizon: num,
+          runs: int(1),
+        },
+        { period: num },
+      ),
+      10,
+    ),
+    comparison: shape({ reference: str, reduced: str, relativeError: num, tolerance: num }),
     outcome: oneOf("holds", "fails", "inconclusive", "not_applicable"),
     region,
     violated: shape({ invariant: pin, detail: text }),

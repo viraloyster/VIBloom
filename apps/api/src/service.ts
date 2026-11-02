@@ -11,7 +11,13 @@ import {
   type Workspace,
 } from "@vibloom/agent";
 import { evaluatePoint, type InitialCondition } from "@vibloom/chem";
-import type { Claim, ExperimentNode, ResultRecord, RootNode } from "@vibloom/contracts";
+import type {
+  Claim,
+  ExperimentNode,
+  Measurement,
+  ResultRecord,
+  RootNode,
+} from "@vibloom/contracts";
 import {
   basisFor,
   canonical,
@@ -177,9 +183,15 @@ export class ProjectService {
     const claim = claimNode.predicate;
     const point = this.pointFor(claim, body.point);
     if (typeof point === "string") return { ok: false, code: "invalid_input", detail: point };
-    const ic = typeof body.ic === "string" ? body.ic : claim.ic;
-    if (!CONTRACT.initialConditions.includes(ic)) {
-      return { ok: false, code: "invalid_input", detail: "unknown initial condition" };
+    // A result counts for a claim only under the claim's own initial condition;
+    // another one is a different scenario, not a test of this claim.
+    const ic = claim.ic;
+    if (body.ic !== undefined && body.ic !== ic) {
+      return {
+        ok: false,
+        code: "invalid_input",
+        detail: `this claim is about initial condition ${ic}; another one needs its own claim`,
+      };
     }
 
     // The basis is captured before the run, so later changes make it stale.
@@ -200,7 +212,32 @@ export class ProjectService {
       basis,
       execution: evaluation.execution,
       point,
+      ic,
+      measurements: Object.entries(evaluation.runs).map(([m, c]) => {
+        const out: Measurement = {
+          model: m,
+          execution: c.execution,
+          observation: c.observation,
+          horizon: c.horizon,
+          runs: c.runs.length,
+        };
+        if (c.period !== undefined) out.period = c.period;
+        return out;
+      }),
     };
+    const predicateBody = claim.kind === "FOR_ALL" ? claim.body : claim;
+    if ("tolerance" in predicateBody && "reference" in predicateBody) {
+      const a = evaluation.runs[predicateBody.reference as "full" | "reduced"]?.period;
+      const b = evaluation.runs[predicateBody.reduced as "full" | "reduced"]?.period;
+      if (a !== undefined && b !== undefined) {
+        record.comparison = {
+          reference: predicateBody.reference,
+          reduced: predicateBody.reduced,
+          relativeError: (a - b) / b,
+          tolerance: predicateBody.tolerance,
+        };
+      }
+    }
     const full = evaluation.runs.full;
     const reduced = evaluation.runs.reduced;
     const observed = full ?? reduced;
