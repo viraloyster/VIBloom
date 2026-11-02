@@ -4,6 +4,7 @@ export type {
   Investigation,
   PredictionVerdict,
   Provider,
+  SearchSummary,
   Stop,
   TraceEntry,
   TurnReply,

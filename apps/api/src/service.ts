@@ -2,12 +2,14 @@
 // commands as "human", runs are recorded as "engine", and nothing in a request
 // body can choose its own actor.
 
+import { search } from "@vibloom/search";
 import {
   investigate,
   RecordingProvider,
   type Investigation,
   type Provider,
   type Recording,
+  type SearchSummary,
   type Workspace,
 } from "@vibloom/agent";
 import { evaluatePoint, type InitialCondition } from "@vibloom/chem";
@@ -18,6 +20,7 @@ import type {
   ResultRecord,
   RootNode,
 } from "@vibloom/contracts";
+import { MAX_STRESS_BUDGET } from "@vibloom/contracts";
 import {
   basisFor,
   canonical,
@@ -129,14 +132,8 @@ export class ProjectService {
           baseHead: this.project.head,
           ops,
         }),
-      runPoint: (request) => {
-        const r = this.run(request);
-        if (!r.ok) return r;
-        const op = r.event.ops[0];
-        return op?.op === "record_result"
-          ? { ok: true, result: op.result }
-          : { ok: false, code: "invalid_input", detail: "the run recorded no result" };
-      },
+      runPoint: (request) => this.runForResult(request),
+      stressTest: (request) => this.stressTest(request),
     };
     const recorder = new RecordingProvider(provider);
     const started = this.clock();
@@ -154,6 +151,71 @@ export class ProjectService {
     } finally {
       this.running = false;
     }
+  }
+
+  private runForResult(
+    request: unknown,
+  ): { ok: true; result: ResultRecord } | Exclude<Submission, { ok: true }> {
+    const r = this.run(request);
+    if (!r.ok) return r;
+    const op = r.event.ops[0];
+    return op?.op === "record_result"
+      ? { ok: true, result: op.result }
+      : { ok: false, code: "invalid_input", detail: "the run recorded no result" };
+  }
+
+  // Halton search over the claim region; every evaluated point is recorded.
+  stressTest(request: {
+    experiment: string;
+    budget: number;
+    seed: number;
+  }): { ok: true; search: SearchSummary } | Exclude<Submission, { ok: true }> {
+    const exp = this.project.state.nodes.get(request.experiment);
+    const claim =
+      exp?.kind === "experiment" ? this.project.state.nodes.get(exp.spec.claim.id) : undefined;
+    if (claim?.kind !== "claim" || claim.predicate.kind !== "FOR_ALL") {
+      return { ok: false, code: "invalid_input", detail: "stress tests need a region claim" };
+    }
+    if (!(
+      Number.isInteger(request.budget) &&
+      request.budget >= 1 &&
+      request.budget <= MAX_STRESS_BUDGET
+    )) {
+      return {
+        ok: false,
+        code: "invalid_input",
+        detail: `budget must be 1 to ${String(MAX_STRESS_BUDGET)}`,
+      };
+    }
+    const dims = Object.entries(claim.predicate.region).map(([name, r]) => ({
+      name,
+      min: r.min,
+      max: r.max,
+      scale: CONTRACT.domain[name]?.scale ?? "linear",
+    }));
+    const ids = new Map<string, string>();
+    const report = search({ dims, budget: request.budget, seed: request.seed }, (point) => {
+      const r = this.runForResult({ experiment: request.experiment, point });
+      if (!r.ok) return "invalid";
+      ids.set(canonical(point), r.result.id);
+      if (r.result.execution.status !== "completed" || r.result.violated) return "invalid";
+      return r.result.outcome ?? "inconclusive";
+    });
+    const summary: SearchSummary = {
+      region: report.region,
+      results: report.evaluated.flatMap((e) => ids.get(canonical(e.point)) ?? []),
+    };
+    const red = report.reduced;
+    const redId = red ? ids.get(canonical(red.point)) : undefined;
+    if (red && redId) {
+      summary.reduced = {
+        result: redId,
+        point: red.point,
+        distance: red.distance,
+        stopped: red.stopped,
+      };
+    }
+    return { ok: true, search: summary };
   }
 
   listInvestigations(): StoredInvestigation[] {

@@ -6,6 +6,7 @@ import {
   any,
   check,
   fail,
+  int,
   isObj,
   list,
   num,
@@ -80,6 +81,19 @@ export type Decision = Base &
         prediction: Prediction;
       }
     | {
+        // A falsification search over the claim region, with a prediction of
+        // whether it will find a counterexample.
+        action: "stress_test";
+        experiment: string;
+        budget: number;
+        seed: number;
+        prediction: {
+          outcome: "counterexample_found" | "no_counterexample";
+          because: string;
+          assumes: string[];
+        };
+      }
+    | {
         // Required after a surprise: candidate causes and one run that tells
         // them apart, or what information is missing.
         action: "diagnose";
@@ -104,6 +118,10 @@ export type Decision = Base &
   );
 
 export type DecisionAction = Decision["action"];
+
+// Each point runs both models under the robust protocol; this keeps one search
+// inside a Worker request.
+export const MAX_STRESS_BUDGET = 12;
 
 const id: Check = (v, path) => {
   str(v, path);
@@ -161,6 +179,27 @@ const decision: Check = (v, path) => {
       return;
     case "revise":
       shape({ ...base, action: any, previous: pin, claim, changes: str }, extra)(v, path);
+      return;
+    case "stress_test":
+      shape(
+        {
+          ...base,
+          action: any,
+          experiment: id,
+          budget: (x, p) => {
+            int(4)(x, p);
+            if ((x as number) > MAX_STRESS_BUDGET)
+              fail(p, `must be at most ${String(MAX_STRESS_BUDGET)}`);
+          },
+          seed: int(0),
+          prediction: shape({
+            outcome: oneOf("counterexample_found", "no_counterexample"),
+            because: str,
+            assumes: list(id, 20),
+          }),
+        },
+        extra,
+      )(v, path);
       return;
     case "diagnose":
       shape(

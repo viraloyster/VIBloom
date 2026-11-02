@@ -42,10 +42,56 @@ function workspace(): Workspace & { project: Project } {
     ],
     true,
   );
-  return {
+  const ws: Workspace & { project: Project } = {
     project,
     state: () => project.state,
     submitAsAgent: (ops) => submit("agent", ops),
+    // An evenly spaced sweep stands in for the Halton search here.
+    stressTest: ({ experiment, budget }) => {
+      const claim = project.state.nodes.get(
+        (project.state.nodes.get(experiment) as { spec?: { claim: { id: string } } }).spec?.claim
+          .id ?? "",
+      );
+      if (claim?.kind !== "claim" || claim.predicate.kind !== "FOR_ALL") {
+        return { ok: false, code: "invalid_input", detail: "region claims only" };
+      }
+      const { min, max } = claim.predicate.region.s!;
+      const results: ResultRecord[] = [];
+      for (let i = 0; i < budget; i++) {
+        const r = ws.runPoint({
+          experiment,
+          point: { s: min + ((max - min) * (i + 0.5)) / budget },
+        });
+        if (r.ok) results.push(r.result);
+      }
+      const fails = results.filter((r) => r.outcome === "fails");
+      const first = fails[0];
+      return {
+        ok: true,
+        search: {
+          region:
+            fails.length > 0
+              ? {
+                  status: "counterexample_found",
+                  counterexamples: fails.length,
+                  evaluated: results.length,
+                  inconclusive: 0,
+                }
+              : { status: "no_counterexample", evaluated: results.length, inconclusive: 0 },
+          results: results.map((r) => r.id),
+          ...(first
+            ? {
+                reduced: {
+                  result: first.id,
+                  point: first.point ?? {},
+                  distance: 0,
+                  stopped: "converged",
+                },
+              }
+            : {}),
+        },
+      };
+    },
     runPoint: ({ experiment, point }) => {
       const s = project.state;
       const exp = s.nodes.get(experiment);
@@ -78,6 +124,7 @@ function workspace(): Workspace & { project: Project } {
       return r.ok ? { ok: true, result } : r;
     },
   };
+  return ws;
 }
 
 const predicate = (max: number) => ({
@@ -397,5 +444,51 @@ describe("investigate", () => {
     expect(inv.trace[2]?.rejection).toMatch(/derives refuted/);
     expect(inv.trace[3]?.rejection).toMatch(/at least one result/);
     expect(inv.stop).toBe("concluded");
+  });
+
+  it("stress-tests a region and diagnoses an unexpected counterexample", async () => {
+    const ws = workspace();
+    const inv = await investigate(
+      "q",
+      new ScriptedProvider([
+        formulate,
+        {
+          action: "stress_test",
+          experiment: "keeps-period-runs",
+          budget: 8,
+          seed: 1,
+          prediction: {
+            outcome: "no_counterexample",
+            because: "the bromide is fast everywhere",
+            assumes: ["fast-bromide"],
+          },
+          rationale: "attack the whole region",
+          cites: ["keeps-period"],
+        },
+        {
+          action: "conclude",
+          claim: "keeps-period",
+          verdict: "refuted",
+          results: [],
+          limits: "x",
+          interpretation: "x",
+          rationale: "r",
+          cites: [],
+        },
+        { action: "ask_researcher", question: "Which cause?", rationale: "r", cites: [] },
+      ]),
+      ws,
+    );
+    expect(inv.trace[1]).toMatchObject({
+      accepted: true,
+      prediction: {
+        predicted: "no_counterexample",
+        observed: "counterexample_found",
+        verdict: "surprise",
+      },
+    });
+    expect(inv.trace[1]?.search?.results).toHaveLength(8);
+    expect(inv.trace[2]?.rejection).toMatch(/diagnose it/);
+    expect(inv.stop).toBe("asked_researcher");
   });
 });

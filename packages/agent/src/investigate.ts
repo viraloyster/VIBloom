@@ -8,6 +8,7 @@ import {
   type LessonNode,
   type Pin,
   type PointOutcome,
+  type RegionStatus,
   type ResultRecord,
 } from "@vibloom/contracts";
 import {
@@ -33,6 +34,19 @@ export interface Workspace {
     point: Record<string, number>;
     ic?: string;
   }): { ok: true; result: ResultRecord } | Rejection;
+  // Falsification search over the claim region; every point becomes a result.
+  stressTest(request: {
+    experiment: string;
+    budget: number;
+    seed: number;
+  }): { ok: true; search: SearchSummary } | Rejection;
+}
+
+export interface SearchSummary {
+  region: RegionStatus;
+  results: string[];
+  // The reduced counterexample, when one was found.
+  reduced?: { result: string; point: Record<string, number>; distance: number; stopped: string };
 }
 
 export interface TurnRequest {
@@ -67,10 +81,11 @@ export interface TraceEntry {
   head: number;
   result?: string;
   prediction?: {
-    predicted: "holds" | "fails";
-    observed?: PointOutcome;
+    predicted: "holds" | "fails" | "counterexample_found" | "no_counterexample";
+    observed?: PointOutcome | RegionStatus["status"];
     verdict: PredictionVerdict;
   };
+  search?: SearchSummary;
   usage?: TurnReply["usage"];
 }
 
@@ -371,6 +386,39 @@ export async function investigate(
           if (!surprise) return refuse("there is no failed prediction to diagnose");
           const r = workspace.submitAsAgent(diagnoseOps(state, d, surprise));
           if (!r.ok) refuse(`${r.code}: ${r.detail}`);
+          break;
+        }
+        case "stress_test": {
+          for (const a of d.prediction.assumes) {
+            if (state.nodes.get(a)?.kind !== "assumption") refuse(`${a} is not an assumption`);
+          }
+          const r = workspace.stressTest({
+            experiment: d.experiment,
+            budget: d.budget,
+            seed: d.seed,
+          });
+          if (!r.ok) refuse(`${r.code}: ${r.detail}`);
+          else {
+            const observed = r.search.region.status;
+            const verdict: PredictionVerdict =
+              observed === "unexplored"
+                ? "undetermined"
+                : observed === d.prediction.outcome
+                  ? "as_predicted"
+                  : "surprise";
+            entry.search = r.search;
+            entry.prediction = { predicted: d.prediction.outcome, observed, verdict };
+            // A surprise is diagnosed from the reduced counterexample, or from
+            // the last point when the expected counterexample did not appear.
+            const about = r.search.reduced?.result ?? r.search.results[r.search.results.length - 1];
+            surprise =
+              verdict === "surprise" && about
+                ? {
+                    result: about,
+                    predicted: d.prediction.outcome === "no_counterexample" ? "holds" : "fails",
+                  }
+                : undefined;
+          }
           break;
         }
         case "run_point": {

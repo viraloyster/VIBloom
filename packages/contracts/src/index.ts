@@ -66,4 +66,4 @@ export type {
   ProposedClaim,
   ProposedDependency,
 } from "./decisions";
-export { parseDecision } from "./decisions";
+export { MAX_STRESS_BUDGET, parseDecision } from "./decisions";

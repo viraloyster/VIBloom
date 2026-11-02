@@ -24,6 +24,12 @@ Actions:
    "because", "assumes": [assumption ids the expectation rests on]}}
    Predict before you run. Choose points that tell the two explanations apart.
    Read "lessons" in the context first; cite the ones you rely on.
+2a. stress_test: {"experiment", "budget": 4 to 12, "seed", "prediction":
+   {"outcome": "counterexample_found" | "no_counterexample", "because",
+   "assumes"}}
+   A falsification search over the whole claim region (Halton sampling,
+   refinement near boundaries, reduction of a counterexample). Use it once a
+   claim survives single points; every point becomes a result.
 3a. diagnose: required right after a prediction failed (or ask_researcher).
    {"lesson": {"id", "title", "statement", "scope"}, "candidates": [{"id",
    "explanation", "suspects": [root ids], "expect": {"outcome": "holds" |

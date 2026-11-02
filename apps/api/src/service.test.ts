@@ -118,6 +118,26 @@ describe("vertical slice", () => {
     expect(forged).toMatchObject({ ok: false, code: "needs_approval" });
   });
 
+  it("stress-tests a region claim and records every point", () => {
+    const svc = new ProjectService(new MemoryStore(), new MemoryInvestigations(), clock);
+    svc.seed();
+    demo(svc);
+    const r = svc.stressTest({ experiment: "reduction-keeps-period-runs", budget: 5, seed: 3 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // At eps_prime = 1e-4 the drift is about 19% across the region.
+    expect(r.search.region.status).toBe("counterexample_found");
+    expect(r.search.results).toHaveLength(5);
+    expect(svc.view().results).toHaveLength(5);
+    expect(r.search.reduced?.result).toBeDefined();
+    expect(
+      svc.stressTest({ experiment: "reduction-keeps-period-runs", budget: 99, seed: 1 }),
+    ).toMatchObject({
+      ok: false,
+      code: "invalid_input",
+    });
+  });
+
   it("tests a claim only under its own initial condition", () => {
     const svc = new ProjectService(new MemoryStore(), new MemoryInvestigations(), clock);
     svc.seed();
