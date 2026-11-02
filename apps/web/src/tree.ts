@@ -4,9 +4,9 @@
 
 import type { RootNode } from "@vibloom/contracts";
 import type { ProjectView } from "./api";
-import { CANOPY, paintCanopy, rng } from "./canopy";
+import { CROWN, rng } from "./canopy";
 import { el, svg } from "./dom";
-import { filaments, layout, TRUNK, type Layout } from "./layout";
+import { filaments, layout, rootSystem, TRUNK, type Layout } from "./layout";
 
 export type NodeState =
   "sound" | "hypothetical" | "fragile" | "broken" | "pending" | "open" | "off";
@@ -62,8 +62,11 @@ export function nodeState(v: ProjectView, n: RootNode): NodeState {
   }
 }
 
+export type Tone = "sprout" | "probe" | "surprise" | "insight";
+
 export interface TreeHandle {
   render(view: ProjectView): void;
+  pulse(ids: string[], tone: Tone): void;
   onSelect(fn: (id: string | undefined) => void): void;
 }
 
@@ -134,6 +137,41 @@ function horizon(): SVGPathElement {
   return svg("path", { d: `${line}L${String(W + 40)},${String(TRUNK.y)} Z`, class: "treeline" });
 }
 
+// A broad, buttressed trunk, as guanacastes have; the crown sits on top.
+function trunk(): SVGGElement {
+  const x = TRUNK.x;
+  const y = TRUNK.y;
+  const bark = svg(
+    "linearGradient",
+    { id: "bark", x1: 0, y1: 0, x2: 1, y2: 0 },
+    svg("stop", { offset: "0", "stop-color": "#140e0a" }),
+    svg("stop", { offset: "0.45", "stop-color": "#3b2a1e" }),
+    svg("stop", { offset: "1", "stop-color": "#0f0a07" }),
+  );
+  const body = svg("path", {
+    d: `M${String(x - 92)},${String(y)} C${String(x - 48)},${String(y - 20)} ${String(x - 40)},${String(y - 70)} ${String(x - 34)},${String(y - 150)}
+        L${String(x + 34)},${String(y - 150)} C${String(x + 40)},${String(y - 70)} ${String(x + 48)},${String(y - 20)} ${String(x + 92)},${String(y)} Z`,
+    fill: "url(#bark)",
+  });
+  return svg("g", { class: "trunk", "pointer-events": "none" }, svg("defs", {}, bark), body);
+}
+
+// The crown fills out as claims gather evidence.
+function crown(fullness: number): SVGImageElement {
+  const scale = 0.84 + 0.16 * fullness;
+  const img = svg("image", {
+    href: "/crown.webp",
+    x: (TRUNK.x - CROWN.width / 2).toFixed(1),
+    y: (TRUNK.y - CROWN.height + 6).toFixed(1),
+    width: CROWN.width,
+    height: CROWN.height,
+    class: "crown",
+    preserveAspectRatio: "xMidYMax meet",
+  });
+  img.style.transform = `scale(${scale.toFixed(3)})`;
+  return img;
+}
+
 function ground(): SVGGElement {
   const g = svg("g", { "pointer-events": "none" });
   g.append(
@@ -171,12 +209,13 @@ function placeLabel(taken: Box[], x: number, y: number, w: number): { dx: number
   ];
   for (const t of tries) {
     const box = { x: x + t.dx, y: y + t.dy, w, h: 24 };
-    if (!taken.some((b) => overlaps(b, box))) {
+    const inside = box.x >= 4 && box.x + w <= W - 4;
+    if (inside && !taken.some((b) => overlaps(b, box))) {
       taken.push(box);
       return t;
     }
   }
-  const fallback = { dx: 18, dy: -12 };
+  const fallback = { dx: x > W / 2 ? -18 - w : 18, dy: -12 };
   taken.push({ x: x + fallback.dx, y: y + fallback.dy, w, h: 24 });
   return fallback;
 }
@@ -193,8 +232,8 @@ export function mountTree(host: HTMLElement): TreeHandle {
   let listener: (id: string | undefined) => void = () => undefined;
   let last: ProjectView | undefined;
   let seen = new Set<string>();
-  let canopyFor = -1;
-  let canopyHref = "";
+  let strands: { height: number; group: SVGGElement } | undefined;
+  let lay: Layout | undefined;
 
   let box = { x: 0, y: 0, w: W, h: H };
   const apply = () => {
@@ -245,14 +284,23 @@ export function mountTree(host: HTMLElement): TreeHandle {
 
   function render(v: ProjectView) {
     last = v;
-    const lay = layout(v.nodes, v.edges);
+    lay = layout(v.nodes, v.edges);
     const claims = v.claims.filter((c) => c !== undefined);
     const withEvidence = claims.filter((c) => c.verdict.verdict !== "unexplored").length;
     const fullness = claims.length === 0 ? 0 : withEvidence / claims.length;
-    const step = Math.round(fullness * 10);
-    if (step !== canopyFor) {
-      canopyFor = step;
-      canopyHref = paintCanopy(step / 10).toDataURL("image/png");
+    // The ornamental root system is drawn once per soil depth and reused.
+    if (strands?.height !== H) {
+      const group = svg("g", { class: "strands", "pointer-events": "none" });
+      for (const s of rootSystem(H - TRUNK.y - 60)) {
+        group.append(
+          svg("path", {
+            d: s.d,
+            "stroke-width": s.width.toFixed(2),
+            class: `strand g${String(s.gen)}`,
+          }),
+        );
+      }
+      strands = { height: H, group };
     }
     const focus = focusLine(lay, selected);
     const byId = new Map(v.nodes.map((n) => [n.id, n]));
@@ -261,7 +309,13 @@ export function mountTree(host: HTMLElement): TreeHandle {
     const roots = svg("g", { class: "roots" });
     const nodes = svg("g", { class: "nodes" });
 
-    const taken: Box[] = [];
+    // Labels must not cover any root's node either.
+    const taken: Box[] = [...lay.nodes.values()].map((p) => ({
+      x: p.x - 14,
+      y: p.y - 14,
+      w: 28,
+      h: 28,
+    }));
     for (const p of lay.nodes.values()) {
       const n = byId.get(p.id);
       if (!n) continue;
@@ -280,6 +334,7 @@ export function mountTree(host: HTMLElement): TreeHandle {
       roots.append(path);
 
       const g = svg("g", {
+        "data-id": n.id,
         class: `node ${n.kind} ${state}${selected === n.id ? " selected" : ""}${fresh ? " fresh" : ""}`,
         transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`,
         tabindex: 0,
@@ -346,15 +401,10 @@ export function mountTree(host: HTMLElement): TreeHandle {
       defs(),
       sky(),
       horizon(),
-      svg("image", {
-        href: canopyHref,
-        x: 0,
-        y: TRUNK.y - CANOPY.groundY,
-        width: CANOPY.width,
-        height: CANOPY.height,
-        class: "crown",
-      }),
+      trunk(),
+      crown(fullness),
       ground(),
+      strands.group,
       decor,
       roots,
       nodes,
@@ -415,8 +465,56 @@ export function mountTree(host: HTMLElement): TreeHandle {
     }
   });
 
+  // A glow that travels from the trunk along the roots to each target, then
+  // makes it flash. Driven by the investigator's moves, never by the model
+  // drawing anything itself.
+  function pulse(ids: string[], tone: Tone) {
+    if (!lay || !last) return;
+    const layer = svg("g", { class: `pulses ${tone}`, "pointer-events": "none" });
+    root.append(layer);
+    ids.forEach((id, i) => {
+      const chain: string[] = [];
+      for (let cur: string | undefined = id; cur; cur = lay?.nodes.get(cur)?.parent) {
+        chain.unshift(lay?.paths.get(cur) ?? "");
+      }
+      if (chain.length === 0 || !chain[0]) return;
+      const d = chain.join(" ");
+      const dot = svg("circle", { r: 6, class: "spark" });
+      const motion = svg("animateMotion", {
+        dur: "1.4s",
+        begin: "indefinite",
+        fill: "freeze",
+        path: d,
+        calcMode: "spline",
+        keyTimes: "0;1",
+        keySplines: ".3 0 .2 1",
+      });
+      dot.append(motion);
+      layer.append(svg("path", { d, class: "trail" }), dot);
+      // SVG animations count from page load; start each one explicitly.
+      setTimeout(() => {
+        motion.beginElement();
+      }, i * 180);
+      setTimeout(
+        () => {
+          root.querySelector(`[data-id="${CSS.escape(id)}"]`)?.classList.add(`flash-${tone}`);
+        },
+        1400 + i * 180,
+      );
+    });
+    setTimeout(
+      () => {
+        layer.remove();
+        for (const n of root.querySelectorAll(`.flash-${tone}`))
+          n.classList.remove(`flash-${tone}`);
+      },
+      3600 + ids.length * 180,
+    );
+  }
+
   return {
     render,
+    pulse,
     onSelect(fn) {
       listener = fn;
     },

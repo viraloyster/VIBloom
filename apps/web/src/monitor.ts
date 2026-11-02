@@ -10,6 +10,8 @@ import { signal, verify } from "./verify";
 export interface MonitorHandle {
   render(view: ProjectView, investigations: StoredInvestigation[]): void;
   focus(resultId: string | undefined): void;
+  // Shows one move of a replayed investigation as the current move.
+  show(entry: TraceEntry | undefined, label?: string): void;
 }
 
 function decisionCard(entry: TraceEntry | undefined): HTMLElement {
@@ -185,6 +187,7 @@ export function mountMonitor(host: HTMLElement): MonitorHandle {
   let view: ProjectView | undefined;
   let investigations: StoredInvestigation[] = [];
   let focused: string | undefined;
+  let shown: { entry: TraceEntry; label: string } | undefined;
   const bench = el("div", { class: "bench" });
 
   function benchFor(r: ResultRecord | undefined) {
@@ -264,7 +267,7 @@ export function mountMonitor(host: HTMLElement): MonitorHandle {
   function draw() {
     if (!view) return;
     const latest = investigations[investigations.length - 1]?.investigation;
-    const lastMove = latest?.trace.filter((t) => t.accepted).at(-1);
+    const lastMove = shown?.entry ?? latest?.trace.filter((t) => t.accepted).at(-1);
     const lessons = view.lessons.filter((l) => l !== undefined);
     host.replaceChildren(
       el("h2", {}, "Monitor"),
@@ -274,7 +277,7 @@ export function mountMonitor(host: HTMLElement): MonitorHandle {
         el(
           "div",
           { class: "col" },
-          el("h3", {}, "Current move"),
+          el("h3", {}, shown ? `Replaying: ${shown.label}` : "Current move"),
           decisionCard(lastMove),
           meter(investigations),
         ),
@@ -331,6 +334,10 @@ export function mountMonitor(host: HTMLElement): MonitorHandle {
     },
     focus(id) {
       focused = id;
+      draw();
+    },
+    show(entry, label = "") {
+      shown = entry ? { entry, label } : undefined;
       draw();
     },
   };

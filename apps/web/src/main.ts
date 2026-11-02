@@ -1,4 +1,5 @@
-import { Api } from "./api";
+import { Api, type StoredInvestigation } from "./api";
+import { play } from "./choreography";
 import { mountChat } from "./chat";
 import { el } from "./dom";
 import { mountMonitor } from "./monitor";
@@ -15,7 +16,20 @@ const api = () => new Api(project);
 
 const tree = mountTree(byId("tree"));
 const monitor = mountMonitor(byId("monitor"));
-const chat = mountChat(byId("chat"), api, refresh);
+let stop: (() => void) | undefined;
+function replay(inv: StoredInvestigation) {
+  stop?.();
+  stop = play(inv, (beat, i, total) => {
+    monitor.show(beat.entry, `move ${String(i + 1)} of ${String(total)}`);
+    for (const p of beat.pulses) tree.pulse(p.ids, p.tone);
+    if (i === total - 1) {
+      setTimeout(() => {
+        monitor.show(undefined);
+      }, 4000);
+    }
+  });
+}
+const chat = mountChat(byId("chat"), api, refresh, replay);
 
 async function refresh() {
   const [view, investigations] = await Promise.all([api().view(), api().investigations()]);

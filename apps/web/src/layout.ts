@@ -195,3 +195,63 @@ export function filaments(
   }
   return out;
 }
+
+export interface Strand {
+  d: string;
+  width: number;
+  gen: number;
+}
+
+// The ornamental root system: a few main roots leave the base of the trunk
+// and branch all the way down. Decoration only; it never carries data.
+export function rootSystem(depth: number, seed = 3): Strand[] {
+  const r = rng(seed);
+  const out: Strand[] = [];
+  const bottom = TRUNK.y + depth;
+  const grow = (
+    x: number,
+    y: number,
+    angle: number,
+    width: number,
+    gen: number,
+    budget: number,
+  ) => {
+    let a = angle;
+    let px = x;
+    let py = y;
+    for (let step = 0; step < budget && py < bottom && out.length < 2600; step++) {
+      const len = 26 + r() * 30;
+      // Roots wander but keep heading down.
+      a += (r() - 0.5) * 0.5 + (Math.PI / 2 - a) * 0.08;
+      const nx = px + Math.cos(a) * len;
+      const ny = py + Math.sin(a) * len;
+      const cx = (px + nx) / 2 + (r() - 0.5) * len * 0.5;
+      const cy = (py + ny) / 2 + (r() - 0.5) * len * 0.3;
+      const w = Math.max(0.35, width * (1 - step / (budget + 4)));
+      out.push({
+        d: `M${px.toFixed(1)},${py.toFixed(1)} Q${cx.toFixed(1)},${cy.toFixed(1)} ${nx.toFixed(1)},${ny.toFixed(1)}`,
+        width: w,
+        gen,
+      });
+      if (gen < 4 && r() < 0.42 - gen * 0.06) {
+        grow(
+          nx,
+          ny,
+          a + (r() < 0.5 ? -1 : 1) * (0.45 + r() * 0.5),
+          w * 0.62,
+          gen + 1,
+          Math.round(budget * (0.4 + r() * 0.25)),
+        );
+      }
+      px = nx;
+      py = ny;
+    }
+  };
+  const mains = 9;
+  for (let i = 0; i < mains; i++) {
+    const t = (i + 0.5) / mains;
+    const angle = Math.PI * (0.06 + 0.88 * t);
+    grow(TRUNK.x + (t - 0.5) * 70, TRUNK.y + 4, angle, 4.2, 0, 26);
+  }
+  return out;
+}

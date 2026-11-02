@@ -366,6 +366,114 @@ th {
   fill: none;
 }
 
+.crown {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  transition: transform 2.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+  filter: drop-shadow(0 8px 18px rgb(0 0 0 / 60%));
+}
+
+.strands {
+  filter: url(#glow);
+}
+
+.strand {
+  fill: none;
+  stroke: #7d5cf0;
+  stroke-linecap: round;
+  opacity: 0.55;
+}
+
+.strand.g0 {
+  stroke: #9a7bff;
+  opacity: 0.75;
+}
+
+.strand.g3,
+.strand.g4 {
+  opacity: 0.35;
+}
+
+.trail {
+  fill: none;
+  stroke-width: 3;
+  opacity: 0;
+  animation: trail 1.6s ease-out forwards;
+}
+
+@keyframes trail {
+  20% {
+    opacity: 0.9;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+.spark {
+  filter: url(#glow);
+}
+
+.pulses.sprout .spark,
+.pulses.sprout .trail {
+  fill: #c9b6ff;
+  stroke: #c9b6ff;
+}
+
+.pulses.probe .spark,
+.pulses.probe .trail {
+  fill: #ffffff;
+  stroke: #e9e2ff;
+}
+
+.pulses.surprise .spark,
+.pulses.surprise .trail {
+  fill: var(--broken);
+  stroke: var(--broken);
+}
+
+.pulses.insight .spark,
+.pulses.insight .trail {
+  fill: var(--fragile);
+  stroke: var(--fragile);
+}
+
+.node.flash-sprout .ring,
+.node.flash-probe .ring,
+.node.flash-insight .ring {
+  animation: flash 1.2s ease-out 2;
+}
+
+.node.flash-surprise {
+  animation: shiver 0.12s linear 8;
+}
+
+.node.flash-surprise .ring {
+  stroke: var(--broken);
+  animation: flash 1.2s ease-out 2;
+}
+
+@keyframes flash {
+  0% {
+    stroke-width: 2.4;
+  }
+
+  30% {
+    stroke-width: 7;
+  }
+
+  100% {
+    stroke-width: 2.4;
+  }
+}
+
+@keyframes shiver {
+  50% {
+    translate: 2px 0;
+  }
+}
+
 .filaments {
   filter: url(#soft);
 }

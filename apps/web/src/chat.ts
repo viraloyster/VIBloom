@@ -36,7 +36,12 @@ function engineText(t: TraceEntry): string {
   return "Accepted";
 }
 
-export function mountChat(host: HTMLElement, api: () => Api, refresh: () => Promise<void>) {
+export function mountChat(
+  host: HTMLElement,
+  api: () => Api,
+  refresh: () => Promise<void>,
+  replay: (inv: StoredInvestigation) => void,
+) {
   const log = el("div", { class: "log" });
   const input = el("textarea", {
     rows: 2,
@@ -77,6 +82,8 @@ export function mountChat(host: HTMLElement, api: () => Api, refresh: () => Prom
           : r.detail;
         if (r.ok) input.value = "";
         await refresh();
+        // Play the investigation on the tree as soon as it is recorded.
+        if (r.ok) replay(r.investigation);
       })
       .catch(() => {
         status.textContent = "The investigation could not be reached.";
@@ -85,6 +92,14 @@ export function mountChat(host: HTMLElement, api: () => Api, refresh: () => Prom
         send.disabled = false;
       });
   });
+
+  const replayButton = (inv: StoredInvestigation) => {
+    const b = el("button", { type: "button", class: "replay" }, "Replay on the tree");
+    b.addEventListener("click", () => {
+      replay(inv);
+    });
+    return b;
+  };
 
   return {
     // The root selected in the tree becomes the focus of the next question.
@@ -97,6 +112,7 @@ export function mountChat(host: HTMLElement, api: () => Api, refresh: () => Prom
       log.replaceChildren(
         ...investigations.flatMap((inv) => [
           el("div", { class: "msg researcher" }, inv.investigation.goal),
+          replayButton(inv),
           ...inv.investigation.trace.flatMap((t) => [
             el(
               "div",
