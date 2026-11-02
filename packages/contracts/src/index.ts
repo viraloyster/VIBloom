@@ -34,3 +34,30 @@ export type {
   RootNode,
   SourceNode,
 } from "./roots";
+export type { Check } from "./schema";
+export {
+  ParseError,
+  any,
+  bool,
+  check,
+  fail,
+  int,
+  isObj,
+  list,
+  num,
+  numbers,
+  oneOf,
+  pin,
+  shape,
+  str,
+  text,
+} from "./schema";
+export type {
+  Decision,
+  DecisionAction,
+  Prediction,
+  ProposedAssumption,
+  ProposedClaim,
+  ProposedDependency,
+} from "./decisions";
+export { parseDecision } from "./decisions";
