@@ -3,6 +3,8 @@
 Meta Global AI Developer Hackathon, Indie track. Building period: October 27 -
 November 4, 2026. Theme: Push the Frontier.
 
+Project start: November 2, 2026, the date of the first commit.
+
 ## Story
 
 To be written by the author.
