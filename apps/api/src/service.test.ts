@@ -202,13 +202,20 @@ describe("investigation", () => {
       rationale: "start in the middle of the region",
       cites: ["bromide-free-period"],
     },
-    (r: TurnRequest) => ({
-      action: "conclude",
-      summary: "At s = 1 the periods differ by about 19%, so the 5% claim fails.",
-      surprise: "eps_prime = 1e-4 is not small enough; the bromide lag lengthens the cycle",
-      rationale: "one counterexample refutes a region claim",
-      cites: (JSON.parse(r.context) as { results: { id: string }[] }).results.map((x) => x.id),
-    }),
+    (r: TurnRequest) => {
+      const results = (JSON.parse(r.context) as { results: { id: string }[] }).results;
+      return {
+        action: "conclude",
+        claim: "bromide-free-period",
+        verdict: "refuted",
+        results: results.map((x) => x.id),
+        limits: "one point, s = 1, far initial condition, robust protocol",
+        interpretation: "The periods differ by about 19%, beyond the 5% tolerance.",
+        surprise: "eps_prime = 1e-4 is not small enough; the bromide lag lengthens the cycle",
+        rationale: "one counterexample refutes a region claim",
+        cites: results.map((x) => x.id),
+      };
+    },
   ];
 
   it("lets the model drive: formulate, predict, get surprised, conclude", async () => {

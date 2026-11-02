@@ -8,7 +8,15 @@ import {
   type PointOutcome,
   type ResultRecord,
 } from "@vibloom/contracts";
-import type { Op, Rejection, State, Submission } from "@vibloom/engine";
+import {
+  canonical,
+  claimView,
+  resultView,
+  type Op,
+  type Rejection,
+  type State,
+  type Submission,
+} from "@vibloom/engine";
 import { renderContext } from "./context";
 
 export type Effort = "low" | "medium";
@@ -190,14 +198,44 @@ function reviseOps(s: State, d: Extract<Decision, { action: "revise" }>): Op[] {
   ];
 }
 
-// Points already used on earlier versions of a claim cannot test a new version.
+// The verdict, the results and their currency are checked; the
+// interpretation stays the model's reading.
+function checkConclusion(s: State, d: Extract<Decision, { action: "conclude" }>) {
+  const view = claimView(s, d.claim);
+  if (!view) return refuse(`${d.claim} is not a claim`);
+  if (view.verdict.verdict !== d.verdict) {
+    refuse(`the engine derives ${view.verdict.verdict} for ${d.claim}, not ${d.verdict}`);
+  }
+  if (d.results.length === 0) refuse("a conclusion must rest on at least one result");
+  for (const id of d.results) {
+    const r = s.results.get(id);
+    if (r?.claim.id !== d.claim) refuse(`${id} is not a result of ${d.claim}`);
+    else if (resultView(s, r).currency !== "current") refuse(`${id} is no longer current`);
+  }
+  if (
+    "by" in view.verdict &&
+    !d.results.some((id) => (view.verdict as { by: string[] }).by.includes(id))
+  ) {
+    refuse("the results must include the evidence the verdict rests on");
+  }
+}
+
+// The point as the engine stores it: claim fixed values filled, keys sorted.
+function effectivePoint(s: State, claimId: string, point: Record<string, number>): string {
+  const c = s.nodes.get(claimId);
+  const fixed = c?.kind === "claim" && c.predicate.kind === "FOR_ALL" ? c.predicate.fixed : {};
+  return canonical({ ...point, ...fixed });
+}
+
+// Points already used on earlier versions of a claim cannot test a new
+// version. Initial conditions need no check: a claim is only tested under its own.
 function usedPoints(s: State, claimId: string): string[] {
   const used: string[] = [];
   let node = s.nodes.get(claimId);
   while (node?.kind === "claim" && node.supersedes) {
     const prevId = node.supersedes.id;
     for (const r of s.results.values()) {
-      if (r.claim.id === prevId && r.point) used.push(JSON.stringify(r.point));
+      if (r.claim.id === prevId && r.point) used.push(canonical(r.point));
     }
     node = s.nodes.get(prevId);
   }
@@ -265,7 +303,7 @@ export async function investigate(
         case "run_point": {
           const exp = state.nodes.get(d.experiment);
           if (exp?.kind === "experiment") {
-            const key = JSON.stringify(d.point);
+            const key = effectivePoint(state, exp.spec.claim.id, d.point);
             if (usedPoints(state, exp.spec.claim.id).includes(key)) {
               refuse("a new claim version must be tested on fresh points");
             }
@@ -287,9 +325,7 @@ export async function investigate(
           break;
         }
         case "conclude":
-          if (!d.cites.some((c) => state.results.has(c))) {
-            refuse("a conclusion must cite at least one result");
-          }
+          checkConclusion(state, d);
           break;
         case "ask_researcher":
           break;

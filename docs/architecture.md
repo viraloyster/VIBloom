@@ -197,16 +197,21 @@ Muse Spark conducts the investigation; the code is the laboratory and its rules.
 Each turn the model returns one structured decision, validated against a
 closed schema:
 
-| Decision         | The model provides                                                               | The code                                                           |
-| ---------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `formulate`      | Executable claims, proposed assumptions and dependencies, ambiguities it noticed | Validates the claims; adds assumptions and links as hypothetical   |
-| `run_point`      | The point, the two explanations it tells apart, and a prediction made beforehand | Runs the experiment, records the result, scores the prediction     |
-| `revise`         | A new claim version linked to the previous one, and what changed                 | Keeps the previous version and its evidence; requires fresh points |
-| `ask_researcher` | A question only the researcher can answer                                        | Stops and waits                                                    |
-| `conclude`       | A short summary                                                                  | Requires at least one cited result                                 |
+| Decision         | The model provides                                                               | The code                                                                                                                                        |
+| ---------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `formulate`      | Executable claims, proposed assumptions and dependencies, ambiguities it noticed | Validates the claims; adds assumptions and links as hypothetical                                                                                |
+| `run_point`      | The point, the two explanations it tells apart, and a prediction made beforehand | Runs the experiment, records the result, scores the prediction                                                                                  |
+| `revise`         | A new claim version linked to the previous one, and what changed                 | Keeps the previous version and its evidence; requires fresh points                                                                              |
+| `ask_researcher` | A question only the researcher can answer                                        | Stops and waits                                                                                                                                 |
+| `conclude`       | The claim, its verdict, the results used, limits and an interpretation           | Checks the verdict against the derived one and that the results are current results of that claim; the interpretation stays the model's reading |
 
 - Every decision cites the nodes and results it relies on; citations to
-  anything outside the project are refused.
+  anything outside the project are refused. A citation identifies evidence; it
+  does not certify an explanation.
+- Results carry the measurements behind them: each model's observation and
+  period, and the relative period error with its tolerance.
+- A claim is tested only under its own initial condition. Fresh points are
+  compared as the engine stores them, with the claim's fixed values filled in.
 - A prediction that fails is a surprise. The next decision must explain it
   before the investigation moves on.
 - A refused decision is returned to the model with the reason and counts

@@ -28,7 +28,10 @@ Actions:
    The previous version and its evidence stay. Test the new version on
    points you have not used before.
 4. ask_researcher: {"question"} when only the researcher can decide.
-5. conclude: {"summary"} in at most three sentences, citing result ids.
+5. conclude: {"claim", "verdict" (exactly the verdict shown in the context),
+   "results" (current result ids of that claim), "limits" (points, initial
+   condition, protocol), "interpretation" (at most three sentences; quote the
+   numbers from measurements and comparison)}.
 
 Claim grammar (region form):
 {"kind": "FOR_ALL", "region": {"s": {"min", "max"}}, "fixed": {"eps_prime": number},

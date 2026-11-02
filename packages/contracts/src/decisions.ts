@@ -73,7 +73,17 @@ export type Decision = Base &
       }
     | { action: "revise"; previous: Pin; claim: ProposedClaim; changes: string }
     | { action: "ask_researcher"; question: string }
-    | { action: "conclude"; summary: string }
+    | {
+        action: "conclude";
+        claim: string;
+        // Must equal the verdict the engine derives; code checks it.
+        verdict: "holds" | "refuted" | "no_counterexample" | "inconclusive" | "unexplored";
+        // Current results of that claim the conclusion rests on.
+        results: string[];
+        limits: string;
+        // The model's reading of the evidence; shown as interpretation.
+        interpretation: string;
+      }
   );
 
 export type DecisionAction = Decision["action"];
@@ -127,7 +137,18 @@ const decision: Check = (v, path) => {
       shape({ ...base, action: any, question: str }, extra)(v, path);
       return;
     case "conclude":
-      shape({ ...base, action: any, summary: str }, extra)(v, path);
+      shape(
+        {
+          ...base,
+          action: any,
+          claim: id,
+          verdict: oneOf("holds", "refuted", "no_counterexample", "inconclusive", "unexplored"),
+          results: list(str, 50),
+          limits: str,
+          interpretation: str,
+        },
+        extra,
+      )(v, path);
       return;
     default:
       return fail(`${path}.action`, "unknown action");

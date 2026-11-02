@@ -19,7 +19,18 @@ const detail = (input: unknown) => {
 describe("parseDecision", () => {
   it("accepts a well formed decision", () => {
     expect(detail(run)).toBe("ok");
-    expect(detail({ action: "conclude", summary: "done", rationale: "r", cites: [] })).toBe("ok");
+    expect(
+      detail({
+        action: "conclude",
+        claim: "c",
+        verdict: "refuted",
+        results: ["r1"],
+        limits: "one point, far initial condition",
+        interpretation: "slow bromide lengthens the cycle",
+        rationale: "r",
+        cites: [],
+      }),
+    ).toBe("ok");
   });
 
   it.each([

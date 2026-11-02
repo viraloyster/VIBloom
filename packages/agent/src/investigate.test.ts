@@ -67,7 +67,8 @@ function workspace(): Workspace & { project: Project } {
         assumptions: [],
         basis: basisFor(s, exp.id, []),
         execution: { status: "completed" },
-        point,
+        // Stored as the server does: with the claim's fixed values filled in.
+        point: { eps_prime: claim.predicate.fixed.eps_prime ?? NaN, ...point },
         outcome: holds ? "holds" : "fails",
         region: holds
           ? { status: "no_counterexample", evaluated: 1, inconclusive: 0 }
@@ -151,7 +152,11 @@ describe("investigate", () => {
       run("keeps-period-low-s-runs", 1.2, "holds"),
       {
         action: "conclude",
-        summary: "The reduction fails at s = 2.0; the narrowed claim held at a fresh point.",
+        claim: "keeps-period-low-s",
+        verdict: "no_counterexample",
+        results: ["r3"],
+        limits: "one point, s = 1.2, far initial condition",
+        interpretation: "Version 1 failed at s = 2.0; the narrowed claim held at a fresh point.",
         rationale: "enough to report",
         cites: ["r2", "r3"],
       },
@@ -245,12 +250,21 @@ describe("investigate", () => {
     const inv = await investigate(
       "q",
       new ScriptedProvider([
-        { action: "conclude", summary: "It works.", rationale: "trust me", cites: ["oregonator"] },
+        {
+          action: "conclude",
+          claim: "oregonator",
+          verdict: "holds",
+          results: [],
+          limits: "none",
+          interpretation: "It works.",
+          rationale: "trust me",
+          cites: ["oregonator"],
+        },
         { action: "ask_researcher", question: "q", rationale: "r", cites: [] },
       ]),
       ws,
     );
-    expect(inv.trace[0]?.rejection).toMatch(/at least one result/);
+    expect(inv.trace[0]?.rejection).toMatch(/not a claim/);
   });
 
   it("stops at the call budget when the model keeps failing", async () => {
@@ -263,5 +277,33 @@ describe("investigate", () => {
     expect(inv.stop).toBe("budget_exhausted");
     expect(inv.trace).toHaveLength(BUDGET.calls);
     expect(ws.project.head).toBe(1);
+  });
+
+  it("checks a conclusion against the derived verdict and current results", async () => {
+    const ws = workspace();
+    const conclude = (verdict: string, results: string[]) => ({
+      action: "conclude",
+      claim: "keeps-period",
+      verdict,
+      results,
+      limits: "one point",
+      interpretation: "x",
+      rationale: "r",
+      cites: [],
+    });
+    const inv = await investigate(
+      "q",
+      new ScriptedProvider([
+        formulate,
+        run("keeps-period-runs", 2.0, "fails"),
+        conclude("holds", ["r1"]),
+        conclude("refuted", []),
+        conclude("refuted", ["r1"]),
+      ]),
+      ws,
+    );
+    expect(inv.trace[2]?.rejection).toMatch(/derives refuted/);
+    expect(inv.trace[3]?.rejection).toMatch(/at least one result/);
+    expect(inv.stop).toBe("concluded");
   });
 });
