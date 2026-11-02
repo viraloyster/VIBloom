@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import reference from "../fixtures/reference.json";
-import { classify, peaks, read, type ModelPoint } from "./classify";
+import { PROTOCOL, classify, peaks, read, type ModelPoint } from "./classify";
 import { BRIZARD_BERRY_2021, FIELD_2007, type OregonatorModel } from "./oregonator";
 
 const grid = (end: number, dt = 1 / 40) => Array.from({ length: end / dt + 1 }, (_, i) => i * dt);
@@ -32,6 +32,13 @@ describe("read", () => {
     const t = grid(40);
     const r = read(t, spikes(t, 9), 1e-3);
     expect(r.kind).toBe("need_longer");
+  });
+
+  it("reads the longest window the protocol can produce", () => {
+    const end = 2 * PROTOCOL.maxBaseHorizon;
+    const t = grid(end);
+    const r = read(t, spikes(t, 9), 1e-3);
+    expect(r.kind).toBe("oscillation");
   });
 
   it("finds peaks by prominence", () => {

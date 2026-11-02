@@ -28,7 +28,8 @@ export const PROTOCOL = {
   atol: 1e-12,
   hmax: 1,
   initialHorizon: 150,
-  maxHorizon: 6000,
+  // Limits the base run; the validation run uses twice the base horizon.
+  maxBaseHorizon: 6000,
   maxPeriodSpread: 5e-3,
 } as const;
 
@@ -53,6 +54,17 @@ export function peaks(v: readonly number[], minProminence: number): number[] {
   return out;
 }
 
+// A loop, not Math.max(...v): long horizons exceed the engine's argument limit.
+function spread(v: readonly number[]): number {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const x of v) {
+    if (x < lo) lo = x;
+    if (x > hi) hi = x;
+  }
+  return hi - lo;
+}
+
 // Sub-sample peak position from the parabola through three samples, in samples.
 function vertexOffset(a: number, b: number, c: number): number {
   const curvature = a - 2 * b + c;
@@ -65,7 +77,7 @@ export function read(t: readonly number[], x: readonly number[], xSteady: number
   const start = t.findIndex((s) => s >= end / 2);
   const window = t.slice(start);
   const logx = x.slice(start).map((v) => Math.log10(v));
-  const swing = Math.max(...logx) - Math.min(...logx);
+  const swing = spread(logx);
   const dt = (window[1] ?? 0) - (window[0] ?? 0);
   const times = peaks(logx, DETECTION.peakProminenceDecades).map(
     (i) => window[i]! + dt * vertexOffset(logx[i - 1]!, logx[i]!, logx[i + 1]!),
@@ -137,7 +149,7 @@ export interface Classification {
 
 function nextHorizon(h: number, r: Reading | null) {
   const estimate = r?.kind === "need_longer" ? (r.periodEstimate ?? 0) : 0;
-  return Math.min(Math.max(4 * h, 12 * estimate), PROTOCOL.maxHorizon);
+  return Math.min(Math.max(4 * h, 12 * estimate), PROTOCOL.maxBaseHorizon);
 }
 
 function agree(a: Reading, b: Reading) {
@@ -168,7 +180,7 @@ export function classify(point: ModelPoint): Classification {
     if (base.execution.status !== "completed")
       return done("indeterminate", horizon, base.execution);
     if (base.reading?.kind !== "need_longer") break;
-    if (horizon >= PROTOCOL.maxHorizon) return done("indeterminate", horizon);
+    if (horizon >= PROTOCOL.maxBaseHorizon) return done("indeterminate", horizon);
     horizon = nextHorizon(horizon, base.reading);
   }
 

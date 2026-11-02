@@ -16,7 +16,8 @@ Three validations are kept separate:
 - Stiff test problems with known behaviour, separate from the Oregonator:
   Robertson and Van der Pol. States agree with the reference to a relative 1e-6.
 - Oregonator periods agree with the reference to a relative 5e-4 on six cases
-  covering both models, two scalings and the coexistence region.
+  covering both models, two scalings and the region where the outcome
+  depends on the initial condition.
 - The analytic Jacobian is checked against directional finite differences.
 - Failures are explicit: budget exhausted, step too small, singular system,
   non-finite values, domain exit, cancelled. None of them becomes "no

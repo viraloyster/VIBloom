@@ -91,8 +91,10 @@ onset found by simulation is subcritical. The remaining difference is open.
 
 - Agreement between models is agreement between models, not with experiments.
 - A finite simulation does not prove that a limit cycle exists.
-- Eigenvalues of the Jacobian give local stability only; near `s = 2.2` a stable
-  steady state and a limit cycle coexist.
+- Eigenvalues of the Jacobian give local stability only. At `s = 2.2` and
+  `eps_prime = 1e-4` the full model settles to the steady state from `near` and
+  oscillates from `far` under the classification protocol. This is observed
+  behaviour, not a proof that both attractors exist.
 
 ## References
 
