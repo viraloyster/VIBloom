@@ -10,7 +10,7 @@ describe("sha256", () => {
 
   it("matches the platform implementation across block boundaries", () => {
     for (const n of [1, 55, 56, 63, 64, 65, 119, 120, 1000]) {
-      const text = "aé".repeat(n);
+      const text = `a${String.fromCharCode(0xe9)}`.repeat(n);
       expect(sha256(text)).toBe(createHash("sha256").update(text, "utf8").digest("hex"));
     }
   });
