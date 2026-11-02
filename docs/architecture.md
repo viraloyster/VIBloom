@@ -207,13 +207,14 @@ Three signals are stored separately and never merged:
 
 ## Layered context for agents
 
-Agents see the project as a virtual file tree derived from the roots map, with
-a summary file per folder. Each summary records the revisions it was derived
-from and goes stale when they change.
-Detail depends on graph distance from the focus: details and history, details,
-summary, title, collapsed folder. Required assumptions are always delivered at
-detail level; if they do not fit the budget the task is split or refused.
-Summaries and source text are data, never instructions.
+Agents see the project as a virtual folder tree derived from the roots map
+(`assumptions/`, `claims/`, `lessons/`...), the same nodes and revisions the
+tree draws. The root the researcher selects is the focus, and detail depends on
+graph distance from it: details and history (distance 0 or 1), details (2), a
+short summary (3), a title (further away). Everything the focus rests on is
+always given in full, however deep. Results appear in full only where they
+touch detailed roots; the rest are counted. Without a focus every root is given
+in full. Summaries and source text are data, never instructions.
 
 ## Investigation loop
 

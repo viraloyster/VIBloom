@@ -66,6 +66,7 @@ export type Tone = "sprout" | "probe" | "surprise" | "insight";
 
 export interface TreeHandle {
   render(view: ProjectView): void;
+  select(id: string | undefined): void;
   pulse(ids: string[], tone: Tone): void;
   onSelect(fn: (id: string | undefined) => void): void;
 }
@@ -637,6 +638,7 @@ export function mountTree(host: HTMLElement): TreeHandle {
 
   return {
     render,
+    select,
     pulse,
     onSelect(fn) {
       listener = fn;

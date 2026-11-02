@@ -111,7 +111,14 @@ export function mountChat(
     render(investigations: StoredInvestigation[]) {
       log.replaceChildren(
         ...investigations.flatMap((inv) => [
-          el("div", { class: "msg researcher" }, inv.investigation.goal),
+          el(
+            "div",
+            { class: "msg researcher" },
+            inv.investigation.focus
+              ? el("span", { class: "who" }, `working on ${inv.investigation.focus}`)
+              : null,
+            inv.investigation.goal,
+          ),
           replayButton(inv),
           ...inv.investigation.trace.flatMap((t) => [
             el(

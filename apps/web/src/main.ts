@@ -19,6 +19,8 @@ const monitor = mountMonitor(byId("monitor"));
 let stop: (() => void) | undefined;
 function replay(inv: StoredInvestigation) {
   stop?.();
+  // Replays start where the researcher was working.
+  if (inv.investigation.focus) tree.select(inv.investigation.focus);
   stop = play(inv, (beat, i, total) => {
     monitor.show(beat.entry, `move ${String(i + 1)} of ${String(total)}`);
     for (const p of beat.pulses) tree.pulse(p.ids, p.tone);

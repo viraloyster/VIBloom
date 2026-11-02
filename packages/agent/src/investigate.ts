@@ -93,6 +93,8 @@ export type Stop = "concluded" | "asked_researcher" | "budget_exhausted" | "prov
 
 export interface Investigation {
   goal: string;
+  // The root the researcher was working on, if any.
+  focus?: string;
   provider: string;
   stop: Stop;
   trace: TraceEntry[];
@@ -353,7 +355,14 @@ export async function investigate(
       reply = await provider.decide(request);
     } catch (e) {
       const error = e instanceof Error ? e.message : "unknown provider error";
-      return { goal, provider: provider.name, stop: "provider_failed", trace, error };
+      return {
+        goal,
+        ...(focus ? { focus } : {}),
+        provider: provider.name,
+        stop: "provider_failed",
+        trace,
+        error,
+      };
     }
     const entry: TraceEntry = { turn, call, effort, accepted: false, head: state.head };
     if (reply.usage) entry.usage = reply.usage;
@@ -473,11 +482,30 @@ export async function investigate(
       escalations++;
       effort = "medium";
     }
-    if (d.action === "conclude") return { goal, provider: provider.name, stop: "concluded", trace };
+    if (d.action === "conclude")
+      return {
+        goal,
+        ...(focus ? { focus } : {}),
+        provider: provider.name,
+        stop: "concluded",
+        trace,
+      };
     if (d.action === "ask_researcher") {
-      return { goal, provider: provider.name, stop: "asked_researcher", trace };
+      return {
+        goal,
+        ...(focus ? { focus } : {}),
+        provider: provider.name,
+        stop: "asked_researcher",
+        trace,
+      };
     }
     turn++;
   }
-  return { goal, provider: provider.name, stop: "budget_exhausted", trace };
+  return {
+    goal,
+    ...(focus ? { focus } : {}),
+    provider: provider.name,
+    stop: "budget_exhausted",
+    trace,
+  };
 }
