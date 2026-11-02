@@ -1,20 +1,25 @@
 // The guanacaste: the canopy shows how much has been built, the roots are the
 // map. Every state drawn here is derived by the engine, never by the browser.
+// Cyan only ever means selection; red, yellow and the rest are scientific state.
 
 import type { RootNode } from "@vibloom/contracts";
 import type { ProjectView } from "./api";
+import { CANOPY, paintCanopy, rng } from "./canopy";
 import { el, svg } from "./dom";
+import { filaments, layout, TRUNK, type Layout } from "./layout";
 
 export type NodeState =
   "sound" | "hypothetical" | "fragile" | "broken" | "pending" | "open" | "off";
 
-const ROWS: RootNode["kind"][][] = [
-  ["claim", "lesson"],
-  ["experiment"],
-  ["model", "invariant"],
-  ["assumption"],
-  ["source"],
-];
+const STATE_LABEL: Record<NodeState, string> = {
+  sound: "",
+  hypothetical: "Hypothetical",
+  fragile: "Weak",
+  broken: "Broken",
+  pending: "Pending review",
+  open: "Open",
+  off: "Off",
+};
 
 export function nodeState(v: ProjectView, n: RootNode): NodeState {
   switch (n.kind) {
@@ -63,63 +68,153 @@ export interface TreeHandle {
 }
 
 const W = 1000;
-const GROUND = 300;
+let H = 1500;
 
-function canopy(fullness: number): SVGGElement {
-  const g = svg("g", { class: "canopy" });
-  // A wide, flat dome, as guanacastes grow in open pasture.
-  const clusters = 26 + Math.round(fullness * 34);
-  for (let i = 0; i < clusters; i++) {
-    const t = i / clusters;
-    const angle = Math.PI * (0.06 + 0.88 * ((t * 7.31) % 1));
-    const r = 0.55 + 0.45 * ((t * 3.7) % 1);
-    const cx = W / 2 + Math.cos(angle) * 330 * r;
-    const cy = 150 - Math.sin(angle) * 105 * r;
+function defs(): SVGDefsElement {
+  const glow = svg(
+    "filter",
+    { id: "glow", x: "-50%", y: "-50%", width: "200%", height: "200%" },
+    svg("feGaussianBlur", { stdDeviation: 3.2, result: "b" }),
+    svg(
+      "feMerge",
+      {},
+      svg("feMergeNode", { in: "b" }),
+      svg("feMergeNode", { in: "SourceGraphic" }),
+    ),
+  );
+  const soft = svg(
+    "filter",
+    { id: "soft", x: "-50%", y: "-50%", width: "200%", height: "200%" },
+    svg("feGaussianBlur", { stdDeviation: 1.2 }),
+  );
+  const earth = svg(
+    "linearGradient",
+    { id: "earth", x1: 0, y1: 0, x2: 0, y2: 1 },
+    svg("stop", { offset: "0", "stop-color": "#0d1410" }),
+    svg("stop", { offset: "0.05", "stop-color": "#07080d" }),
+    svg("stop", { offset: "1", "stop-color": "#03030a" }),
+  );
+  const halo = svg(
+    "radialGradient",
+    { id: "halo" },
+    svg("stop", { offset: "0", "stop-color": "rgb(150 110 255 / 55%)" }),
+    svg("stop", { offset: "1", "stop-color": "rgb(150 110 255 / 0%)" }),
+  );
+  return svg("defs", {}, glow, soft, earth, halo);
+}
+
+function sky(): SVGGElement {
+  const g = svg("g", { class: "sky", "pointer-events": "none" });
+  const r = rng(11);
+  for (let i = 0; i < 70; i++) {
+    const x = r() * W;
+    const y = r() * 230;
     g.append(
-      svg("ellipse", {
-        cx: cx.toFixed(1),
-        cy: cy.toFixed(1),
-        rx: (58 + 30 * ((t * 5.3) % 1)).toFixed(1),
-        ry: (30 + 14 * ((t * 2.9) % 1)).toFixed(1),
-        class: `leaf leaf-${String(i % 3)}`,
+      svg("circle", {
+        cx: x.toFixed(1),
+        cy: y.toFixed(1),
+        r: (0.4 + r() * 0.9).toFixed(2),
+        opacity: (0.25 + r() * 0.5).toFixed(2),
       }),
     );
   }
+  const title = svg("text", { x: W / 2, y: 70, "text-anchor": "middle", class: "brand" });
+  title.textContent = "VIBloom";
+  g.append(title);
   return g;
 }
 
-function trunk(): SVGPathElement {
-  return svg("path", {
-    class: "trunk",
-    d: `M ${String(W / 2 - 34)} ${String(GROUND)} C ${String(W / 2 - 22)} 230, ${String(W / 2 - 40)} 200, ${String(W / 2 - 90)} 160
-        L ${String(W / 2 + 90)} 160 C ${String(W / 2 + 40)} 200, ${String(W / 2 + 22)} 230, ${String(W / 2 + 34)} ${String(GROUND)} Z`,
-  });
+// A distant treeline on the horizon, behind the guanacaste.
+function horizon(): SVGPathElement {
+  const r = rng(17);
+  let line = `M-40,${String(TRUNK.y)} `;
+  for (let x = -40; x <= W + 40; x += 18) {
+    line += `L${x.toFixed(0)},${(TRUNK.y - 28 - r() * 26).toFixed(1)} `;
+  }
+  return svg("path", { d: `${line}L${String(W + 40)},${String(TRUNK.y)} Z`, class: "treeline" });
+}
+
+function ground(): SVGGElement {
+  const g = svg("g", { "pointer-events": "none" });
+  g.append(
+    svg("rect", { x: -3000, y: TRUNK.y, width: 7000, height: 4000, fill: "url(#earth)" }),
+    svg("ellipse", { cx: TRUNK.x, cy: TRUNK.y + 8, rx: 160, ry: 26, fill: "url(#halo)" }),
+  );
+  // A strip of grass along the surface.
+  const r = rng(5);
+  let d = "";
+  for (let x = -40; x < W + 40; x += 6) {
+    const h = 4 + r() * 10;
+    d += `M${x.toFixed(1)},${String(TRUNK.y)} l${((r() - 0.5) * 4).toFixed(1)},${(-h).toFixed(1)} `;
+  }
+  g.append(svg("path", { d, class: "grass" }));
+  return g;
+}
+
+interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+const overlaps = (a: Box, b: Box) =>
+  a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+function placeLabel(taken: Box[], x: number, y: number, w: number): { dx: number; dy: number } {
+  const tries = [
+    { dx: 18, dy: -12 },
+    { dx: -18 - w, dy: -12 },
+    { dx: 18, dy: 14 },
+    { dx: -18 - w, dy: 14 },
+    { dx: -w / 2, dy: 20 },
+  ];
+  for (const t of tries) {
+    const box = { x: x + t.dx, y: y + t.dy, w, h: 24 };
+    if (!taken.some((b) => overlaps(b, box))) {
+      taken.push(box);
+      return t;
+    }
+  }
+  const t = tries[0]!;
+  taken.push({ x: x + t.dx, y: y + t.dy, w, h: 24 });
+  return t;
 }
 
 export function mountTree(host: HTMLElement): TreeHandle {
-  const root = svg("svg", { viewBox: `0 0 ${String(W)} 900`, class: "tree-svg", role: "img" });
+  const root = svg("svg", {
+    viewBox: `0 0 ${String(W)} ${String(H)}`,
+    class: "tree-svg",
+    role: "img",
+  });
   const detail = el("div", { class: "node-detail" });
-  host.replaceChildren(el("h2", {}, "Roots"), root, detail);
+  host.replaceChildren(root, detail);
   let selected: string | undefined;
   let listener: (id: string | undefined) => void = () => undefined;
   let last: ProjectView | undefined;
+  let seen = new Set<string>();
+  let canopyFor = -1;
+  let canopyHref = "";
 
-  // Zoom with the wheel, pan by dragging; the roots are the map.
-  let box = { x: 0, y: 0, w: W, h: 900 };
+  let box = { x: 0, y: 0, w: W, h: H };
   const apply = () => {
     root.setAttribute(
       "viewBox",
-      `${String(box.x)} ${String(box.y)} ${String(box.w)} ${String(box.h)}`,
+      `${box.x.toFixed(1)} ${box.y.toFixed(1)} ${box.w.toFixed(1)} ${box.h.toFixed(1)}`,
     );
+    root.classList.toggle("near", box.w < 650);
   };
   root.addEventListener(
     "wheel",
     (e) => {
       e.preventDefault();
-      const k = e.deltaY > 0 ? 1.15 : 1 / 1.15;
-      const w = Math.min(W * 2, Math.max(W / 6, box.w * k));
-      const h = (w / W) * 900;
-      box = { x: box.x + (box.w - w) / 2, y: box.y + (box.h - h) / 2, w, h };
+      const k = e.deltaY > 0 ? 1.12 : 1 / 1.12;
+      const w = Math.min(W * 1.6, Math.max(W / 5, box.w * k));
+      const h = (w / W) * H;
+      const rect = root.getBoundingClientRect();
+      const fx = (e.clientX - rect.left) / rect.width;
+      const fy = (e.clientY - rect.top) / rect.height;
+      box = { x: box.x + (box.w - w) * fx, y: box.y + (box.h - h) * fy, w, h };
       apply();
     },
     { passive: false },
@@ -128,7 +223,7 @@ export function mountTree(host: HTMLElement): TreeHandle {
   root.addEventListener("pointerdown", (e) => {
     drag = { x: e.clientX, y: e.clientY };
   });
-  root.addEventListener("pointerup", () => (drag = undefined));
+  window.addEventListener("pointerup", () => (drag = undefined));
   root.addEventListener("pointermove", (e) => {
     if (!drag) return;
     const scale = box.w / root.clientWidth;
@@ -141,105 +236,142 @@ export function mountTree(host: HTMLElement): TreeHandle {
     apply();
   });
 
-  function connected(v: ProjectView, id: string): Set<string> {
-    const out = new Set([id]);
-    for (const dir of ["down", "up"] as const) {
-      const stack = [id];
-      for (let cur = stack.pop(); cur !== undefined; cur = stack.pop()) {
-        for (const e of v.edges) {
-          const [a, b] = dir === "down" ? [e.from, e.to] : [e.to, e.from];
-          if (a === cur && !out.has(b)) {
-            out.add(b);
-            stack.push(b);
-          }
-        }
-      }
-    }
-    return out;
+  // The path from the trunk to the focus, drawn in cyan.
+  function focusLine(lay: Layout, id: string | undefined): Set<string> {
+    const line = new Set<string>();
+    for (let cur = id; cur; cur = lay.nodes.get(cur)?.parent) line.add(cur);
+    return line;
   }
 
   function render(v: ProjectView) {
     last = v;
-    const pos = new Map<string, { x: number; y: number }>();
-    ROWS.forEach((kinds, depth) => {
-      const row = v.nodes.filter((n) => kinds.includes(n.kind));
-      // Roots spread wider the deeper they go, out to the edge of the map.
-      const spread = Math.min(390, 170 + depth * 80);
-      row.forEach((n, i) => {
-        const x =
-          W / 2 +
-          (row.length === 1
-            ? (depth % 2 === 0 ? -1 : 1) * 60 * depth
-            : -spread + (2 * spread * i) / (row.length - 1));
-        pos.set(n.id, { x, y: GROUND + 90 + depth * 120 + (i % 2) * 26 });
-      });
-    });
-
+    const lay = layout(v.nodes, v.edges);
     const claims = v.claims.filter((c) => c !== undefined);
     const withEvidence = claims.filter((c) => c.verdict.verdict !== "unexplored").length;
     const fullness = claims.length === 0 ? 0 : withEvidence / claims.length;
-    const lit = selected ? connected(v, selected) : undefined;
-
-    const edges = svg("g", { class: "edges" });
-    for (const e of v.edges) {
-      const a = pos.get(e.from);
-      const b = pos.get(e.to);
-      if (!a || !b) continue;
-      const on = lit?.has(e.from) && lit.has(e.to);
-      edges.append(
-        svg("path", {
-          d: `M ${a.x.toFixed(1)} ${a.y.toFixed(1)} C ${a.x.toFixed(1)} ${((a.y + b.y) / 2).toFixed(1)}, ${b.x.toFixed(1)} ${((a.y + b.y) / 2).toFixed(1)}, ${b.x.toFixed(1)} ${b.y.toFixed(1)}`,
-          class: `edge ${e.state}${on ? " lit" : ""}${lit && !on ? " dim" : ""}`,
-        }),
-      );
+    const step = Math.round(fullness * 10);
+    if (step !== canopyFor) {
+      canopyFor = step;
+      canopyHref = paintCanopy(step / 10).toDataURL("image/png");
     }
-    // Every root reaches the trunk: claims and lessons hang from it.
-    for (const n of v.nodes) {
-      if (n.kind !== "claim" && n.kind !== "lesson") continue;
-      const p = pos.get(n.id);
-      if (p) {
-        edges.append(
-          svg("path", {
-            d: `M ${String(W / 2)} ${String(GROUND)} Q ${String(W / 2)} ${p.y.toFixed(1)}, ${p.x.toFixed(1)} ${p.y.toFixed(1)}`,
-            class: "edge taproot",
-          }),
-        );
-      }
-    }
+    const focus = focusLine(lay, selected);
+    const byId = new Map(v.nodes.map((n) => [n.id, n]));
 
+    const decor = svg("g", { class: "filaments", "pointer-events": "none" });
+    const roots = svg("g", { class: "roots" });
     const nodes = svg("g", { class: "nodes" });
-    for (const n of v.nodes) {
-      const p = pos.get(n.id);
-      if (!p) continue;
+
+    const taken: Box[] = [];
+    for (const p of lay.nodes.values()) {
+      const n = byId.get(p.id);
+      if (!n) continue;
       const state = nodeState(v, n);
+      // Terminal roots keep growing below their node, deeper than the map.
+      const terminal = ![...lay.nodes.values()].some((c) => c.parent === p.id);
+      for (const d of filaments(p.x, p.y, p.id, terminal ? 4 : 3, terminal ? 1.7 : 1.2)) {
+        decor.append(svg("path", { d, class: `rootlet ${state}` }));
+      }
+      const fresh = !seen.has(p.id);
+      const path = svg("path", {
+        d: lay.paths.get(p.id) ?? "",
+        class: `root ${state}${focus.has(p.id) ? " focus" : ""}${fresh ? " sprout" : ""}`,
+        "stroke-width": Math.max(1.4, 5 - p.depth * 1.1).toFixed(1),
+      });
+      roots.append(path);
+
       const g = svg("g", {
-        class: `node ${n.kind} ${state}${selected === n.id ? " selected" : ""}${lit && !lit.has(n.id) ? " dim" : ""}`,
+        class: `node ${n.kind} ${state}${selected === n.id ? " selected" : ""}${fresh ? " fresh" : ""}`,
         transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`,
         tabindex: 0,
         role: "button",
+        "aria-label": `${n.title} ${STATE_LABEL[state]}`,
       });
-      const label = svg("text", { y: 30, "text-anchor": "middle" });
-      label.textContent = n.title.length > 28 ? `${n.title.slice(0, 27)}...` : n.title;
-      g.append(svg("circle", { r: n.kind === "claim" || n.kind === "lesson" ? 14 : 10 }), label);
+      const big = n.kind === "claim" || n.kind === "lesson" || n.kind === "assumption";
+      g.append(
+        svg("circle", { r: big ? 11 : 8, class: "ring" }),
+        svg("circle", { r: big ? 4.5 : 3.5, class: "core" }),
+      );
+      // Selection is an outline; the state colour stays.
+      if (selected === n.id) g.append(svg("circle", { r: big ? 17 : 13, class: "select" }));
+      const text = `${n.title.length > 30 ? `${n.title.slice(0, 29)}...` : n.title}${STATE_LABEL[state] ? `  ${STATE_LABEL[state]}` : ""}`;
+      // Labels try the right, then the left, then lower, so neighbours never
+      // cover each other.
+      const width = text.length * 6.6 + 20;
+      const spot = placeLabel(taken, p.x, p.y, width);
+      const label = svg("g", {
+        class: `label${p.depth <= 1 || state === "broken" || state === "fragile" || selected === n.id ? " always" : ""}`,
+        transform: `translate(${spot.dx.toFixed(0)} ${spot.dy.toFixed(0)})`,
+      });
+      const t = svg("text", { x: 10, y: 16 });
+      t.textContent = text;
+      label.append(svg("rect", { width: width.toFixed(0), height: 24, rx: 8 }), t);
+      g.append(label);
       const pick = () => {
         selected = selected === n.id ? undefined : n.id;
         listener(selected);
         render(v);
       };
-      g.addEventListener("click", pick);
+      g.addEventListener("click", (e) => {
+        e.stopPropagation();
+        pick();
+      });
       g.addEventListener("keydown", (e) => {
         if (e.key === "Enter") pick();
       });
       nodes.append(g);
     }
+    for (const b of lay.buds) {
+      for (const d of filaments(b.x, b.y, b.id, 2, 0.8)) {
+        decor.append(svg("path", { d, class: "rootlet" }));
+      }
+    }
+    for (const l of lay.links) {
+      roots.append(
+        svg("path", {
+          d: l.d,
+          class: `link ${l.state}${focus.has(l.from) && focus.has(l.to) ? " focus" : ""}`,
+        }),
+      );
+    }
 
+    // The soil grows with the map so deep roots are never cut off.
+    if (lay.height !== H) {
+      H = Math.max(1500, lay.height);
+      if (box.y === 0 && box.x === 0 && box.w === W) {
+        box = { x: 0, y: 0, w: W, h: H };
+        apply();
+      }
+    }
     root.replaceChildren(
-      canopy(fullness),
-      trunk(),
-      svg("line", { x1: -2000, x2: 3000, y1: GROUND, y2: GROUND, class: "ground" }),
-      edges,
+      defs(),
+      sky(),
+      horizon(),
+      svg("image", {
+        href: canopyHref,
+        x: 0,
+        y: TRUNK.y - CANOPY.groundY,
+        width: CANOPY.width,
+        height: CANOPY.height,
+        class: "crown",
+      }),
+      ground(),
+      decor,
+      roots,
       nodes,
     );
+
+    // New roots grow out from where they attach; nothing else re-animates.
+    for (const path of root.querySelectorAll<SVGPathElement>("path.sprout")) {
+      const len = path.getTotalLength();
+      path.style.strokeDasharray = `${len.toFixed(1)}`;
+      path.style.strokeDashoffset = `${len.toFixed(1)}`;
+      path.getBoundingClientRect();
+      requestAnimationFrame(() => {
+        path.style.transition = "stroke-dashoffset 1.6s cubic-bezier(.2,.7,.2,1)";
+        path.style.strokeDashoffset = "0";
+      });
+    }
+    seen = new Set(lay.nodes.keys());
     renderDetail(v);
   }
 
@@ -253,7 +385,7 @@ export function mountTree(host: HTMLElement): TreeHandle {
     }
     const rows: [string, string][] = [
       ["kind", n.kind],
-      ["state", nodeState(v, n)],
+      ["state", STATE_LABEL[nodeState(v, n)] || "Sound"],
       ["revision", String(n.revision)],
     ];
     if (n.kind === "assumption") rows.push(["statement", n.statement], ["scope", n.scope]);
@@ -275,11 +407,18 @@ export function mountTree(host: HTMLElement): TreeHandle {
     );
   }
 
+  root.addEventListener("click", () => {
+    if (selected && last) {
+      selected = undefined;
+      listener(undefined);
+      render(last);
+    }
+  });
+
   return {
     render,
     onSelect(fn) {
       listener = fn;
-      if (last) render(last);
     },
   };
 }
