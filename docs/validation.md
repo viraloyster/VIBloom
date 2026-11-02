@@ -45,12 +45,12 @@ The test suite must fail for each of these degenerate implementations:
 
 Each evaluation reports its denominators, its cases and its limits.
 
-| Evaluation     | Compares                                                                                     |
-| -------------- | -------------------------------------------------------------------------------------------- |
-| Search         | Halton with transition refinement vs uniform sampling, same budget, counting all solver work |
-| Context        | Layered context vs full context, counting expansions                                         |
-| Evidence check | Strict parser vs open-weight review on messy sources                                         |
-| Agent          | Muse Spark alone vs Muse Spark with the engine                                               |
+| Evaluation     | Compares                                                                                                                                                                  |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Search         | Halton with transition refinement vs uniform sampling, same budget, counting all solver work                                                                              |
+| Context        | Layered context vs full context, counting expansions                                                                                                                      |
+| Evidence check | Strict parser vs open-weight review on messy sources                                                                                                                      |
+| Agent          | Adaptive Muse Spark investigation vs a fixed policy with the same tools, domain and budget: distinct counterexamples, valid decisions, inconclusive points, cost and time |
 
 Results are added here as each evaluation lands, with the command that
 reproduces them from a clean checkout.

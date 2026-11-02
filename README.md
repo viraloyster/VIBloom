@@ -21,7 +21,8 @@ Status: under active development during the Meta Global AI Developer Hackathon
 5. Changing an assumption propagates through the dependency graph.
 
 Meta models: Muse Spark (Meta Model API) investigates and explains; Muse Spark
-Open (open weights) scores uncertainty and pre-checks handwritten input.
+Open (open weights) reviews citations against claims and pre-checks handwritten
+input.
 
 ## Repository
 
