@@ -4,7 +4,8 @@
 import type { Claim as Predicate } from "./claims";
 import type { Currency, Execution, Observation, PointOutcome, RegionStatus } from "./results";
 
-export type NodeKind = "assumption" | "invariant" | "source" | "model" | "experiment" | "claim";
+export type NodeKind =
+  "assumption" | "invariant" | "source" | "model" | "experiment" | "claim" | "lesson";
 
 interface NodeBase {
   id: string;
@@ -70,8 +71,47 @@ export interface ClaimNode extends NodeBase {
   supersedes?: Pin;
 }
 
+// What a candidate explanation expects to observe in the discriminating test,
+// in terms the engine measures.
+export type Expectation =
+  { outcome: "holds" | "fails" } | { relativeError: { min: number; max: number } };
+
+export interface Candidate {
+  id: string;
+  explanation: string;
+  // Roots the explanation blames.
+  suspects: string[];
+  expect: Expectation;
+}
+
+// What an unexpected result taught, or what it left open. Support is derived
+// from results by code; the model only proposes candidates and the test.
+export interface LessonNode extends NodeBase {
+  kind: "lesson";
+  statement: string;
+  // When the lesson is expected to apply.
+  scope: string;
+  // The result that contradicted the prediction, and the numbers.
+  about: string;
+  discrepancy: {
+    predicted: "holds" | "fails";
+    observed?: PointOutcome;
+    relativeError?: number;
+    tolerance?: number;
+  };
+  candidates: Candidate[];
+  // One run whose outcome tells the candidates apart. Absent when the model
+  // reports that the information is insufficient.
+  test?: { experiment: string; point: Record<string, number> };
+  insufficient?: string;
+  // Every premise the lesson rests on, captured by code when it was written.
+  basis: Pin[];
+  // Set only by an explicit decision of a person.
+  retired?: { reason: string };
+}
+
 export type RootNode =
-  AssumptionNode | InvariantNode | SourceNode | ModelNode | ExperimentNode | ClaimNode;
+  AssumptionNode | InvariantNode | SourceNode | ModelNode | ExperimentNode | ClaimNode | LessonNode;
 
 // A node at an exact revision.
 export interface Pin {

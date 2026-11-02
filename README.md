@@ -9,6 +9,11 @@ roots are the map: a network of assumptions, invariants, sources and experiments
 When a root changes or breaks, the conclusions that depend on it are marked for
 review.
 
+VIBloom is meant as a research layer that other technical projects can build
+on: a place to state what they expect, test it and keep what each failure
+taught, tied to the assumptions behind it. The current implementation works
+with chemical models; other domains are future work.
+
 Status: under active development during the Meta Global AI Developer Hackathon
 (October 27 - November 4, 2026). See [HACKATHON.md](HACKATHON.md).
 

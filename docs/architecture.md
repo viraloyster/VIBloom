@@ -61,7 +61,7 @@ enforces invariants; assumptions are put to the test.
 
 ## Roots map
 
-The roots of the tree are a graph with six node kinds:
+The roots of the tree are a graph with seven node kinds:
 
 | Node         | Holds                                                             |
 | ------------ | ----------------------------------------------------------------- |
@@ -71,6 +71,7 @@ The roots of the tree are a graph with six node kinds:
 | `model`      | An executable model: equations, parameters, scaling, mappings     |
 | `experiment` | A specification (model, claim, solver, detector, protocol, seed)  |
 | `claim`      | A versioned statement, its predicate and its protocol             |
+| `lesson`     | What an unexpected result taught or left open, and its premises   |
 
 - Results and citations are immutable records, not nodes. A citation points to
   a fragment of a source at a version: locator, quote and context.
@@ -102,6 +103,29 @@ The roots of the tree are a graph with six node kinds:
 - Computational dependencies form a DAG. Informational links may form cycles.
 - Edges proposed by a model start as hypothetical: they warn, they do not
   invalidate.
+
+## Anticipation and lessons
+
+VIBloom keeps what was expected, what contradicted it and which evidence
+changed the explanation.
+
+- Before every run the model predicts the outcome. A failed prediction is a
+  surprise, and the discrepancy is recorded with its numbers.
+- After a surprise the model writes a lesson: candidate explanations, each
+  blaming specific roots and expecting a measurable result in one new run
+  (an outcome, or a range of the relative period error). The engine rejects
+  candidates whose expectations a single result could meet together, and a
+  test at the surprising point itself. When no such test can be written, the
+  lesson stays open and says what information is missing.
+- Support is derived from the test result: one candidate fits (supported
+  under the tested conditions, not proven to be the cause), several fit (not
+  distinguished) or none fits. The model never sets it.
+- A lesson rests on every premise of the result it explains. If one changes
+  it goes pending review; if one is switched off, unsupported. Only a person
+  retires a lesson.
+- Lessons appear in the context of later decisions, so what was learned
+  shapes what is tried next. Whether a lesson improves later predictions is
+  measured by comparing equivalent investigations with and without it.
 
 ## Claim versions
 

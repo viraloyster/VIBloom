@@ -9,6 +9,7 @@ import {
   type RootNode,
 } from "@vibloom/contracts";
 import type { Actor, Op, Rejection, RejectionCode } from "./commands";
+import { canonical } from "./hash";
 
 export interface State {
   head: number;
@@ -85,6 +86,63 @@ function addEdge(s: State, e: DependsOn) {
 
 const isText = (v: unknown) => typeof v === "string" && v.trim().length > 0;
 
+type Expect = Extract<RootNode, { kind: "lesson" }>["candidates"][number]["expect"];
+
+// Two expectations can both be met by one result, so they cannot tell
+// candidates apart.
+function overlap(a: Expect, b: Expect): boolean {
+  if ("outcome" in a || "outcome" in b) {
+    return "outcome" in a && "outcome" in b ? a.outcome === b.outcome : true;
+  }
+  return a.relativeError.min <= b.relativeError.max && b.relativeError.min <= a.relativeError.max;
+}
+
+function checkLesson(s: State, n: Omit<Extract<RootNode, { kind: "lesson" }>, "revision">) {
+  if (n.retired) reject("invalid_input", "a lesson starts unretired");
+  const about = s.results.get(n.about) ?? reject("not_found", `result ${n.about} does not exist`);
+  const basis = new Map(n.basis.map((b) => [b.id, b.revision]));
+  for (const b of n.basis) {
+    const target = node(s, b.id);
+    if (b.revision < 1 || b.revision > target.revision) {
+      reject("invalid_input", `basis pins a revision ${b.id} never had`);
+    }
+  }
+  // A lesson rests on every premise of the result it explains.
+  for (const b of about.basis) {
+    if (!basis.has(b.id)) reject("invalid_input", `basis must include ${b.id}`);
+  }
+  for (const c of n.candidates) {
+    for (const id of c.suspects) node(s, id);
+    const e = c.expect;
+    if ("relativeError" in e && !(e.relativeError.min < e.relativeError.max)) {
+      reject("invalid_input", `candidate ${c.id} needs min < max`);
+    }
+  }
+  if (!n.test) {
+    if (!n.insufficient) reject("invalid_input", "without a test, say what information is missing");
+    return;
+  }
+  const exp = node(s, n.test.experiment);
+  if (exp.kind !== "experiment")
+    reject("invalid_input", `${n.test.experiment} is not an experiment`);
+  if (!basis.has(exp.id)) reject("invalid_input", "basis must include the test experiment");
+  if (n.candidates.length < 2) reject("invalid_input", "a test needs at least two candidates");
+  // The surprising run is already known; only a new run can discriminate.
+  if (about.point && canonical(about.point) === canonical(n.test.point)) {
+    reject("invalid_input", "the test must run somewhere other than the surprising result");
+  }
+  n.candidates.forEach((a, i) => {
+    n.candidates.slice(i + 1).forEach((b) => {
+      if (overlap(a.expect, b.expect)) {
+        reject(
+          "invalid_input",
+          `${a.id} and ${b.id} expect compatible results; the test cannot tell them apart`,
+        );
+      }
+    });
+  });
+}
+
 function applyOp(s: State, op: Op, actor: Actor, approved: boolean, contract: Contract) {
   switch (op.op) {
     case "add_node": {
@@ -127,6 +185,9 @@ function applyOp(s: State, op: Op, actor: Actor, approved: boolean, contract: Co
           pinned(s, n.spec.model, "model");
           pinned(s, n.spec.claim, "claim");
           if (n.results.length > 0) reject("invalid_input", "an experiment starts without results");
+          break;
+        case "lesson":
+          checkLesson(s, n);
           break;
         default:
           // Unreachable after parsing; kept so the gate never trusts types alone.
@@ -215,6 +276,17 @@ function applyOp(s: State, op: Op, actor: Actor, approved: boolean, contract: Co
       }
       s.results.set(r.id, structuredClone(r));
       if (exp.kind === "experiment") exp.results.push(r.id);
+      return;
+    }
+
+    case "retire_lesson": {
+      if (actor !== "human") reject("forbidden", "only a person retires a lesson");
+      const n = node(s, op.id);
+      if (n.kind !== "lesson") return reject("invalid_input", `${op.id} is not a lesson`);
+      if (n.revision !== op.expectedRevision) {
+        reject("conflict", `${op.id} is at revision ${String(n.revision)}`);
+      }
+      s.nodes.set(op.id, { ...n, retired: { reason: op.reason }, revision: n.revision + 1 });
       return;
     }
 

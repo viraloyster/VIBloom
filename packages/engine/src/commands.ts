@@ -20,6 +20,8 @@ export type Op =
   | { op: "add_edge"; edge: DependsOn }
   | { op: "confirm_edge"; from: string; to: string }
   | { op: "record_result"; result: ResultRecord }
+  // A person's explicit decision; the model cannot retire what it learned.
+  | { op: "retire_lesson"; id: string; expectedRevision: number; reason: string }
   // Never accepted. They exist so attempts are rejected by name, not ignored.
   | { op: "delete_result"; id: string }
   | { op: "edit_result"; result: ResultRecord }

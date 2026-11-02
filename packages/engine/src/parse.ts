@@ -20,6 +20,14 @@ import {
 } from "@vibloom/contracts";
 import type { Command } from "./commands";
 
+const expectation: Check = (v, path) => {
+  if (isObj(v) && "outcome" in v) {
+    shape({ outcome: oneOf("holds", "fails") })(v, path);
+    return;
+  }
+  shape({ relativeError: shape({ min: num, max: num }) })(v, path);
+};
+
 const node: Check = (v, path) => {
   const base = { id: str, title: str };
   if (!isObj(v)) return fail(path, "must be an object");
@@ -70,6 +78,35 @@ const node: Check = (v, path) => {
       shape(
         { ...base, kind: any, version: int(1), text: str, predicate: any, protocol: str },
         { supersedes: pin },
+      )(v, path);
+      return;
+    case "lesson":
+      shape(
+        {
+          ...base,
+          kind: any,
+          statement: str,
+          scope: str,
+          about: str,
+          discrepancy: shape(
+            { predicted: oneOf("holds", "fails") },
+            {
+              observed: oneOf("holds", "fails", "inconclusive", "not_applicable"),
+              relativeError: num,
+              tolerance: num,
+            },
+          ),
+          candidates: list(
+            shape({ id: str, explanation: str, suspects: list(str, 20), expect: expectation }),
+            4,
+          ),
+          basis: list(pin, 5000),
+        },
+        {
+          test: shape({ experiment: str, point: numbers }),
+          insufficient: str,
+          retired: shape({ reason: str }),
+        },
       )(v, path);
       return;
     default:
@@ -195,6 +232,9 @@ const op: Check = (v, path) => {
       return;
     case "set_verdict":
       shape({ op: any, claim: str, verdict: text })(v, path);
+      return;
+    case "retire_lesson":
+      shape({ op: any, id: str, expectedRevision: int(1), reason: str })(v, path);
       return;
     default:
       return fail(`${path}.op`, "unknown operation");

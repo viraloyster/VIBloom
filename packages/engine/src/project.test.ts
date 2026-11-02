@@ -1,7 +1,7 @@
 import type { Contract, ResultRecord } from "@vibloom/contracts";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Actor, Command, NewNode, Op } from "./commands";
-import { basisFor, claimView, resultView } from "./derive";
+import { basisFor, claimView, lessonView, resultView } from "./derive";
 import { canonical } from "./hash";
 import { Project } from "./project";
 
@@ -603,5 +603,129 @@ describe("encapsulation", () => {
     const q = new Project(own);
     own.initialConditions.length = 0;
     expect(q.contract.initialConditions).toEqual(["far", "near"]);
+  });
+});
+
+describe("lessons", () => {
+  const point = { s: 2, eps_prime: 1.98e-5 };
+  const surprising = { s: 1.8, eps_prime: 1.98e-5 };
+  const refuting = (id: string, relativeError: number, at = point) =>
+    result(id, {
+      point: at,
+      outcome: "fails",
+      comparison: { reference: "full", reduced: "reduced", relativeError, tolerance: 0.05 },
+      region: { status: "counterexample_found", counterexamples: 1, evaluated: 1, inconclusive: 0 },
+    });
+
+  const lesson = (over: Record<string, unknown> = {}) =>
+    ({
+      kind: "lesson",
+      id: "why-period-drifts",
+      title: "Why the period drifts at s = 2",
+      statement: "The reduced model misses the period at s = 2",
+      scope: "s near 2, eps_prime = 1.98e-5, far",
+      about: "r1",
+      discrepancy: { predicted: "holds", observed: "fails", relativeError: 0.19, tolerance: 0.05 },
+      candidates: [
+        {
+          id: "slow-bromide",
+          explanation: "bromide lags, lengthening the cycle",
+          suspects: ["qssa"],
+          expect: { relativeError: { min: 0.06, max: 1 } },
+        },
+        {
+          id: "numerics",
+          explanation: "the solver blurs the relaxation",
+          suspects: ["model"],
+          expect: { relativeError: { min: -0.05, max: 0.05 } },
+        },
+      ],
+      test: { experiment: "exp", point },
+      basis: basisFor(p.state, "exp", ["qssa", "q"]),
+      ...over,
+    }) as NewNode;
+
+  beforeEach(() => {
+    send("engine", [{ op: "record_result", result: refuting("r1", 0.19, surprising) }]);
+  });
+
+  it("is backed only by the test it named, under those conditions", () => {
+    expect(send("agent", [{ op: "add_node", node: lesson() }]).ok).toBe(true);
+    expect(lessonView(p.state, "why-period-drifts")?.support).toEqual({ status: "awaiting_test" });
+    send("engine", [{ op: "record_result", result: refuting("r2", 0.18) }]);
+    expect(lessonView(p.state, "why-period-drifts")).toMatchObject({
+      support: { status: "supported", candidate: "slow-bromide", result: "r2" },
+      currency: "current",
+    });
+  });
+
+  it("goes pending review when a premise changes", () => {
+    send("agent", [{ op: "add_node", node: lesson() }]);
+    send("human", [
+      { op: "set_assumption", id: "qssa", expectedRevision: 1, change: { scope: "low s" } },
+    ]);
+    expect(lessonView(p.state, "why-period-drifts")?.currency).toBe("pending_review");
+  });
+
+  it("needs a new run, not the surprising one, to discriminate", () => {
+    const here = lesson({ test: { experiment: "exp", point: surprising } });
+    expect(send("agent", [{ op: "add_node", node: here }])).toMatchObject({
+      ok: false,
+      detail: expect.stringMatching(/somewhere other than/) as unknown,
+    });
+  });
+
+  it("can stay open when information is insufficient", () => {
+    const open = lesson({
+      test: undefined,
+      candidates: [],
+      insufficient: "no slower model to compare",
+    });
+    expect(send("agent", [{ op: "add_node", node: open }]).ok).toBe(true);
+    expect(lessonView(p.state, "why-period-drifts")?.support).toEqual({
+      status: "open",
+      why: "no slower model to compare",
+    });
+  });
+
+  it("rejects tests that cannot tell the candidates apart", () => {
+    const [a, b] = (lesson() as { candidates: unknown[] }).candidates as [object, object];
+    const same = { ...b, expect: { relativeError: { min: 0.1, max: 0.3 } } };
+    expect(
+      send("agent", [{ op: "add_node", node: lesson({ candidates: [a, same] }) }]),
+    ).toMatchObject({
+      ok: false,
+      detail: expect.stringMatching(/cannot tell them apart/) as unknown,
+    });
+    expect(send("agent", [{ op: "add_node", node: lesson({ candidates: [a] }) }])).toMatchObject({
+      ok: false,
+      detail: expect.stringMatching(/at least two candidates/) as unknown,
+    });
+    expect(
+      send("agent", [
+        { op: "add_node", node: lesson({ test: undefined, insufficient: undefined }) },
+      ]),
+    ).toMatchObject({ ok: false });
+  });
+
+  it("rests on every premise of the result it explains", () => {
+    const partial = lesson({ basis: basisFor(p.state, "exp", []).filter((b) => b.id !== "qssa") });
+    expect(send("agent", [{ op: "add_node", node: partial }])).toMatchObject({
+      ok: false,
+      detail: expect.stringMatching(/basis must include/) as unknown,
+    });
+  });
+
+  it("is retired only by a person", () => {
+    send("agent", [{ op: "add_node", node: lesson() }]);
+    const retire: Op = {
+      op: "retire_lesson",
+      id: "why-period-drifts",
+      expectedRevision: 1,
+      reason: "superseded",
+    };
+    expect(send("agent", [retire])).toMatchObject({ ok: false, code: "forbidden" });
+    expect(send("human", [retire]).ok).toBe(true);
+    expect(lessonView(p.state, "why-period-drifts")?.retired).toEqual({ reason: "superseded" });
   });
 });

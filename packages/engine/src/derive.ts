@@ -1,7 +1,8 @@
 // Everything the interface and agents show is derived here from the state;
 // nothing in this file is stored.
 
-import type { Currency, Pin, ResultRecord } from "@vibloom/contracts";
+import type { Currency, Pin, ResultRecord, RootNode } from "@vibloom/contracts";
+import { canonical } from "./hash";
 import type { State } from "./state";
 
 export interface ResultView {
@@ -143,4 +144,78 @@ export function claimView(s: State, claimId: string): ClaimView | undefined {
       .filter(({ r }) => r.execution.status !== "completed" || r.violated)
       .map(({ r }) => r.id),
   };
+}
+
+export type LessonSupport =
+  | { status: "open"; why: string }
+  | { status: "awaiting_test" }
+  // Backed under the tested conditions; other causes may still fit.
+  | { status: "supported"; candidate: string; result: string }
+  | { status: "not_distinguished"; candidates: string[]; result: string }
+  | { status: "no_candidate_fits"; result: string };
+
+export interface LessonView {
+  id: string;
+  support: LessonSupport;
+  currency: Currency;
+  reasons: string[];
+  retired?: { reason: string };
+}
+
+type Lesson = Extract<RootNode, { kind: "lesson" }>;
+
+function meets(r: ResultRecord, e: Lesson["candidates"][number]["expect"]): boolean {
+  if ("outcome" in e) return r.outcome === e.outcome;
+  const x = r.comparison?.relativeError;
+  return x !== undefined && x >= e.relativeError.min && x <= e.relativeError.max;
+}
+
+// Support comes only from current results of the test the lesson named.
+export function lessonView(s: State, id: string): LessonView | undefined {
+  const n = s.nodes.get(id);
+  if (n?.kind !== "lesson") return undefined;
+  const basis = new Map(n.basis.map((b) => [b.id, b.revision]));
+  const reasons: string[] = [];
+  let currency: Currency = "current";
+  for (const [bid, rev] of basis) {
+    const b = s.nodes.get(bid);
+    if (b?.kind === "assumption" && b.state === "off") {
+      currency = "unsupported";
+      reasons.push(`assumption ${bid} is off`);
+    } else if (b && b.revision !== rev && currency === "current") {
+      currency = "pending_review";
+      reasons.push(`${bid} changed since revision ${String(rev)}`);
+    }
+  }
+
+  let support: LessonSupport;
+  const test = n.test;
+  if (!test) support = { status: "open", why: n.insufficient ?? "no test" };
+  else {
+    const point = canonical(test.point);
+    const runs = [...s.results.values()].filter(
+      (r) =>
+        r.experiment.id === test.experiment &&
+        r.point !== undefined &&
+        canonical(r.point) === point &&
+        resultView(s, r).currency === "current",
+    );
+    const r = runs[runs.length - 1];
+    if (!r) support = { status: "awaiting_test" };
+    else if (r.execution.status !== "completed" || r.violated) {
+      support = { status: "open", why: `test run ${r.id} did not complete` };
+    } else {
+      const fits = n.candidates.filter((c) => meets(r, c.expect)).map((c) => c.id);
+      const [only] = fits;
+      support =
+        fits.length === 1 && only !== undefined
+          ? { status: "supported", candidate: only, result: r.id }
+          : fits.length > 1
+            ? { status: "not_distinguished", candidates: fits, result: r.id }
+            : { status: "no_candidate_fits", result: r.id };
+    }
+  }
+  const view: LessonView = { id, support, currency, reasons };
+  if (n.retired) view.retired = n.retired;
+  return view;
 }

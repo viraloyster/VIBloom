@@ -20,6 +20,9 @@ export type {
 } from "./results";
 export type {
   AssumptionNode,
+  Candidate,
+  Expectation,
+  LessonNode,
   ClaimNode,
   Citation,
   DependsOn,
