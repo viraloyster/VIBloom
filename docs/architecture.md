@@ -44,20 +44,45 @@ enforces invariants; assumptions are put to the test.
 
 - An assumption is something the investigation takes as given: a model choice
   such as the two-variable reduction, a parameter value and its source, an
-  initial condition, a numerical criterion. It is confirmed, hypothetical
+  initial condition, a numerical criterion. It is adopted, hypothetical
   (proposed by a model and not yet confirmed) or switched off.
 - An invariant is a property that must hold wherever it is declared:
   concentrations stay non-negative, parameters stay inside the admissible
   domain, recorded evidence never changes. Every result is checked against the
   invariants in scope. No model can relax one.
-- A region claim is a candidate invariant over a parameter region. The search
-  tries to break it, as invariant testing does for smart contracts.
+- A run that breaks an invariant, for example by producing a negative
+  concentration, is a failed run with diagnostics. It does not refute a claim.
+- A region claim is a candidate invariant over a parameter region, stored as a
+  claim. The search tries to break it, as invariant testing does for smart
+  contracts; a counterexample is a finding, not an integrity failure.
 - Switching an assumption off, or refuting it, makes every conclusion that
   depends on it unsupported. A changed assumption makes them pending review.
   Nothing is deleted.
-- Assumptions, invariants, sources and experiments are the roots of the tree.
-  Fragile and broken roots are marked in the interface and in the context agents
-  receive, in the same way.
+
+## Roots map
+
+The roots of the tree are a graph with six node kinds:
+
+| Node         | Holds                                                             |
+| ------------ | ----------------------------------------------------------------- |
+| `assumption` | A premise: adopted, hypothetical or off; its scope and protection |
+| `invariant`  | A mandatory check implemented in code, versioned, with its scope  |
+| `source`     | An immutable document, identified by version and hash             |
+| `model`      | An executable model: equations, parameters, scaling, mappings     |
+| `experiment` | A specification (model, claim, solver, detector, protocol, seed)  |
+| `claim`      | A versioned statement, its predicate and its protocol             |
+
+- Results and citations are immutable records, not nodes. A citation points to
+  a fragment of a source at a version: locator, quote and context.
+- `A depends_on B` means A needs B. Invalidation walks the edges backwards.
+  Dependencies of an experiment come from its specification and are always
+  confirmed; an agent cannot omit them or mark them hypothetical.
+- `supports` and `refutes` link one result to one claim version. Code derives
+  them from numerical results. Links proposed by a model are review signals and
+  never change a status. They are a separate view from the dependency DAG.
+- Visual states are derived: hypothetical, off, fragile, unsupported, pending
+  review, and a failed check shown on the run that failed it. The interface and
+  the context agents receive show the same states.
 
 ## Evidence and dependencies
 
@@ -106,7 +131,9 @@ Three signals are stored separately and never merged:
 
 ## Layered context for agents
 
-Agents see the project as a virtual file tree with a summary file per folder.
+Agents see the project as a virtual file tree derived from the roots map, with
+a summary file per folder. Each summary records the revisions it was derived
+from and goes stale when they change.
 Detail depends on graph distance from the focus: details and history, details,
 summary, title, collapsed folder. Required assumptions are always delivered at
 detail level; if they do not fit the budget the task is split or refused.

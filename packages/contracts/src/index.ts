@@ -18,3 +18,19 @@ export type {
   PointOutcome,
   RegionStatus,
 } from "./results";
+export type {
+  AssumptionNode,
+  ClaimNode,
+  Citation,
+  DependsOn,
+  Evidence,
+  ExperimentNode,
+  ExperimentSpec,
+  InvariantNode,
+  ModelNode,
+  NodeKind,
+  Pin,
+  ResultRecord,
+  RootNode,
+  SourceNode,
+} from "./roots";
