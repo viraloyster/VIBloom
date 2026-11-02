@@ -2,11 +2,11 @@
 
 Three validations are kept separate:
 
-| Validation | Shows |
-|---|---|
-| Numerical | The solver reproduces reference solutions within declared tolerances |
-| Model | Equations, parameters and transformations match the cited source |
-| Comparison | Compared conditions and observables mean the same in both models |
+| Validation | Shows                                                                |
+| ---------- | -------------------------------------------------------------------- |
+| Numerical  | The solver reproduces reference solutions within declared tolerances |
+| Model      | Equations, parameters and transformations match the cited source     |
+| Comparison | Compared conditions and observables mean the same in both models     |
 
 ## Numerical
 
@@ -41,12 +41,12 @@ The test suite must fail for each of these degenerate implementations:
 
 Each evaluation reports its denominators, its cases and its limits.
 
-| Evaluation | Compares |
-|---|---|
-| Search | Halton with transition refinement vs uniform sampling, same budget, counting all solver work |
-| Context | Layered context vs full context, counting expansions |
-| Evidence check | Strict parser vs open-weight review on messy sources |
-| Agent | Muse Spark alone vs Muse Spark with the engine |
+| Evaluation     | Compares                                                                                     |
+| -------------- | -------------------------------------------------------------------------------------------- |
+| Search         | Halton with transition refinement vs uniform sampling, same budget, counting all solver work |
+| Context        | Layered context vs full context, counting expansions                                         |
+| Evidence check | Strict parser vs open-weight review on messy sources                                         |
+| Agent          | Muse Spark alone vs Muse Spark with the engine                                               |
 
 Results are added here as each evaluation lands, with the command that
 reproduces them from a clean checkout.

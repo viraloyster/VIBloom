@@ -41,12 +41,12 @@ its own normalization as `(eps, eps_prime) = (d, d e)`.
 
 ## Parameters
 
-| Parameter | Value | Source |
-|---|---|---|
-| `q` | 7.62e-5 | [1], adapted from [2] |
-| `e` | 2e-3 | [1] |
-| `d` | 1e-3 in [1]; 9.9e-3 in [2] | [1] uses 1e-3 to improve its asymptotic analysis |
-| `s` | swept, 0.4 to 2.8 | free parameter |
+| Parameter | Value                      | Source                                           |
+| --------- | -------------------------- | ------------------------------------------------ |
+| `q`       | 7.62e-5                    | [1], adapted from [2]                            |
+| `e`       | 2e-3                       | [1]                                              |
+| `d`       | 1e-3 in [1]; 9.9e-3 in [2] | [1] uses 1e-3 to improve its asymptotic analysis |
+| `s`       | swept, 0.4 to 2.8          | free parameter                                   |
 
 With the values of [2], `eps = 9.9e-3` and `eps_prime = 1.98e-5`.
 
@@ -75,11 +75,11 @@ Oregonator-3 limit cycle at `s` slightly above 0.50047.
 
 Reproduction during the design phase (to be committed with the solver):
 
-| Quantity | [1] | This work | Difference |
-|---|---|---|---|
-| Oregonator-2 period, `s = 1` | 7110 | 7087 | -0.3% |
-| Oregonator-3 period, `s = 1` | 7160 | 7149 | -0.2% |
-| Oregonator-3 onset | above 0.50047 | between 0.50055 and 0.5006 | about 1e-4 in `s` |
+| Quantity                     | [1]           | This work                  | Difference        |
+| ---------------------------- | ------------- | -------------------------- | ----------------- |
+| Oregonator-2 period, `s = 1` | 7110          | 7087                       | -0.3%             |
+| Oregonator-3 period, `s = 1` | 7160          | 7149                       | -0.2%             |
+| Oregonator-3 onset           | above 0.50047 | between 0.50055 and 0.5006 | about 1e-4 in `s` |
 
 The onset lies in a canard explosion, which is exponentially sensitive. Linear
 stability places the Hopf point of the full model at `s = 0.50073`, so the

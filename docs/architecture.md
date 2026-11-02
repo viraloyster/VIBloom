@@ -10,15 +10,15 @@
 
 ## Packages
 
-| Package | Responsibility | May import |
-|---|---|---|
-| `contracts` | Shared types and boundary validation | nothing |
-| `engine` | Event log, write gate, derived status, dependency propagation, layered context | `contracts` |
-| `chem` | Stiff solver, Oregonator models, oscillation classifier, claim evaluation | `contracts` |
-| `search` | Halton sampling, transition refinement, counterexample shrinking | `contracts` |
-| `agent` | Orchestrator, tools, model providers (scripted, recorded, live) | `contracts`, `engine` |
-| `apps/api` | Cloudflare Worker, Durable Objects, persistence | all packages |
-| `apps/web` | Roots map, monitor, chat, local preview | all packages |
+| Package     | Responsibility                                                                 | May import            |
+| ----------- | ------------------------------------------------------------------------------ | --------------------- |
+| `contracts` | Shared types and boundary validation                                           | nothing               |
+| `engine`    | Event log, write gate, derived status, dependency propagation, layered context | `contracts`           |
+| `chem`      | Stiff solver, Oregonator models, oscillation classifier, claim evaluation      | `contracts`           |
+| `search`    | Halton sampling, transition refinement, counterexample shrinking               | `contracts`           |
+| `agent`     | Orchestrator, tools, model providers (scripted, recorded, live)                | `contracts`, `engine` |
+| `apps/api`  | Cloudflare Worker, Durable Objects, persistence                                | all packages          |
+| `apps/web`  | Roots map, monitor, chat, local preview                                        | all packages          |
 
 Import boundaries are enforced by lint. Each package exposes one entry point.
 
@@ -26,13 +26,13 @@ Import boundaries are enforced by lint. Each package exposes one entry point.
 
 Each result carries five separate dimensions:
 
-| Dimension | Values |
-|---|---|
-| Execution | completed, cancelled, budget exhausted, numerical failure |
-| Observation | oscillation detected, steady state, indeterminate |
-| Point predicate | holds, fails, inconclusive, not applicable |
-| Region | unexplored, counterexample found, no counterexample in N evaluated points |
-| Currency | current, pending review |
+| Dimension       | Values                                                                    |
+| --------------- | ------------------------------------------------------------------------- |
+| Execution       | completed, cancelled, budget exhausted, numerical failure                 |
+| Observation     | oscillation detected, steady state, indeterminate                         |
+| Point predicate | holds, fails, inconclusive, not applicable                                |
+| Region          | unexplored, counterexample found, no counterexample in N evaluated points |
+| Currency        | current, pending review                                                   |
 
 A region claim is never reported as holding. Sampling can only find a
 counterexample or report how many points were evaluated without one.
@@ -50,11 +50,11 @@ counterexample or report how many points were evaluated without one.
 
 ## Write gate
 
-| Write | Policy |
-|---|---|
-| Manipulate checks: disable, relax, delete evidence, rewrite results | reject |
-| Record evidence, including evidence that refutes a claim | accept and propagate |
-| Change a protected premise or the meaning of a claim | require human approval |
+| Write                                                               | Policy                 |
+| ------------------------------------------------------------------- | ---------------------- |
+| Manipulate checks: disable, relax, delete evidence, rewrite results | reject                 |
+| Record evidence, including evidence that refutes a claim            | accept and propagate   |
+| Change a protected premise or the meaning of a claim                | require human approval |
 
 Writes are atomic: validate, check the base revision, then append the event,
 update the projection and record the command id in one transaction. A command

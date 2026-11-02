@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+.wrangler/
+.dev.vars
+.env*
+*.log
+__pycache__/
+.venv/
