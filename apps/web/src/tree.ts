@@ -227,7 +227,20 @@ export function mountTree(host: HTMLElement): TreeHandle {
     role: "img",
   });
   const detail = el("div", { class: "node-detail" });
-  host.replaceChildren(root, detail);
+  const zoomIn = el("button", { type: "button", title: "Zoom in", "aria-label": "Zoom in" }, "+");
+  const zoomOut = el(
+    "button",
+    { type: "button", title: "Zoom out", "aria-label": "Zoom out" },
+    "-",
+  );
+  const fit = el("button", { type: "button", title: "Show the whole tree" }, "Fit");
+  const stage = el(
+    "div",
+    { class: "stage" },
+    root,
+    el("div", { class: "zoom" }, zoomIn, zoomOut, fit),
+  );
+  host.replaceChildren(stage, detail);
   let selected: string | undefined;
   let listener: (id: string | undefined) => void = () => undefined;
   let last: ProjectView | undefined;
@@ -258,9 +271,56 @@ export function mountTree(host: HTMLElement): TreeHandle {
     },
     { passive: false },
   );
+  // Smooth camera moves, so the eye can follow where the map goes.
+  let flight = 0;
+  function flyTo(target: { x: number; y: number; w: number }) {
+    const from = { ...box };
+    const to = { x: target.x, y: target.y, w: target.w, h: (target.w / W) * H };
+    const start = performance.now();
+    const id = ++flight;
+    const step = (now: number) => {
+      if (id !== flight) return;
+      const t = Math.min(1, (now - start) / 650);
+      const e = 1 - Math.pow(1 - t, 3);
+      box = {
+        x: from.x + (to.x - from.x) * e,
+        y: from.y + (to.y - from.y) * e,
+        w: from.w + (to.w - from.w) * e,
+        h: from.h + (to.h - from.h) * e,
+      };
+      apply();
+      if (t < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+  const zoomAt = (k: number, cx = box.x + box.w / 2, cy = box.y + box.h / 2) => {
+    const w = Math.min(W * 1.6, Math.max(W / 6, box.w * k));
+    const h = (w / W) * H;
+    flyTo({ x: cx - ((cx - box.x) / box.w) * w, y: cy - ((cy - box.y) / box.h) * h, w });
+  };
+  zoomIn.addEventListener("click", () => {
+    zoomAt(1 / 1.6);
+  });
+  zoomOut.addEventListener("click", () => {
+    zoomAt(1.6);
+  });
+  fit.addEventListener("click", () => {
+    flyTo({ x: 0, y: 0, w: W });
+  });
+  root.addEventListener("dblclick", (e) => {
+    const r = root.getBoundingClientRect();
+    zoomAt(
+      1 / 2,
+      box.x + ((e.clientX - r.left) / r.width) * box.w,
+      box.y + ((e.clientY - r.top) / r.height) * box.h,
+    );
+  });
+
   let drag: { x: number; y: number } | undefined;
+  let dragged = 0;
   root.addEventListener("pointerdown", (e) => {
     drag = { x: e.clientX, y: e.clientY };
+    dragged = 0;
   });
   window.addEventListener("pointerup", () => (drag = undefined));
   root.addEventListener("pointermove", (e) => {
@@ -271,15 +331,29 @@ export function mountTree(host: HTMLElement): TreeHandle {
       x: box.x - (e.clientX - drag.x) * scale,
       y: box.y - (e.clientY - drag.y) * scale,
     };
+    dragged += Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y);
     drag = { x: e.clientX, y: e.clientY };
     apply();
   });
 
-  // The path from the trunk to the focus, drawn in cyan.
-  function focusLine(lay: Layout, id: string | undefined): Set<string> {
-    const line = new Set<string>();
-    for (let cur = id; cur; cur = lay.nodes.get(cur)?.parent) line.add(cur);
-    return line;
+  // Everything the selected root rests on (down) and everything resting on
+  // it (up), through every real dependency, not only the drawn tree.
+  function reach(v: ProjectView, id: string | undefined) {
+    const walk = (dir: "down" | "up") => {
+      const out = new Set<string>();
+      const stack = id ? [id] : [];
+      for (let cur = stack.pop(); cur !== undefined; cur = stack.pop()) {
+        for (const e of v.edges) {
+          const [a, b] = dir === "down" ? [e.from, e.to] : [e.to, e.from];
+          if (a === cur && !out.has(b)) {
+            out.add(b);
+            stack.push(b);
+          }
+        }
+      }
+      return out;
+    };
+    return { down: walk("down"), up: walk("up") };
   }
 
   function render(v: ProjectView) {
@@ -302,7 +376,9 @@ export function mountTree(host: HTMLElement): TreeHandle {
       }
       strands = { height: H, group };
     }
-    const focus = focusLine(lay, selected);
+    const { down, up } = reach(v, selected);
+    const inFocus = (id: string) => id === selected || down.has(id) || up.has(id);
+    root.classList.toggle("focusing", selected !== undefined);
     const byId = new Map(v.nodes.map((n) => [n.id, n]));
 
     const decor = svg("g", { class: "filaments", "pointer-events": "none" });
@@ -310,6 +386,14 @@ export function mountTree(host: HTMLElement): TreeHandle {
     const nodes = svg("g", { class: "nodes" });
 
     // Labels must not cover any root's node either.
+    // A drawn root links a node to its parent: lit toward what the selection
+    // rests on, or toward what rests on the selection.
+    const litClass = (id: string, parent: string | undefined): string => {
+      if (!selected || !inFocus(id)) return "";
+      if (parent && !inFocus(parent)) return "";
+      if (!parent && !(up.has(id) || id === selected)) return "";
+      return down.has(id) ? " lit down" : " lit up";
+    };
     const taken: Box[] = [...lay.nodes.values()].map((p) => ({
       x: p.x - 14,
       y: p.y - 14,
@@ -328,14 +412,14 @@ export function mountTree(host: HTMLElement): TreeHandle {
       const fresh = !seen.has(p.id);
       const path = svg("path", {
         d: lay.paths.get(p.id) ?? "",
-        class: `root ${state}${focus.has(p.id) ? " focus" : ""}${fresh ? " sprout" : ""}`,
+        class: `root ${state}${litClass(p.id, p.parent)}${fresh ? " sprout" : ""}`,
         "stroke-width": Math.max(1.4, 5 - p.depth * 1.1).toFixed(1),
       });
       roots.append(path);
 
       const g = svg("g", {
         "data-id": n.id,
-        class: `node ${n.kind} ${state}${selected === n.id ? " selected" : ""}${fresh ? " fresh" : ""}`,
+        class: `node ${n.kind} ${state}${selected && inFocus(n.id) ? " in-focus" : ""}${selected === n.id ? " selected" : ""}${fresh ? " fresh" : ""}`,
         transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`,
         tabindex: 0,
         role: "button",
@@ -354,7 +438,7 @@ export function mountTree(host: HTMLElement): TreeHandle {
       const width = text.length * 6.6 + 20;
       const spot = placeLabel(taken, p.x, p.y, width);
       const label = svg("g", {
-        class: `label${p.depth <= 1 || state === "broken" || state === "fragile" || selected === n.id ? " always" : ""}`,
+        class: `label${(selected ? inFocus(n.id) : p.depth <= 1 || state === "broken" || state === "fragile") ? " always" : ""}`,
         transform: `translate(${spot.dx.toFixed(0)} ${spot.dy.toFixed(0)})`,
       });
       const t = svg("text", { x: 10, y: 16 });
@@ -362,9 +446,7 @@ export function mountTree(host: HTMLElement): TreeHandle {
       label.append(svg("rect", { width: width.toFixed(0), height: 24, rx: 8 }), t);
       g.append(label);
       const pick = () => {
-        selected = selected === n.id ? undefined : n.id;
-        listener(selected);
-        render(v);
+        select(selected === n.id ? undefined : n.id);
       };
       g.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -384,7 +466,7 @@ export function mountTree(host: HTMLElement): TreeHandle {
       roots.append(
         svg("path", {
           d: l.d,
-          class: `link ${l.state}${focus.has(l.from) && focus.has(l.to) ? " focus" : ""}`,
+          class: `link ${l.state}${inFocus(l.from) && inFocus(l.to) ? (down.has(l.to) ? " lit down" : " lit up") : ""}`,
         }),
       );
     }
@@ -449,20 +531,61 @@ export function mountTree(host: HTMLElement): TreeHandle {
       );
       if (l?.support.status === "supported") rows.push(["backed cause", l.support.candidate]);
     }
+    // Direct links as buttons, so the map can be walked root by root.
+    const hop = (ids: string[]) =>
+      ids.length === 0
+        ? el("span", { class: "hint" }, "nothing")
+        : el(
+            "span",
+            { class: "hops" },
+            ...ids.map((id) => {
+              const target = v.nodes.find((x) => x.id === id);
+              const b = el("button", { type: "button", class: "hop" }, target?.title ?? id);
+              b.addEventListener("click", () => {
+                select(id);
+              });
+              return b;
+            }),
+          );
+    const restsOn = v.edges.filter((e) => e.from === n.id).map((e) => e.to);
     const dependents = v.edges.filter((e) => e.to === n.id).map((e) => e.from);
-    rows.push(["rests on it", dependents.join(", ") || "-"]);
     detail.replaceChildren(
       el("h3", {}, n.title),
       el("dl", {}, ...rows.flatMap(([k, val]) => [el("dt", {}, k), el("dd", {}, val)])),
+      el("p", { class: "hop-title down" }, "Rests on"),
+      hop(restsOn),
+      el("p", { class: "hop-title up" }, "Rests on it"),
+      hop(dependents),
     );
   }
 
-  root.addEventListener("click", () => {
-    if (selected && last) {
-      selected = undefined;
-      listener(undefined);
-      render(last);
+  // Selecting frames the root with everything it connects to.
+  function select(id: string | undefined) {
+    selected = id;
+    listener(selected);
+    if (!last) return;
+    render(last);
+    if (!id || !lay) {
+      flyTo({ x: 0, y: 0, w: W });
+      return;
     }
+    const { down, up } = reach(last, id);
+    const pts = [id, ...down, ...up].flatMap((k) => {
+      const p = lay?.nodes.get(k);
+      return p ? [p] : [];
+    });
+    const xs = pts.map((p) => p.x);
+    const ys = pts.map((p) => p.y);
+    const x0 = Math.min(...xs) - 160;
+    const x1 = Math.max(...xs) + 160;
+    const y0 = Math.min(...ys) - 140;
+    const y1 = Math.max(...ys) + 160;
+    const w = Math.min(W * 1.2, Math.max(420, x1 - x0, ((y1 - y0) * W) / H));
+    flyTo({ x: (x0 + x1) / 2 - w / 2, y: (y0 + y1) / 2 - ((w / W) * H) / 2, w });
+  }
+
+  root.addEventListener("click", () => {
+    if (dragged < 6 && selected) select(undefined);
   });
 
   // A glow that travels from the trunk along the roots to each target, then
