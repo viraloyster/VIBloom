@@ -3,6 +3,7 @@
 import type { Contract } from "@vibloom/contracts";
 import type { Actor, Command, Op, Rejection } from "./commands";
 import { canonical, sha256 } from "./hash";
+import { parseCommand } from "./parse";
 import { applyOps, emptyState, type State } from "./state";
 
 export interface Event {
@@ -45,7 +46,11 @@ export class Project {
     return this.log;
   }
 
-  submit(command: Command, at: string): Submission {
+  // Takes unknown input: commands arrive as JSON from the API and the agent.
+  submit(input: unknown, at: string): Submission {
+    const parsed = parseCommand(input);
+    if (!parsed.ok) return { ok: false, code: "invalid_input", detail: parsed.detail };
+    const command = parsed.command;
     const digest = commandDigest(command);
     const seen = this.commands.get(command.commandId);
     if (seen) {
@@ -95,14 +100,15 @@ export class Project {
       if (e.prevHash !== p.current.lastHash)
         return { ok: false, seq: e.seq, detail: "broken chain" };
       if (eventHash(body) !== hash) return { ok: false, seq: e.seq, detail: "hash mismatch" };
-      const command: Command = {
+      const parsed = parseCommand({
         commandId: e.commandId,
         actor: e.actor,
         baseHead: p.current.head,
         ops: e.ops,
         approved: e.approved,
-      };
-      if (commandDigest(command) !== e.digest) {
+      });
+      if (!parsed.ok) return { ok: false, seq: e.seq, detail: parsed.detail };
+      if (commandDigest(parsed.command) !== e.digest) {
         return { ok: false, seq: e.seq, detail: "digest mismatch" };
       }
       const applied = applyOps(p.current, e.ops, e.actor, e.approved, contract);

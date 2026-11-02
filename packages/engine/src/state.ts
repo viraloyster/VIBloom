@@ -128,6 +128,9 @@ function applyOp(s: State, op: Op, actor: Actor, approved: boolean, contract: Co
           pinned(s, n.spec.claim, "claim");
           if (n.results.length > 0) reject("invalid_input", "an experiment starts without results");
           break;
+        default:
+          // Unreachable after parsing; kept so the gate never trusts types alone.
+          return reject("invalid_input", "unknown node kind");
       }
       s.nodes.set(n.id, { ...structuredClone(n), revision: 1 });
       if (n.kind === "experiment") {
@@ -208,6 +211,8 @@ function applyOp(s: State, op: Op, actor: Actor, approved: boolean, contract: Co
       return reject("forbidden", "a claim version is immutable; propose a new version");
     case "set_verdict":
       return reject("forbidden", "verdicts are derived from evidence");
+    default:
+      return reject("invalid_input", "unknown operation");
   }
 }
 

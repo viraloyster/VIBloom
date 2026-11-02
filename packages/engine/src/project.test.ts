@@ -464,3 +464,60 @@ describe("gate fuzzing", () => {
     expect(accepted).toBeGreaterThan(150);
   });
 });
+
+describe("malformed input fuzzing", () => {
+  const rng = (seed: number) => () => (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
+
+  // One structural mutation somewhere in a JSON value.
+  function mutate(value: unknown, rand: () => number): unknown {
+    const copy = structuredClone(value) as Record<string, unknown>;
+    const holders: Record<string, unknown>[] = [];
+    const walk = (v: unknown) => {
+      if (v !== null && typeof v === "object") {
+        holders.push(v as Record<string, unknown>);
+        Object.values(v).forEach(walk);
+      }
+    };
+    walk(copy);
+    const target = holders[Math.floor(rand() * holders.length)]!;
+    const keys = Object.keys(target);
+    const key = keys[Math.floor(rand() * keys.length)] ?? "x";
+    const junk = [null, 0, -1, 1.5, "", "op", [], {}, true, "x".repeat(30_000)];
+    const r = rand();
+    if (r < 0.3) Reflect.deleteProperty(target, key);
+    else if (r < 0.5) target[`extra${String(Math.floor(rand() * 3))}`] = 1;
+    else target[key] = junk[Math.floor(rand() * junk.length)];
+    return copy;
+  }
+
+  it("rejects malformed commands without throwing or changing anything", () => {
+    const valid = [
+      { commandId: "m", actor: "engine", ops: [{ op: "record_result", result: result("rm") }] },
+      {
+        commandId: "m",
+        actor: "human",
+        ops: [{ op: "set_assumption", id: "qssa", expectedRevision: 1, change: { state: "off" } }],
+      },
+      {
+        commandId: "m",
+        actor: "agent",
+        ops: [{ op: "add_node", node: { ...nodes.qssa, id: "h", state: "hypothetical" } }],
+      },
+    ];
+    for (let seed = 1; seed <= 400; seed++) {
+      const rand = rng(seed);
+      const cmd = {
+        ...valid[seed % valid.length]!,
+        commandId: `m${String(seed)}`,
+        baseHead: p.state.head,
+      };
+      const before = snapshot(p);
+      const input = mutate(cmd, rand);
+      let r: ReturnType<Project["submit"]> | undefined;
+      expect(() => (r = p.submit(input, "t"))).not.toThrow();
+      if (r && !r.ok) expect(snapshot(p)).toBe(before);
+    }
+    const replayed = Project.replay(contract, p.events);
+    expect(replayed.ok && snapshot(replayed.project)).toBe(snapshot(p));
+  });
+});
