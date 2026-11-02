@@ -44,8 +44,14 @@ export default tseslint.config(
   { files: ["scripts/**/*.mjs"], languageOptions: { globals: globals.node } },
   ...boundaryRules,
   {
-    // Numerical kernels index arrays inside loops bounded by their lengths.
-    files: ["packages/chem/src/**/*.ts", "packages/search/src/**/*.ts"],
+    // Numerical kernels index arrays inside loops bounded by their lengths; tests
+    // index fixtures they built themselves.
+    files: [
+      "packages/chem/src/**/*.ts",
+      "packages/search/src/**/*.ts",
+      "packages/engine/src/hash.ts",
+      "**/*.test.ts",
+    ],
     rules: { "@typescript-eslint/no-non-null-assertion": "off" },
   },
 );
