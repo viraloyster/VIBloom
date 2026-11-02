@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VIBloom</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <button id="gear" class="gear" aria-label="Settings" title="Settings">&#9881;</button>
+      <aside id="settings" class="settings" hidden></aside>
+      <main class="workspace">
+        <section id="monitor" class="monitor" aria-label="Monitor"></section>
+        <section id="chat" class="chat" aria-label="Investigation"></section>
+      </main>
+      <section id="tree" class="tree" aria-label="Tree"></section>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

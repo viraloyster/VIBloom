@@ -24,7 +24,9 @@ conclusion linked to the assumptions it rests on. Read
 npm ci
 npm run check   # types, lint, format, text check
 npm test
+npm run build                 # the interface, served by the Worker
 npm run dev -w @vibloom/api   # Worker and Durable Object on a local workerd
+npm run dev                   # interface with hot reload, proxying /api
 ```
 
 CI runs the same commands. A change is done when both pass.

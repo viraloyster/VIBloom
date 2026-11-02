@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.base.json",
   "include": ["packages/*/src", "apps/*/src", "vitest.config.ts", "eslint.config.mjs"],
-  "exclude": ["apps/api"]
+  "exclude": ["apps/api", "apps/web"]
 }

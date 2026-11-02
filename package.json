@@ -11,12 +11,14 @@
   },
   "scripts": {
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run check:text",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p apps/api --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p apps/api --noEmit && tsc -p apps/web --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check:text": "node scripts/check-text.mjs",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build": "npm run build -w @vibloom/web",
+    "dev": "npm run dev -w @vibloom/web"
   },
   "prettier": {
     "printWidth": 100
