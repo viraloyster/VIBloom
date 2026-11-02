@@ -86,8 +86,12 @@ The roots of the tree are a graph with six node kinds:
 
 ## Evidence and dependencies
 
-- Each result declares all its necessary assumptions. If one is switched off,
-  refuted or changed, that result stops counting for the claim. Other current
+- Each result declares its necessary assumptions, and the engine captures the
+  revisions of its whole dependency closure (its basis) when the run is
+  prepared. The basis is never rebuilt later from the current graph. If a node
+  in the closure is switched off, the result is unsupported; if it changed, or
+  joined the closure after the run, the result is pending review. Either way it
+  stops counting for the claim. Other current
   results with independent assumptions still count, and current contrary
   evidence is never hidden by favourable evidence.
 - A claim's verdict is derived by the engine from current evidence. Models

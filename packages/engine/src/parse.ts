@@ -175,7 +175,14 @@ const region: Check = (v, path) => {
 };
 
 const result = shape(
-  { id: str, experiment: pin, claim: pin, assumptions: list(pin, 1000), execution },
+  {
+    id: str,
+    experiment: pin,
+    claim: pin,
+    assumptions: list(pin, 1000),
+    basis: list(pin, 5000),
+    execution,
+  },
   {
     observation: oneOf("oscillation", "steady_state", "indeterminate"),
     point: numbers,

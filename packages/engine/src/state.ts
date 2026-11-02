@@ -197,6 +197,22 @@ function applyOp(s: State, op: Op, actor: Actor, approved: boolean, contract: Co
       if (exp.kind === "experiment" && exp.spec.claim.id !== r.claim.id) {
         reject("invalid_input", "a result belongs to the claim of its experiment");
       }
+      const basis = new Map<string, number>();
+      for (const b of r.basis) {
+        const n = node(s, b.id);
+        if (basis.has(b.id)) reject("invalid_input", `basis lists ${b.id} twice`);
+        if (b.revision < 1 || b.revision > n.revision) {
+          reject("invalid_input", `basis pins a revision ${b.id} never had`);
+        }
+        basis.set(b.id, b.revision);
+      }
+      const declared = [r.experiment, r.claim, ...r.assumptions];
+      if (exp.kind === "experiment") declared.push(exp.spec.model);
+      for (const d of declared) {
+        if (basis.get(d.id) !== d.revision) {
+          reject("invalid_input", `basis must include ${d.id} at revision ${String(d.revision)}`);
+        }
+      }
       s.results.set(r.id, structuredClone(r));
       if (exp.kind === "experiment") exp.results.push(r.id);
       return;

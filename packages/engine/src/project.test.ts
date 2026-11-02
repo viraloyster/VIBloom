@@ -1,7 +1,7 @@
 import type { Contract, ResultRecord } from "@vibloom/contracts";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Actor, Command, NewNode, Op } from "./commands";
-import { claimView, resultView } from "./derive";
+import { basisFor, claimView, resultView } from "./derive";
 import { canonical } from "./hash";
 import { Project } from "./project";
 
@@ -98,18 +98,31 @@ const send = (actor: Actor, ops: Op[], extra: Partial<Command> = {}) =>
     `2026-11-02T00:00:${String(n).padStart(2, "0")}Z`,
   );
 
-const result = (id: string, over: Partial<ResultRecord> = {}): ResultRecord => ({
-  id,
-  experiment: { id: "exp", revision: 1 },
-  claim: { id: "claim", revision: 1 },
-  assumptions: [
-    { id: "qssa", revision: 1 },
-    { id: "q", revision: 1 },
-  ],
-  execution: { status: "completed" },
-  region: { status: "no_counterexample", evaluated: 64, inconclusive: 2 },
-  ...over,
-});
+// The basis is captured from the project as it is when the result is built.
+const result = (id: string, over: Partial<ResultRecord> = {}): ResultRecord => {
+  const r = {
+    id,
+    experiment: { id: "exp", revision: 1 },
+    claim: { id: "claim", revision: 1 },
+    assumptions: [
+      { id: "qssa", revision: 1 },
+      { id: "q", revision: 1 },
+    ],
+    execution: { status: "completed" as const },
+    region: { status: "no_counterexample" as const, evaluated: 64, inconclusive: 2 },
+    ...over,
+  };
+  return {
+    ...r,
+    basis:
+      over.basis ??
+      basisFor(
+        p.state,
+        "exp",
+        r.assumptions.map((a) => a.id),
+      ),
+  };
+};
 
 const snapshot = (q: Project) =>
   canonical({
@@ -206,11 +219,54 @@ describe("propagation", () => {
   });
 
   it("does not let a late result computed on an old revision count", () => {
+    const late = result("late");
     send("human", [
       { op: "set_assumption", id: "qssa", expectedRevision: 1, change: { scope: "narrower" } },
     ]);
-    expect(send("engine", [{ op: "record_result", result: result("late") }]).ok).toBe(true);
+    expect(send("engine", [{ op: "record_result", result: late }]).ok).toBe(true);
     expect(claimView(p.state, "claim")?.verdict).toEqual({ verdict: "unexplored" });
+  });
+
+  it("tracks transitive dependencies the run did not declare", () => {
+    send("human", [
+      { op: "add_edge", edge: { from: "qssa", to: "q", origin: "human", state: "confirmed" } },
+    ]);
+    const r = result("r1", { assumptions: [{ id: "qssa", revision: 1 }] });
+    expect(r.basis.map((b) => b.id)).toContain("q");
+    send("engine", [{ op: "record_result", result: r }]);
+    expect(resultView(p.state, r).currency).toBe("current");
+    send(
+      "human",
+      [{ op: "set_assumption", id: "q", expectedRevision: 1, change: { statement: "q = 8e-5" } }],
+      { approved: true },
+    );
+    expect(resultView(p.state, r)).toMatchObject({
+      currency: "pending_review",
+      reasons: ["q changed since revision 1"],
+    });
+  });
+
+  it("reviews results when a confirmed dependency is added after the run", () => {
+    const r = result("r1", { assumptions: [{ id: "qssa", revision: 1 }] });
+    send("engine", [{ op: "record_result", result: r }]);
+    send("human", [
+      { op: "add_edge", edge: { from: "qssa", to: "q", origin: "human", state: "confirmed" } },
+    ]);
+    expect(resultView(p.state, r)).toMatchObject({
+      currency: "pending_review",
+      reasons: ["q became a dependency after the run"],
+    });
+  });
+
+  it("rejects a result whose basis leaves out what it declares", () => {
+    const r = result("r1");
+    const before = snapshot(p);
+    const partial = { ...r, basis: r.basis.filter((b) => b.id !== "qssa") };
+    expect(send("engine", [{ op: "record_result", result: partial }])).toMatchObject({
+      ok: false,
+      code: "invalid_input",
+    });
+    expect(snapshot(p)).toBe(before);
   });
 
   it("warns, but does not invalidate, through hypothetical links", () => {

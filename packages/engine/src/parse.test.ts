@@ -94,6 +94,7 @@ describe("parseCommand", () => {
               experiment: { id: "e", revision: 1 },
               claim: { id: "c", revision: 1 },
               assumptions: [],
+              basis: [],
               execution: { status: "failed", reason: "bad_luck" },
             },
           },

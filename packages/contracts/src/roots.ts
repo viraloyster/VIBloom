@@ -104,6 +104,9 @@ export interface ResultRecord {
   experiment: Pin;
   claim: Pin;
   assumptions: Pin[];
+  // Revisions of the whole dependency closure, captured by code when the run
+  // was prepared. Never rebuilt later from the current graph.
+  basis: Pin[];
   execution: Execution;
   observation?: Observation;
   point?: Record<string, number>;

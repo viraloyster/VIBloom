@@ -41,32 +41,49 @@ function relation(r: ResultRecord): ResultView["relation"] {
   return r.outcome === "holds" ? "supports" : "none";
 }
 
+function roots(s: State, experiment: string, assumptions: readonly string[]) {
+  const ids = [experiment, ...assumptions];
+  const exp = s.nodes.get(experiment);
+  if (exp?.kind === "experiment") ids.push(exp.spec.model.id, exp.spec.claim.id);
+  return ids;
+}
+
+// What a run on this experiment needs right now, at current revisions. The
+// engine stores it in the result as its basis.
+export function basisFor(s: State, experiment: string, assumptions: readonly string[]): Pin[] {
+  const { needed } = closure(s, roots(s, experiment, assumptions));
+  return [...needed]
+    .flatMap((id) => {
+      const n = s.nodes.get(id);
+      return n ? [{ id, revision: n.revision }] : [];
+    })
+    .sort((a, b) => (a.id < b.id ? -1 : 1));
+}
+
 export function resultView(s: State, r: ResultRecord): ResultView {
-  const pins: Pin[] = [r.experiment, r.claim, ...r.assumptions];
-  const exp = s.nodes.get(r.experiment.id);
-  if (exp?.kind === "experiment") pins.push(exp.spec.model);
+  const basis = new Map(r.basis.map((p) => [p.id, p.revision]));
   const { needed, warnings } = closure(
     s,
-    pins.map((p) => p.id),
+    roots(
+      s,
+      r.experiment.id,
+      r.assumptions.map((a) => a.id),
+    ),
   );
 
-  const reasons: string[] = [];
-  let currency: Currency = "current";
+  const off: string[] = [];
+  const stale: string[] = [];
   for (const id of needed) {
     const n = s.nodes.get(id);
-    if (n?.kind === "assumption" && n.state === "off") {
-      currency = "unsupported";
-      reasons.push(`assumption ${id} is off`);
-    }
+    if (!n) continue;
+    if (n.kind === "assumption" && n.state === "off") off.push(`assumption ${id} is off`);
+    const used = basis.get(id);
+    if (used === undefined) stale.push(`${id} became a dependency after the run`);
+    else if (used !== n.revision) stale.push(`${id} changed since revision ${String(used)}`);
   }
-  for (const p of pins) {
-    const n = s.nodes.get(p.id);
-    if (n && n.revision !== p.revision && currency === "current") {
-      currency = "pending_review";
-      reasons.push(`${p.id} changed since revision ${String(p.revision)}`);
-    }
-  }
-  return { id: r.id, currency, relation: relation(r), reasons, warnings };
+  const currency: Currency =
+    off.length > 0 ? "unsupported" : stale.length > 0 ? "pending_review" : "current";
+  return { id: r.id, currency, relation: relation(r), reasons: [...off, ...stale], warnings };
 }
 
 export type Verdict =
