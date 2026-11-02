@@ -1,9 +1,9 @@
-import { Api, type StoredInvestigation } from "./api";
+import { Api, type ProjectView, type StoredInvestigation } from "./api";
 import { play } from "./choreography";
 import { mountChat } from "./chat";
 import { el } from "./dom";
 import { mountMonitor } from "./monitor";
-import { mountTree } from "./tree";
+import { mountTree, nodeState } from "./tree";
 
 const byId = (id: string) => {
   const e = document.getElementById(id);
@@ -14,7 +14,39 @@ const byId = (id: string) => {
 let project = new URLSearchParams(location.search).get("project") ?? "oregonator";
 const api = () => new Api(project);
 
-const tree = mountTree(byId("tree"));
+let current: ProjectView | undefined;
+
+// Run a person's change, then let the tree show what it propagated to.
+async function change(ops: unknown[]): Promise<string | undefined> {
+  const was = current;
+  if (!was) return "The project is still loading.";
+  const before = new Map(was.nodes.map((n) => [n.id, nodeState(was, n)]));
+  const r = await api().command(was.head, ops);
+  if (!r.ok) return r.code === "stale_base" ? "The map changed; try again." : r.detail;
+  await refresh();
+  const after = current;
+  if (!after) return undefined;
+  const changed = after.nodes.filter((n) => before.get(n.id) !== nodeState(after, n));
+  const broke = changed.filter((n) => ["broken", "off"].includes(nodeState(after, n)));
+  const rest = changed.filter((n) => !broke.includes(n));
+  if (broke.length > 0)
+    tree.pulse(
+      broke.map((n) => n.id),
+      "surprise",
+    );
+  if (rest.length > 0)
+    tree.pulse(
+      rest.map((n) => n.id),
+      "insight",
+    );
+  return undefined;
+}
+
+const tree = mountTree(byId("tree"), {
+  setAssumption: (id, revision, c) =>
+    change([{ op: "set_assumption", id, expectedRevision: revision, change: c }]),
+  confirmLink: (from, to) => change([{ op: "confirm_edge", from, to }]),
+});
 const monitor = mountMonitor(byId("monitor"));
 let stop: (() => void) | undefined;
 function replay(inv: StoredInvestigation) {
@@ -40,6 +72,7 @@ async function refresh() {
       .seed()
       .then(() => refresh());
   else {
+    current = view;
     lastNodes = view.nodes.map((n) => ({ id: n.id, title: n.title }));
     tree.render(view);
     monitor.render(view, investigations);

@@ -221,7 +221,18 @@ function placeLabel(taken: Box[], x: number, y: number, w: number): { dx: number
   return fallback;
 }
 
-export function mountTree(host: HTMLElement): TreeHandle {
+// What a person can do to a root from the map. Every action is a command
+// that goes through the write gate; the tree only shows what the engine derives.
+export interface RootActions {
+  setAssumption(
+    id: string,
+    revision: number,
+    change: { state?: "adopted" | "off"; statement?: string },
+  ): Promise<string | undefined>;
+  confirmLink(from: string, to: string): Promise<string | undefined>;
+}
+
+export function mountTree(host: HTMLElement, actions: RootActions): TreeHandle {
   const root = svg("svg", {
     viewBox: `0 0 ${String(W)} ${String(H)}`,
     class: "tree-svg",
@@ -533,7 +544,14 @@ export function mountTree(host: HTMLElement): TreeHandle {
       if (l?.support.status === "supported") rows.push(["backed cause", l.support.candidate]);
     }
     // Direct links as buttons, so the map can be walked root by root.
-    const hop = (ids: string[]) =>
+    const status = el("p", { class: "action-status", role: "status" });
+    const act = (run: () => Promise<string | undefined>) => {
+      status.textContent = "Recording...";
+      void run().then((error) => {
+        status.textContent = error ?? "";
+      });
+    };
+    const hop = (ids: string[], dir: "down" | "up") =>
       ids.length === 0
         ? el("span", { class: "hint" }, "nothing")
         : el(
@@ -545,18 +563,76 @@ export function mountTree(host: HTMLElement): TreeHandle {
               b.addEventListener("click", () => {
                 select(id);
               });
-              return b;
+              const [from, to] = dir === "down" ? [n.id, id] : [id, n.id];
+              const edge = v.edges.find((e) => e.from === from && e.to === to);
+              if (edge?.state !== "hypothetical") return b;
+              // A link the model proposed stays a warning until a person confirms it.
+              const confirm = el(
+                "button",
+                { type: "button", class: "hop confirm", title: "Confirm this dependency" },
+                "Confirm",
+              );
+              confirm.addEventListener("click", () => {
+                act(() => actions.confirmLink(from, to));
+              });
+              return el("span", { class: "hop-pair" }, b, confirm);
             }),
           );
+
+    const tools: HTMLElement[] = [];
+    if (n.kind === "assumption") {
+      if (n.protected) {
+        tools.push(
+          el("p", { class: "hint" }, "Protected: changing it needs a signed-in person's approval."),
+        );
+      } else {
+        const toggle = el(
+          "button",
+          { type: "button" },
+          n.state === "off" ? "Switch on" : "Switch off",
+        );
+        toggle.addEventListener("click", () => {
+          act(() =>
+            actions.setAssumption(n.id, n.revision, {
+              state: n.state === "off" ? "adopted" : "off",
+            }),
+          );
+        });
+        tools.push(toggle);
+        if (n.state === "hypothetical") {
+          const adopt = el("button", { type: "button" }, "Adopt");
+          adopt.addEventListener("click", () => {
+            act(() => actions.setAssumption(n.id, n.revision, { state: "adopted" }));
+          });
+          tools.push(adopt);
+        }
+        const edit = el("button", { type: "button" }, "Edit statement");
+        edit.addEventListener("click", () => {
+          const input = el("textarea", { rows: 3, maxlength: 2000 });
+          input.value = n.statement;
+          const save = el("button", { type: "button" }, "Save");
+          save.addEventListener("click", () => {
+            const statement = input.value.trim();
+            if (statement && statement !== n.statement) {
+              act(() => actions.setAssumption(n.id, n.revision, { statement }));
+            }
+          });
+          edit.replaceWith(el("div", { class: "edit" }, input, save));
+        });
+        tools.push(edit);
+      }
+    }
     const restsOn = v.edges.filter((e) => e.from === n.id).map((e) => e.to);
     const dependents = v.edges.filter((e) => e.to === n.id).map((e) => e.from);
     detail.replaceChildren(
       el("h3", {}, n.title),
       el("dl", {}, ...rows.flatMap(([k, val]) => [el("dt", {}, k), el("dd", {}, val)])),
+      el("div", { class: "tools" }, ...tools),
+      status,
       el("p", { class: "hop-title down" }, "Rests on"),
-      hop(restsOn),
+      hop(restsOn, "down"),
       el("p", { class: "hop-title up" }, "Rests on it"),
-      hop(dependents),
+      hop(dependents, "up"),
     );
   }
 

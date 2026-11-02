@@ -415,27 +415,35 @@ th {
   filter: url(#glow);
 }
 
-.pulses.sprout .spark,
-.pulses.sprout .trail {
+.pulses.sprout .spark {
   fill: #c9b6ff;
+}
+
+.pulses.sprout .trail {
   stroke: #c9b6ff;
 }
 
-.pulses.probe .spark,
-.pulses.probe .trail {
+.pulses.probe .spark {
   fill: #ffffff;
-  stroke: #e9e2ff;
 }
 
-.pulses.surprise .spark,
-.pulses.surprise .trail {
+.pulses.probe .trail {
+  stroke: #ffffff;
+}
+
+.pulses.surprise .spark {
   fill: var(--broken);
+}
+
+.pulses.surprise .trail {
   stroke: var(--broken);
 }
 
-.pulses.insight .spark,
-.pulses.insight .trail {
+.pulses.insight .spark {
   fill: var(--fragile);
+}
+
+.pulses.insight .trail {
   stroke: var(--fragile);
 }
 
@@ -586,6 +594,44 @@ th {
 .zoom button {
   background: rgb(18 14 34 / 85%);
   min-width: 34px;
+}
+
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.edit {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+}
+
+.edit textarea {
+  flex: 1;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.action-status {
+  min-height: 1em;
+  color: var(--fragile);
+  font-size: 12px;
+}
+
+.hop-pair {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.hop.confirm {
+  border-color: var(--hypothetical);
+  color: var(--hypothetical);
 }
 
 .hop-title {
@@ -793,4 +839,7 @@ th {
     border-left: none;
     border-top: 1px solid var(--line);
   }
+}
+.tools:empty {
+  display: none;
 }

@@ -50,6 +50,13 @@ export class Api {
   seed() {
     return call<{ ok: boolean } | Failure>(`${this.base}/seed`, { method: "POST" });
   }
+  // A person's command; the server sets the actor and approval.
+  command(baseHead: number, ops: unknown[]) {
+    return call<{ ok: true } | Failure>(`${this.base}/commands`, {
+      method: "POST",
+      body: JSON.stringify({ commandId: crypto.randomUUID(), baseHead, ops }),
+    });
+  }
   investigate(goal: string, focus?: string) {
     return call<{ ok: true; investigation: StoredInvestigation } | Failure>(
       `${this.base}/investigations`,
