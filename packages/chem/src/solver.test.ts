@@ -72,6 +72,31 @@ describe("solve reports failures explicitly", () => {
     expect(tr.stats.steps).toBe(3);
   });
 
+  it("never exceeds the evaluation budget", () => {
+    for (const maxRhsEvals of [1, 15, 16, 17, 100, 1000]) {
+      const tr = solve(decay, [1], 10, { rtol: 1e-8, atol: 1e-12, maxRhsEvals });
+      expect(tr.stats.rhsEvals).toBeLessThanOrEqual(maxRhsEvals);
+    }
+  });
+
+  it("rejects invalid options", () => {
+    const ok = { rtol: 1e-8, atol: 1e-12 };
+    const bad: Array<[number[], number, object]> = [
+      [[], 1, ok],
+      [[1], 0, ok],
+      [[1], Infinity, ok],
+      [[1], 1, { ...ok, rtol: 0 }],
+      [[1], 1, { ...ok, rtol: NaN }],
+      [[1], 1, { ...ok, atol: -1 }],
+      [[1], 1, { ...ok, hmax: 0 }],
+      [[1], 1, { ...ok, columns: 1 }],
+      [[1], 1, { ...ok, maxSteps: 1.5 }],
+    ];
+    for (const [y0, t1, opt] of bad) {
+      expect(() => solve(decay, y0, t1, { ...ok, ...opt })).toThrow(RangeError);
+    }
+  });
+
   it("rejects states outside the domain instead of clipping them", () => {
     const sys: OdeSystem = { ...decay, inDomain: ([y = 0]) => y >= 0.5 };
     const tr = solve(sys, [1], 2, { rtol: 1e-8, atol: 1e-12 });

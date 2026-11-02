@@ -50,7 +50,10 @@ export function solve(
   t1: number,
   opt: SolveOptions,
 ): Trajectory {
+  checkOptions(y0, t1, opt);
   const K = opt.columns ?? 6;
+  // Right-hand side evaluations of one macro step: f0 plus j - 1 per column j.
+  const stepCost = 1 + (K * (K - 1)) / 2;
   const n = y0.length;
   const hmax = opt.hmax ?? t1;
   const maxSteps = opt.maxSteps ?? 1_000_000;
@@ -76,7 +79,11 @@ export function solve(
   let accepted = 0;
 
   while (t < t1) {
-    if (stats.steps >= maxSteps || stats.rejected >= maxRejected || stats.rhsEvals >= maxRhsEvals) {
+    if (
+      stats.steps >= maxSteps ||
+      stats.rejected >= maxRejected ||
+      stats.rhsEvals + stepCost > maxRhsEvals
+    ) {
       return fail("budget_exhausted");
     }
     if (H < 1e-14 * Math.max(1, Math.abs(t))) {
@@ -161,6 +168,25 @@ export function solve(
     }
   }
   return out;
+}
+
+// Options come from code, not from users, so a bad value is a programming error.
+function checkOptions(y0: readonly number[], t1: number, opt: SolveOptions) {
+  const positive = (v: number | undefined) => v === undefined || (Number.isFinite(v) && v > 0);
+  const count = (v: number | undefined) => v === undefined || (Number.isInteger(v) && v >= 0);
+  if (y0.length === 0) throw new RangeError("y0 must not be empty");
+  if (!(Number.isFinite(t1) && t1 > 0)) throw new RangeError("t1 must be finite and positive");
+  if (!(Number.isFinite(opt.rtol) && opt.rtol > 0 && opt.rtol < 1)) {
+    throw new RangeError("rtol must be in (0, 1)");
+  }
+  if (!(Number.isFinite(opt.atol) && opt.atol >= 0)) throw new RangeError("atol must be >= 0");
+  if (!positive(opt.h0) || !positive(opt.hmax)) throw new RangeError("h0 and hmax must be > 0");
+  if (opt.columns !== undefined && !(Number.isInteger(opt.columns) && opt.columns >= 2)) {
+    throw new RangeError("columns must be an integer >= 2");
+  }
+  if (!count(opt.maxSteps) || !count(opt.maxRejected) || !count(opt.maxRhsEvals)) {
+    throw new RangeError("limits must be non-negative integers");
+  }
 }
 
 function stepFactor(err: number, K: number) {
