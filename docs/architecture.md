@@ -213,6 +213,12 @@ closed schema:
   against the budget: 8 turns and 14 calls per investigation.
 - Without the model the tools still work, but nothing formulates, chooses or
   revises: the investigation stops.
+- A new project starts with what the system provides: the executable model,
+  its parameters and the invariants. Claims and assumptions come from the
+  investigation.
+- Each investigation is stored with a recording of the model's replies, keyed
+  by request hash. Replaying it on a fresh project reproduces the same trace,
+  so an investigation can be reviewed without model access.
 
 ## Agent reasoning
 

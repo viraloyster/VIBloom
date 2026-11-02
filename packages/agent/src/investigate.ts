@@ -63,13 +63,15 @@ export interface TraceEntry {
   usage?: TurnReply["usage"];
 }
 
-export type Stop = "concluded" | "asked_researcher" | "budget_exhausted";
+export type Stop = "concluded" | "asked_researcher" | "budget_exhausted" | "provider_failed";
 
 export interface Investigation {
   goal: string;
   provider: string;
   stop: Stop;
   trace: TraceEntry[];
+  // Set when the model could not be reached; what was done so far is kept.
+  error?: string;
 }
 
 export const BUDGET = { turns: 8, calls: 14, escalations: 1 } as const;
@@ -224,7 +226,13 @@ export async function investigate(
       trace: structuredClone(trace),
     };
     if (feedback !== undefined) request.feedback = feedback;
-    const reply = await provider.decide(request);
+    let reply: TurnReply;
+    try {
+      reply = await provider.decide(request);
+    } catch (e) {
+      const error = e instanceof Error ? e.message : "unknown provider error";
+      return { goal, provider: provider.name, stop: "provider_failed", trace, error };
+    }
     const entry: TraceEntry = { turn, call, effort, accepted: false, head: state.head };
     if (reply.usage) entry.usage = reply.usage;
     trace.push(entry);

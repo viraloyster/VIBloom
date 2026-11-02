@@ -2,6 +2,14 @@
 // commands as "human", runs are recorded as "engine", and nothing in a request
 // body can choose its own actor.
 
+import {
+  investigate,
+  RecordingProvider,
+  type Investigation,
+  type Provider,
+  type Recording,
+  type Workspace,
+} from "@vibloom/agent";
 import { evaluatePoint, type InitialCondition } from "@vibloom/chem";
 import type { Claim, ExperimentNode, ResultRecord, RootNode } from "@vibloom/contracts";
 import {
@@ -14,12 +22,33 @@ import {
   type Event,
   type Submission,
 } from "@vibloom/engine";
-import { CONTRACT, SEED_OPS } from "./seed";
+import { BASE_OPS, CONTRACT } from "./seed";
 
 export interface EventStore {
   all(): Event[];
   append(event: Event): void;
 }
+
+export interface StoredInvestigation {
+  id: string;
+  started: string;
+  finished: string;
+  investigation: Investigation;
+  recording: Recording;
+}
+
+export interface InvestigationStore {
+  all(): StoredInvestigation[];
+  count(): number;
+  append(record: StoredInvestigation): void;
+}
+
+export type InvestigationOutcome =
+  | { ok: true; investigation: StoredInvestigation }
+  | { ok: false; code: "invalid_input" | "conflict" | "forbidden"; detail: string };
+
+// Each investigation spends model tokens; this caps a public demo project.
+export const MAX_INVESTIGATIONS = 20;
 
 export type Clock = () => string;
 
@@ -35,10 +64,17 @@ const isObj = (v: unknown): v is Record<string, unknown> =>
 export class ProjectService {
   private readonly store: EventStore;
   private readonly clock: Clock;
+  private readonly investigations: InvestigationStore;
+  private running = false;
   private project: Project;
 
-  constructor(store: EventStore, clock: Clock = () => new Date().toISOString()) {
+  constructor(
+    store: EventStore,
+    investigations: InvestigationStore,
+    clock: Clock = () => new Date().toISOString(),
+  ) {
     this.store = store;
+    this.investigations = investigations;
     this.clock = clock;
     const replayed = Project.replay(CONTRACT, store.all());
     if (!replayed.ok) throw new Error(`stored log fails replay at ${String(replayed.seq)}`);
@@ -57,8 +93,64 @@ export class ProjectService {
       actor: "human",
       approved: true,
       baseHead: this.project.head,
-      ops: SEED_OPS,
+      ops: BASE_OPS,
     });
+  }
+
+  // Runs one investigation to its end. One at a time per project.
+  async investigate(goal: unknown, provider: Provider): Promise<InvestigationOutcome> {
+    if (typeof goal !== "string" || goal.trim().length === 0 || goal.length > 2000) {
+      return { ok: false, code: "invalid_input", detail: "goal must be a short non-empty text" };
+    }
+    if (this.running) return { ok: false, code: "conflict", detail: "an investigation is running" };
+    if (this.investigations.count() >= MAX_INVESTIGATIONS) {
+      return {
+        ok: false,
+        code: "forbidden",
+        detail: "investigation limit reached for this project",
+      };
+    }
+    this.running = true;
+    const id = `inv-${String(this.investigations.count() + 1)}`;
+    let n = 0;
+    const workspace: Workspace = {
+      state: () => this.project.state,
+      submitAsAgent: (ops) =>
+        this.commit({
+          commandId: `${id}-${String(++n)}`,
+          actor: "agent",
+          baseHead: this.project.head,
+          ops,
+        }),
+      runPoint: (request) => {
+        const r = this.run(request);
+        if (!r.ok) return r;
+        const op = r.event.ops[0];
+        return op?.op === "record_result"
+          ? { ok: true, result: op.result }
+          : { ok: false, code: "invalid_input", detail: "the run recorded no result" };
+      },
+    };
+    const recorder = new RecordingProvider(provider);
+    const started = this.clock();
+    try {
+      const investigation = await investigate(goal, recorder, workspace);
+      const record: StoredInvestigation = {
+        id,
+        started,
+        finished: this.clock(),
+        investigation,
+        recording: recorder.recording,
+      };
+      this.investigations.append(record);
+      return { ok: true, investigation: record };
+    } finally {
+      this.running = false;
+    }
+  }
+
+  listInvestigations(): StoredInvestigation[] {
+    return this.investigations.all();
   }
 
   // A person's command. Only actor and approval are taken from the server.

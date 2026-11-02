@@ -1,5 +1,6 @@
-// The first project: does the two-variable Oregonator keep the period of the
-// three-variable model? See docs/science.md.
+// What the system provides to every project: the executable model, its
+// parameters and the invariants code enforces. Claims and assumptions come from
+// the investigation. See docs/science.md.
 
 import type { Contract } from "@vibloom/contracts";
 import type { Op } from "@vibloom/engine";
@@ -14,7 +15,7 @@ export const CONTRACT: Contract = {
   initialConditions: ["far", "mid", "near"],
 };
 
-export const SEED_OPS: Op[] = [
+export const BASE_OPS: Op[] = [
   {
     op: "add_node",
     node: {
@@ -25,18 +26,6 @@ export const SEED_OPS: Op[] = [
       scope: "both models",
       state: "adopted",
       protected: true,
-    },
-  },
-  {
-    op: "add_node",
-    node: {
-      kind: "assumption",
-      id: "quasi-steady-bromide",
-      title: "Bromide is quasi-steady",
-      statement: "eps_prime y' = 0, so y = s z / (q + x)",
-      scope: "two-variable model",
-      state: "adopted",
-      protected: false,
     },
   },
   {
@@ -61,6 +50,26 @@ export const SEED_OPS: Op[] = [
       equations: "eps x' = q y - x y + x (1 - x); eps_prime y' = -q y - x y + s z; z' = x - z",
       params: { q: 7.62e-5, eps: 9.9e-3 },
       scaling: "tau = d t",
+    },
+  },
+  {
+    op: "add_edge",
+    edge: { from: "oregonator", to: "field-parameters", origin: "human", state: "confirmed" },
+  },
+];
+
+// A hand-written investigation start, used by tests and as a fixture.
+export const DEMO_OPS: Op[] = [
+  {
+    op: "add_node",
+    node: {
+      kind: "assumption",
+      id: "quasi-steady-bromide",
+      title: "Bromide is quasi-steady",
+      statement: "eps_prime y' = 0, so y = s z / (q + x)",
+      scope: "two-variable model",
+      state: "adopted",
+      protected: false,
     },
   },
   {
@@ -90,7 +99,7 @@ export const SEED_OPS: Op[] = [
     op: "add_node",
     node: {
       kind: "experiment",
-      id: "point-runs",
+      id: "reduction-keeps-period-runs",
       title: "Point runs of both models",
       spec: {
         model: { id: "oregonator", revision: 1 },
@@ -101,10 +110,6 @@ export const SEED_OPS: Op[] = [
       },
       results: [],
     },
-  },
-  {
-    op: "add_edge",
-    edge: { from: "oregonator", to: "field-parameters", origin: "human", state: "confirmed" },
   },
   {
     op: "add_edge",

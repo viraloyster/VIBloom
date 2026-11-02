@@ -1,9 +1,17 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Event, Submission } from "@vibloom/engine";
-import { ProjectService, type EventStore } from "./service";
+import { MetaProvider } from "@vibloom/agent";
+import {
+  ProjectService,
+  type EventStore,
+  type InvestigationStore,
+  type StoredInvestigation,
+} from "./service";
 
 interface Env {
   PROJECT: DurableObjectNamespace<ProjectObject>;
+  // Worker secret; locally in .dev.vars. Never logged or recorded.
+  MODEL_API_KEY?: string;
 }
 
 const MAX_BODY = 1_000_000;
@@ -25,13 +33,38 @@ class SqlEventStore implements EventStore {
   }
 }
 
+class SqlInvestigationStore implements InvestigationStore {
+  private readonly sql: SqlStorage;
+  constructor(sql: SqlStorage) {
+    this.sql = sql;
+    sql.exec(
+      "CREATE TABLE IF NOT EXISTS investigations (n INTEGER PRIMARY KEY, body TEXT NOT NULL)",
+    );
+  }
+  all(): StoredInvestigation[] {
+    return this.sql
+      .exec<{ body: string }>("SELECT body FROM investigations ORDER BY n")
+      .toArray()
+      .map((r) => JSON.parse(r.body) as StoredInvestigation);
+  }
+  count(): number {
+    return this.sql.exec<{ c: number }>("SELECT COUNT(*) AS c FROM investigations").one().c;
+  }
+  append(r: StoredInvestigation) {
+    this.sql.exec("INSERT INTO investigations (body) VALUES (?)", JSON.stringify(r));
+  }
+}
+
 // One object per project: its single thread serialises every write.
 export class ProjectObject extends DurableObject<Env> {
   private readonly service: ProjectService;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.service = new ProjectService(new SqlEventStore(ctx.storage.sql));
+    this.service = new ProjectService(
+      new SqlEventStore(ctx.storage.sql),
+      new SqlInvestigationStore(ctx.storage.sql),
+    );
   }
 
   seed() {
@@ -53,6 +86,19 @@ export class ProjectObject extends DurableObject<Env> {
   verify() {
     return this.service.verify();
   }
+  async investigate(body: unknown) {
+    const goal =
+      typeof body === "object" && body !== null ? (body as { goal?: unknown }).goal : undefined;
+    if (!this.env.MODEL_API_KEY) {
+      return { ok: false as const, code: "unavailable", detail: "the model is not configured" };
+    }
+    return this.service.investigate(goal, new MetaProvider({ apiKey: this.env.MODEL_API_KEY }));
+  }
+  // As JSON text: recorded model replies are arbitrary JSON, which RPC types
+  // cannot describe.
+  investigations(): string {
+    return JSON.stringify(this.service.listInvestigations());
+  }
 }
 
 const json = (body: unknown, status = 200) =>
@@ -69,9 +115,11 @@ const STATUS: Record<string, number> = {
   stale_base: 409,
   conflict: 409,
   duplicate_command: 409,
+  unavailable: 503,
 };
 
-const answer = (r: Submission) => json(r, r.ok ? 200 : (STATUS[r.code] ?? 400));
+const answer = (r: Submission | { ok: boolean; code?: string }) =>
+  json(r, r.ok ? 200 : (STATUS[r.code ?? ""] ?? 400));
 
 async function readBody(request: Request): Promise<unknown> {
   const text = await request.text();
@@ -101,6 +149,12 @@ export default {
           return answer(await project.command(await readBody(request)));
         case "POST /runs":
           return answer(await project.run(await readBody(request)));
+        case "POST /investigations":
+          return answer(await project.investigate(await readBody(request)));
+        case "GET /investigations":
+          return new Response(await project.investigations(), {
+            headers: { "content-type": "application/json; charset=utf-8" },
+          });
         default:
           return json({ ok: false, code: "not_found", detail: "no such route" }, 404);
       }

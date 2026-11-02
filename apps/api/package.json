@@ -8,6 +8,7 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
+    "@vibloom/agent": "0.1.0",
     "@vibloom/chem": "0.1.0",
     "@vibloom/contracts": "0.1.0",
     "@vibloom/engine": "0.1.0"
