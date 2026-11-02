@@ -6,7 +6,7 @@ const run = {
   experiment: "point-runs",
   point: { s: 1.8 },
   distinguishes: ["the reduction fails only near onset", "it fails everywhere"],
-  prediction: { outcome: "holds", because: "far from onset the bromide relaxes fast" },
+  prediction: { outcome: "holds", because: "far from onset the bromide relaxes fast", assumes: [] },
   rationale: "test the middle of the region first",
   cites: ["reduction-keeps-period"],
 };

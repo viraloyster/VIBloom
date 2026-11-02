@@ -1,5 +1,5 @@
 import type { Contract, ResultRecord } from "@vibloom/contracts";
-import { basisFor, Project, type Op } from "@vibloom/engine";
+import { basisFor, lessonView, Project, type Op } from "@vibloom/engine";
 import { describe, expect, it } from "vitest";
 import { BUDGET, investigate, type Workspace } from "./investigate";
 import { ScriptedProvider } from "./scripted";
@@ -118,21 +118,54 @@ const run = (experiment: string, s: number, outcome: "holds" | "fails", extra = 
   experiment,
   point: { s },
   distinguishes: ["fails only near onset", "fails everywhere"],
-  prediction: { outcome, because: "reasoned from the timescales" },
+  prediction: { outcome, because: "reasoned from the timescales", assumes: [] },
   rationale: "probe the region",
   cites: [experiment],
   ...extra,
 });
 
 describe("investigate", () => {
-  it("formulates, predicts, is surprised, revises and concludes", async () => {
+  it("anticipates, diagnoses a surprise, tests it, revises and concludes", async () => {
     const ws = workspace();
     const provider = new ScriptedProvider([
       formulate,
       run("keeps-period-runs", 1.0, "holds"),
       run("keeps-period-runs", 2.0, "holds"),
-      // Moving on without explaining the surprise is refused.
+      // Moving on without diagnosing the surprise is refused.
       run("keeps-period-runs", 0.8, "holds"),
+      {
+        action: "diagnose",
+        lesson: {
+          id: "why-high-s-fails",
+          title: "Why the reduction fails at s = 2",
+          statement: "The reduced model missed the period at s = 2.0",
+          scope: "keeps-period, eps_prime = 1e-4, far",
+        },
+        candidates: [
+          {
+            id: "drift-grows-with-s",
+            explanation: "the bromide lag grows with s, so lower s still agrees",
+            suspects: ["fast-bromide"],
+            expect: { outcome: "holds" },
+          },
+          {
+            id: "broken-above-onset",
+            explanation: "the reduction fails everywhere past the first point",
+            suspects: ["fast-bromide"],
+            expect: { outcome: "fails" },
+          },
+        ],
+        test: { experiment: "keeps-period-runs", point: { s: 1.4 } },
+        rationale: "one run at s = 1.4 separates the two",
+        cites: ["r2", "fast-bromide"],
+      },
+      run("keeps-period-runs", 1.4, "holds", {
+        prediction: {
+          outcome: "holds",
+          because: "the lag is small at s = 1.4",
+          assumes: ["fast-bromide"],
+        },
+      }),
       {
         action: "revise",
         previous: { id: "keeps-period", revision: 1 },
@@ -143,22 +176,21 @@ describe("investigate", () => {
           predicate: predicate(1.5),
         },
         changes: "region narrowed from [0.6, 2.3] to [0.6, 1.5]",
-        surprise: "the drift grows with s; the slow bromide matters at high s",
         rationale: "separate the regime where the reduction works",
-        cites: ["r2"],
+        cites: ["why-high-s-fails"],
       },
-      // The point that shaped the revision cannot test it.
+      // A point that shaped the revision cannot test it.
       run("keeps-period-low-s-runs", 1.0, "holds"),
       run("keeps-period-low-s-runs", 1.2, "holds"),
       {
         action: "conclude",
         claim: "keeps-period-low-s",
         verdict: "no_counterexample",
-        results: ["r3"],
+        results: ["r4"],
         limits: "one point, s = 1.2, far initial condition",
         interpretation: "Version 1 failed at s = 2.0; the narrowed claim held at a fresh point.",
         rationale: "enough to report",
-        cites: ["r2", "r3"],
+        cites: ["r2", "r4"],
       },
     ]);
 
@@ -170,6 +202,8 @@ describe("investigate", () => {
       true,
       false,
       true,
+      true,
+      true,
       false,
       true,
       true,
@@ -180,22 +214,33 @@ describe("investigate", () => {
       "surprise",
       null,
       null,
+      "as_predicted",
+      null,
       null,
       "as_predicted",
       null,
     ]);
-    expect(inv.trace[3]?.rejection).toMatch(/explain the surprise/);
-    expect(inv.trace[5]?.rejection).toMatch(/fresh points/);
+    expect(inv.trace[3]?.rejection).toMatch(/diagnose it/);
+    expect(inv.trace[7]?.rejection).toMatch(/fresh points/);
     // The model saw why it was refused.
-    expect(provider.requests[4]?.feedback).toMatch(/explain the surprise/);
+    expect(provider.requests[4]?.feedback).toMatch(/diagnose it/);
 
     const s = ws.project.state;
-    expect(s.nodes.get("fast-bromide")).toMatchObject({ state: "hypothetical" });
+    // The lesson records the numbers of the surprise and is backed by the test.
+    expect(s.nodes.get("why-high-s-fails")).toMatchObject({
+      about: "r2",
+      discrepancy: { predicted: "holds", observed: "fails" },
+      test: { experiment: "keeps-period-runs", point: { s: 1.4, eps_prime: 1e-4 } },
+    });
+    expect(lessonView(s, "why-high-s-fails")?.support).toEqual({
+      status: "supported",
+      candidate: "drift-grows-with-s",
+      result: "r3",
+    });
     expect(s.edges).toContainEqual(
       expect.objectContaining({
-        from: "keeps-period",
+        from: "why-high-s-fails",
         to: "fast-bromide",
-        origin: "model",
         state: "hypothetical",
       }),
     );
@@ -205,6 +250,53 @@ describe("investigate", () => {
     });
     // The refutation of version 1 is still on record.
     expect(s.results.get("r2")).toMatchObject({ outcome: "fails" });
+  });
+
+  it("lets a diagnosis stay open when information is missing", async () => {
+    const ws = workspace();
+    const inv = await investigate(
+      "q",
+      new ScriptedProvider([
+        formulate,
+        run("keeps-period-runs", 2.0, "holds"),
+        {
+          action: "diagnose",
+          lesson: { id: "open-question", title: "Unclear", statement: "s", scope: "s" },
+          candidates: [],
+          insufficient: "no slower bromide model to compare against",
+          rationale: "no test available",
+          cites: [],
+        },
+        {
+          action: "ask_researcher",
+          question: "Is a slower bromide model available?",
+          rationale: "r",
+          cites: [],
+        },
+      ]),
+      ws,
+    );
+    expect(inv.stop).toBe("asked_researcher");
+    expect(lessonView(ws.project.state, "open-question")?.support).toEqual({
+      status: "open",
+      why: "no slower bromide model to compare against",
+    });
+  });
+
+  it("refuses predictions that rest on unknown assumptions", async () => {
+    const ws = workspace();
+    const inv = await investigate(
+      "q",
+      new ScriptedProvider([
+        formulate,
+        run("keeps-period-runs", 1.0, "holds", {
+          prediction: { outcome: "holds", because: "b", assumes: ["oregonator"] },
+        }),
+        { action: "ask_researcher", question: "q", rationale: "r", cites: [] },
+      ]),
+      ws,
+    );
+    expect(inv.trace[1]?.rejection).toMatch(/not an assumption/);
   });
 
   it("refuses citations to things that do not exist", async () => {

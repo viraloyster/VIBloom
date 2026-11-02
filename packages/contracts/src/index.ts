@@ -61,6 +61,7 @@ export type {
   Decision,
   DecisionAction,
   Prediction,
+  ProposedCandidate,
   ProposedAssumption,
   ProposedClaim,
   ProposedDependency,

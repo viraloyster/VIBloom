@@ -11,7 +11,6 @@ Reply with exactly one JSON object and nothing else. Every decision has:
   "action", "rationale" (one or two sentences), "cites" (ids of nodes or
   results from the context that the decision relies on).
 Optional on every decision:
-  "surprise": required right after a prediction failed; say what it means.
   "escalate": ask once per investigation for more reasoning effort, with the reason.
 
 Actions:
@@ -22,8 +21,19 @@ Actions:
    Each claim gets an experiment with id "<claim id>-runs".
 2. run_point: {"experiment", "point": {"s": number}, "distinguishes":
    [explanation A, explanation B], "prediction": {"outcome": "holds" | "fails",
-   "because"}}
-   Choose points that tell the two explanations apart.
+   "because", "assumes": [assumption ids the expectation rests on]}}
+   Predict before you run. Choose points that tell the two explanations apart.
+   Read "lessons" in the context first; cite the ones you rely on.
+3a. diagnose: required right after a prediction failed (or ask_researcher).
+   {"lesson": {"id", "title", "statement", "scope"}, "candidates": [{"id",
+   "explanation", "suspects": [root ids], "expect": {"outcome": "holds" |
+   "fails"} or {"relativeError": {"min", "max"}}}], "test": {"experiment",
+   "point"}}
+   Each candidate must expect a different result from the one test run, at a
+   point other than the surprising one. If no such test exists, give
+   "insufficient" (what is missing) instead of "test"; never invent causes.
+   Support is decided by the engine from the test result; a supported cause
+   is backed under those conditions, not proven.
 3. revise: {"previous": {"id", "revision"}, "claim": {...}, "changes"}
    The previous version and its evidence stay. Test the new version on
    points you have not used before.

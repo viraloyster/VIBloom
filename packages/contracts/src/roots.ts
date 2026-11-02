@@ -1,4 +1,4 @@
-// The roots map: what every conclusion rests on. Six node kinds; results and
+// The roots map: what every conclusion rests on. Seven node kinds; results and
 // citations are immutable records referenced from nodes and edges.
 
 import type { Claim as Predicate } from "./claims";

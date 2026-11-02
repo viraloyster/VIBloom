@@ -22,6 +22,7 @@ import {
   basisFor,
   canonical,
   claimView,
+  lessonView,
   Project,
   resultView,
   sha256,
@@ -321,6 +322,9 @@ export class ProjectService {
       experiments: [...s.nodes.values()].filter(
         (n): n is ExperimentNode => n.kind === "experiment",
       ),
+      lessons: [...s.nodes.values()]
+        .filter((n) => n.kind === "lesson")
+        .map((n) => lessonView(s, n.id)),
     };
   }
 

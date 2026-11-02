@@ -1,13 +1,14 @@
 // What the investigating model may decide on each turn. Every decision is
 // structured, cites what it relies on, and is validated before it acts.
 
-import type { Pin } from "./roots";
+import type { Expectation, Pin } from "./roots";
 import {
   any,
   check,
   fail,
   isObj,
   list,
+  num,
   numbers,
   oneOf,
   pin,
@@ -20,6 +21,15 @@ import {
 export interface Prediction {
   outcome: "holds" | "fails";
   because: string;
+  // Assumptions the expectation rests on, so a surprise points at them.
+  assumes: string[];
+}
+
+export interface ProposedCandidate {
+  id: string;
+  explanation: string;
+  suspects: string[];
+  expect: Expectation;
 }
 
 export interface ProposedClaim {
@@ -46,8 +56,6 @@ interface Base {
   rationale: string;
   // Node and result ids the decision relies on.
   cites: string[];
-  // Required right after a prediction failed: what the surprise means.
-  surprise?: string;
   // Asks for more reasoning effort on the next turn, with the reason.
   escalate?: string;
 }
@@ -71,6 +79,15 @@ export type Decision = Base &
         distinguishes: [string, string];
         prediction: Prediction;
       }
+    | {
+        // Required after a surprise: candidate causes and one run that tells
+        // them apart, or what information is missing.
+        action: "diagnose";
+        lesson: { id: string; title: string; statement: string; scope: string };
+        candidates: ProposedCandidate[];
+        test?: { experiment: string; point: Record<string, number> };
+        insufficient?: string;
+      }
     | { action: "revise"; previous: Pin; claim: ProposedClaim; changes: string }
     | { action: "ask_researcher"; question: string }
     | {
@@ -93,9 +110,17 @@ const id: Check = (v, path) => {
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(v as string)) fail(path, "must be a lowercase slug");
 };
 
+const expectation: Check = (v, path) => {
+  if (isObj(v) && "outcome" in v) {
+    shape({ outcome: oneOf("holds", "fails") })(v, path);
+    return;
+  }
+  shape({ relativeError: shape({ min: num, max: num }) })(v, path);
+};
+
 const claim = shape({ id, title: str, text: str, predicate: any });
 const base = { rationale: str, cites: list(str, 50) };
-const extra = { surprise: str, escalate: str };
+const extra = { escalate: str };
 
 const decision: Check = (v, path) => {
   if (!isObj(v)) return fail(path, "must be an object");
@@ -125,13 +150,31 @@ const decision: Check = (v, path) => {
             list(str, 2)(x, p);
             if ((x as unknown[]).length !== 2) fail(p, "must name exactly two explanations");
           },
-          prediction: shape({ outcome: oneOf("holds", "fails"), because: str }),
+          prediction: shape({
+            outcome: oneOf("holds", "fails"),
+            because: str,
+            assumes: list(id, 20),
+          }),
         },
         { ...extra, ic: str },
       )(v, path);
       return;
     case "revise":
       shape({ ...base, action: any, previous: pin, claim, changes: str }, extra)(v, path);
+      return;
+    case "diagnose":
+      shape(
+        {
+          ...base,
+          action: any,
+          lesson: shape({ id, title: str, statement: str, scope: str }),
+          candidates: list(
+            shape({ id, explanation: str, suspects: list(id, 20), expect: expectation }),
+            4,
+          ),
+        },
+        { ...extra, test: shape({ experiment: id, point: numbers }), insufficient: str },
+      )(v, path);
       return;
     case "ask_researcher":
       shape({ ...base, action: any, question: str }, extra)(v, path);

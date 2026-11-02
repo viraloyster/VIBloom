@@ -198,9 +198,91 @@ describe("investigation", () => {
       experiment: "bromide-free-period-runs",
       point: { s: 1 },
       distinguishes: ["the reduction is exact enough", "slow bromide shifts the period"],
-      prediction: { outcome: "holds", because: "eps_prime is two orders below eps" },
+      prediction: {
+        outcome: "holds",
+        because: "eps_prime is two orders below eps",
+        assumes: ["fast-bromide"],
+      },
       rationale: "start in the middle of the region",
       cites: ["bromide-free-period"],
+    },
+    {
+      action: "diagnose",
+      lesson: {
+        id: "why-period-drifts",
+        title: "Why the reduced period drifts",
+        statement: "At s = 1 the reduced model runs about 19% faster than the full model",
+        scope: "eps_prime = 1e-4, far initial condition",
+      },
+      candidates: [
+        {
+          id: "slow-bromide",
+          explanation: "bromide is not fast enough at eps_prime = 1e-4, at any s",
+          suspects: ["fast-bromide"],
+          expect: { relativeError: { min: 0.1, max: 0.3 } },
+        },
+        {
+          id: "local-to-s-1",
+          explanation: "something specific to s = 1; elsewhere the models agree",
+          suspects: ["fast-bromide"],
+          expect: { relativeError: { min: -0.05, max: 0.05 } },
+        },
+      ],
+      test: { experiment: "bromide-free-period-runs", point: { s: 1.6 } },
+      rationale: "a second s separates a global lag from a local effect",
+      cites: ["fast-bromide"],
+    },
+    {
+      action: "run_point",
+      experiment: "bromide-free-period-runs",
+      point: { s: 1.6 },
+      distinguishes: ["global bromide lag", "local effect at s = 1"],
+      prediction: {
+        outcome: "fails",
+        because: "if the lag is global the drift persists",
+        assumes: ["fast-bromide"],
+      },
+      rationale: "run the discriminating test",
+      cites: ["why-period-drifts"],
+    },
+    {
+      action: "diagnose",
+      lesson: {
+        id: "why-period-drifts",
+        title: "Why the reduced period drifts",
+        statement: "At s = 1 the reduced model runs about 19% faster than the full model",
+        scope: "eps_prime = 1e-4, far initial condition",
+      },
+      candidates: [
+        {
+          id: "slow-bromide",
+          explanation: "bromide is not fast enough at eps_prime = 1e-4, at any s",
+          suspects: ["fast-bromide"],
+          expect: { relativeError: { min: 0.1, max: 0.3 } },
+        },
+        {
+          id: "local-to-s-1",
+          explanation: "something specific to s = 1; elsewhere the models agree",
+          suspects: ["fast-bromide"],
+          expect: { relativeError: { min: -0.05, max: 0.05 } },
+        },
+      ],
+      test: { experiment: "bromide-free-period-runs", point: { s: 1.6 } },
+      rationale: "a second s separates a global lag from a local effect",
+      cites: ["fast-bromide"],
+    },
+    {
+      action: "run_point",
+      experiment: "bromide-free-period-runs",
+      point: { s: 1.6 },
+      distinguishes: ["global bromide lag", "local effect at s = 1"],
+      prediction: {
+        outcome: "fails",
+        because: "if the lag is global the drift persists",
+        assumes: ["fast-bromide"],
+      },
+      rationale: "run the discriminating test",
+      cites: ["why-period-drifts"],
     },
     (r: TurnRequest) => {
       const results = (JSON.parse(r.context) as { results: { id: string }[] }).results;
@@ -211,7 +293,6 @@ describe("investigation", () => {
         results: results.map((x) => x.id),
         limits: "one point, s = 1, far initial condition, robust protocol",
         interpretation: "The periods differ by about 19%, beyond the 5% tolerance.",
-        surprise: "eps_prime = 1e-4 is not small enough; the bromide lag lengthens the cycle",
         rationale: "one counterexample refutes a region claim",
         cites: results.map((x) => x.id),
       };
@@ -232,6 +313,10 @@ describe("investigation", () => {
       observed: "fails",
       verdict: "surprise",
     });
+    expect(trace[3]?.prediction?.verdict).toBe("as_predicted");
+    // The lesson is backed by the discriminating run, with real numbers.
+    const lesson = svc.view().lessons.find((l) => l?.id === "why-period-drifts");
+    expect(lesson?.support).toMatchObject({ status: "supported", candidate: "slow-bromide" });
     expect(svc.view().claims.find((c) => c?.claim === "bromide-free-period")?.verdict.verdict).toBe(
       "refuted",
     );

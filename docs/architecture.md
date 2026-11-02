@@ -221,13 +221,14 @@ Muse Spark conducts the investigation; the code is the laboratory and its rules.
 Each turn the model returns one structured decision, validated against a
 closed schema:
 
-| Decision         | The model provides                                                               | The code                                                                                                                                        |
-| ---------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `formulate`      | Executable claims, proposed assumptions and dependencies, ambiguities it noticed | Validates the claims; adds assumptions and links as hypothetical                                                                                |
-| `run_point`      | The point, the two explanations it tells apart, and a prediction made beforehand | Runs the experiment, records the result, scores the prediction                                                                                  |
-| `revise`         | A new claim version linked to the previous one, and what changed                 | Keeps the previous version and its evidence; requires fresh points                                                                              |
-| `ask_researcher` | A question only the researcher can answer                                        | Stops and waits                                                                                                                                 |
-| `conclude`       | The claim, its verdict, the results used, limits and an interpretation           | Checks the verdict against the derived one and that the results are current results of that claim; the interpretation stays the model's reading |
+| Decision         | The model provides                                                                                                                              | The code                                                                                                                                        |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `formulate`      | Executable claims, proposed assumptions and dependencies, ambiguities it noticed                                                                | Validates the claims; adds assumptions and links as hypothetical                                                                                |
+| `run_point`      | The point, the two explanations it tells apart, and a prediction made beforehand                                                                | Runs the experiment, records the result, scores the prediction                                                                                  |
+| `diagnose`       | After a surprise: candidate causes, the roots each blames, and one test run where they expect different results; or what information is missing | Writes a lesson with the numbers of the discrepancy and every premise; derives its support from the test                                        |
+| `revise`         | A new claim version linked to the previous one, and what changed                                                                                | Keeps the previous version and its evidence; requires fresh points                                                                              |
+| `ask_researcher` | A question only the researcher can answer                                                                                                       | Stops and waits                                                                                                                                 |
+| `conclude`       | The claim, its verdict, the results used, limits and an interpretation                                                                          | Checks the verdict against the derived one and that the results are current results of that claim; the interpretation stays the model's reading |
 
 - Every decision cites the nodes and results it relies on; citations to
   anything outside the project are refused. A citation identifies evidence; it
@@ -236,7 +237,8 @@ closed schema:
   period, and the relative period error with its tolerance.
 - A claim is tested only under its own initial condition. Fresh points are
   compared as the engine stores them, with the claim's fixed values filled in.
-- A prediction that fails is a surprise. The next decision must explain it
+- A prediction names the assumptions it rests on. A prediction that fails is
+  a surprise, and the next decision must diagnose it (or ask the researcher)
   before the investigation moves on.
 - A refused decision is returned to the model with the reason and counts
   against the budget: 8 turns and 14 calls per investigation.

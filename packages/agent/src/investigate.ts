@@ -5,10 +5,13 @@
 import {
   parseDecision,
   type Decision,
+  type LessonNode,
+  type Pin,
   type PointOutcome,
   type ResultRecord,
 } from "@vibloom/contracts";
 import {
+  basisFor,
   canonical,
   claimView,
   resultView,
@@ -110,6 +113,70 @@ function soleModel(s: State) {
 }
 
 const experimentFor = (claim: string) => `${claim}-runs`;
+
+interface Surprise {
+  result: string;
+  predicted: "holds" | "fails";
+}
+
+// The lesson's premises: everything the surprising run and the test rest on,
+// at current revisions.
+function lessonBasis(s: State, about: ResultRecord, testExperiment?: string): Pin[] {
+  const pins = new Map<string, number>();
+  const add = (list: Pin[]) => {
+    for (const b of list) pins.set(b.id, b.revision);
+  };
+  add(
+    basisFor(
+      s,
+      about.experiment.id,
+      about.assumptions.map((a) => a.id),
+    ),
+  );
+  for (const b of about.basis) pins.set(b.id, s.nodes.get(b.id)?.revision ?? b.revision);
+  if (testExperiment) add(basisFor(s, testExperiment, []));
+  return [...pins].map(([id, revision]) => ({ id, revision }));
+}
+
+function diagnoseOps(
+  s: State,
+  d: Extract<Decision, { action: "diagnose" }>,
+  surprise: Surprise,
+): Op[] {
+  const about = s.results.get(surprise.result);
+  if (!about) return refuse(`result ${surprise.result} is gone`);
+  const discrepancy: LessonNode["discrepancy"] = { predicted: surprise.predicted };
+  if (about.outcome) discrepancy.observed = about.outcome;
+  if (about.comparison) {
+    discrepancy.relativeError = about.comparison.relativeError;
+    discrepancy.tolerance = about.comparison.tolerance;
+  }
+  const node: Omit<LessonNode, "revision"> = {
+    kind: "lesson",
+    ...d.lesson,
+    about: about.id,
+    discrepancy,
+    candidates: d.candidates,
+    basis: lessonBasis(s, about, d.test?.experiment),
+  };
+  if (d.test) {
+    const exp = s.nodes.get(d.test.experiment);
+    const claimId = exp?.kind === "experiment" ? exp.spec.claim.id : "";
+    node.test = {
+      experiment: d.test.experiment,
+      point: JSON.parse(effectivePoint(s, claimId, d.test.point)) as Record<string, number>,
+    };
+  }
+  if (d.insufficient) node.insufficient = d.insufficient;
+  const suspects = new Set(d.candidates.flatMap((c) => c.suspects));
+  return [
+    { op: "add_node", node },
+    ...[...suspects].map((to): Op => ({
+      op: "add_edge",
+      edge: { from: d.lesson.id, to, origin: "model", state: "hypothetical" },
+    })),
+  ];
+}
 
 function formulateOps(s: State, d: Extract<Decision, { action: "formulate" }>): Op[] {
   const model = soleModel(s);
@@ -251,7 +318,7 @@ export async function investigate(
   let effort: Effort = "low";
   let escalations = 0;
   let feedback: string | undefined;
-  let pendingSurprise = false;
+  let surprise: Surprise | undefined;
   let turn = 1;
 
   for (let call = 1; call <= BUDGET.calls && turn <= BUDGET.turns; call++) {
@@ -285,8 +352,8 @@ export async function investigate(
 
     try {
       checkCites(state, d);
-      if (pendingSurprise && d.surprise === undefined) {
-        refuse("the last prediction failed; explain the surprise before moving on");
+      if (surprise && d.action !== "diagnose" && d.action !== "ask_researcher") {
+        refuse("the last prediction failed; diagnose it before moving on");
       }
       if (d.escalate !== undefined && escalations >= BUDGET.escalations) {
         refuse("reasoning effort can be raised only once per investigation");
@@ -300,7 +367,16 @@ export async function investigate(
           if (!r.ok) refuse(`${r.code}: ${r.detail}`);
           break;
         }
+        case "diagnose": {
+          if (!surprise) return refuse("there is no failed prediction to diagnose");
+          const r = workspace.submitAsAgent(diagnoseOps(state, d, surprise));
+          if (!r.ok) refuse(`${r.code}: ${r.detail}`);
+          break;
+        }
         case "run_point": {
+          for (const a of d.prediction.assumes) {
+            if (state.nodes.get(a)?.kind !== "assumption") refuse(`${a} is not an assumption`);
+          }
           const exp = state.nodes.get(d.experiment);
           if (exp?.kind === "experiment") {
             const key = effectivePoint(state, exp.spec.claim.id, d.point);
@@ -320,7 +396,10 @@ export async function investigate(
             entry.result = r.result.id;
             entry.prediction = { predicted: d.prediction.outcome, verdict };
             if (r.result.outcome) entry.prediction.observed = r.result.outcome;
-            pendingSurprise = verdict === "surprise";
+            surprise =
+              verdict === "surprise"
+                ? { result: r.result.id, predicted: d.prediction.outcome }
+                : undefined;
           }
           break;
         }
@@ -339,7 +418,7 @@ export async function investigate(
     entry.accepted = true;
     entry.head = workspace.state().head;
     feedback = undefined;
-    if (d.action !== "run_point") pendingSurprise = pendingSurprise && d.surprise === undefined;
+    if (d.action === "diagnose") surprise = undefined;
     if (d.escalate !== undefined) {
       escalations++;
       effort = "medium";
