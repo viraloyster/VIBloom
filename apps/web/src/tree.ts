@@ -176,9 +176,9 @@ function placeLabel(taken: Box[], x: number, y: number, w: number): { dx: number
       return t;
     }
   }
-  const t = tries[0]!;
-  taken.push({ x: x + t.dx, y: y + t.dy, w, h: 24 });
-  return t;
+  const fallback = { dx: 18, dy: -12 };
+  taken.push({ x: x + fallback.dx, y: y + fallback.dy, w, h: 24 });
+  return fallback;
 }
 
 export function mountTree(host: HTMLElement): TreeHandle {
@@ -363,8 +363,8 @@ export function mountTree(host: HTMLElement): TreeHandle {
     // New roots grow out from where they attach; nothing else re-animates.
     for (const path of root.querySelectorAll<SVGPathElement>("path.sprout")) {
       const len = path.getTotalLength();
-      path.style.strokeDasharray = `${len.toFixed(1)}`;
-      path.style.strokeDashoffset = `${len.toFixed(1)}`;
+      path.style.strokeDasharray = len.toFixed(1);
+      path.style.strokeDashoffset = len.toFixed(1);
       path.getBoundingClientRect();
       requestAnimationFrame(() => {
         path.style.transition = "stroke-dashoffset 1.6s cubic-bezier(.2,.7,.2,1)";

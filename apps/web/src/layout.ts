@@ -83,8 +83,7 @@ export function layout(nodes: RootNode[], edges: DependsOn[]): Layout {
     depth.set(id, 0);
     return id;
   });
-  for (let i = 0; i < queue.length; i++) {
-    const id = queue[i]!;
+  for (const id of queue) {
     for (const d of deps.get(id) ?? []) {
       if (depth.has(d)) continue;
       parent.set(d, id);
@@ -190,8 +189,9 @@ export function filaments(
     for (let i = 0; i < n; i++)
       grow(ex, ey, angle + (r() - 0.5) * 1.3, len * (0.55 + r() * 0.2), gen - 1);
   };
-  const n = 3 + Math.floor(r() * 3);
-  for (let i = 0; i < n; i++)
-    grow(x, y, Math.PI / 2 + (r() - 0.5) * 2.2, 26 + r() * 24, generations);
+  const n = 3 + Math.floor(r() * 4);
+  for (let i = 0; i < n; i++) {
+    grow(x, y, Math.PI / 2 + (r() - 0.5) * 2.6, (30 + r() * 34) * reach, generations);
+  }
   return out;
 }
