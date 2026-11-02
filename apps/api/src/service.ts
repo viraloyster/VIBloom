@@ -108,9 +108,19 @@ export class ProjectService {
   }
 
   // Runs one investigation to its end. One at a time per project.
-  async investigate(goal: unknown, provider: Provider): Promise<InvestigationOutcome> {
+  async investigate(
+    goal: unknown,
+    provider: Provider,
+    focus?: unknown,
+  ): Promise<InvestigationOutcome> {
     if (typeof goal !== "string" || goal.trim().length === 0 || goal.length > 2000) {
       return { ok: false, code: "invalid_input", detail: "goal must be a short non-empty text" };
+    }
+    if (
+      focus !== undefined &&
+      (typeof focus !== "string" || !this.project.state.nodes.has(focus))
+    ) {
+      return { ok: false, code: "invalid_input", detail: "focus must be a root of this project" };
     }
     if (this.running) return { ok: false, code: "conflict", detail: "an investigation is running" };
     if (this.investigations.count() >= MAX_INVESTIGATIONS) {
@@ -138,7 +148,12 @@ export class ProjectService {
     const recorder = new RecordingProvider(provider);
     const started = this.clock();
     try {
-      const investigation = await investigate(goal, recorder, workspace);
+      const investigation = await investigate(
+        goal,
+        recorder,
+        workspace,
+        typeof focus === "string" ? focus : undefined,
+      );
       const record: StoredInvestigation = {
         id,
         started,

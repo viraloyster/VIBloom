@@ -328,6 +328,8 @@ export async function investigate(
   goal: string,
   provider: Provider,
   workspace: Workspace,
+  // A root the researcher selected; its full context is given every turn.
+  focus?: string,
 ): Promise<Investigation> {
   const trace: TraceEntry[] = [];
   let effort: Effort = "low";
@@ -342,7 +344,7 @@ export async function investigate(
       goal,
       turn,
       effort,
-      context: renderContext(state),
+      context: renderContext(state, focus),
       trace: structuredClone(trace),
     };
     if (feedback !== undefined) request.feedback = feedback;

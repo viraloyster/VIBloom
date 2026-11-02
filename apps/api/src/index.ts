@@ -119,8 +119,10 @@ export class ProjectObject extends DurableObject<Env> {
     return this.service.verify();
   }
   async investigate(body: unknown) {
-    const goal =
-      typeof body === "object" && body !== null ? (body as { goal?: unknown }).goal : undefined;
+    const { goal, focus } =
+      typeof body === "object" && body !== null
+        ? (body as { goal?: unknown; focus?: unknown })
+        : { goal: undefined, focus: undefined };
     if (!this.env.MODEL_API_KEY) {
       return { ok: false as const, code: "unavailable", detail: "the model is not configured" };
     }
@@ -134,6 +136,7 @@ export class ProjectObject extends DurableObject<Env> {
       const r = await this.service.investigate(
         goal,
         new MetaProvider({ apiKey: this.env.MODEL_API_KEY }),
+        focus,
       );
       // A failed call may still have been billed, so it counts too.
       const inv = r.ok ? r.investigation.investigation : undefined;

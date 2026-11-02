@@ -24,13 +24,17 @@ async function refresh() {
       .seed()
       .then(() => refresh());
   else {
+    lastNodes = view.nodes.map((n) => ({ id: n.id, title: n.title }));
     tree.render(view);
     monitor.render(view, investigations);
     chat.render(investigations);
   }
 }
 
-tree.onSelect(() => undefined);
+let lastNodes: { id: string; title: string }[] = [];
+tree.onSelect((id) => {
+  chat.setFocus(lastNodes.find((n) => n.id === id));
+});
 
 // Settings stay out of the way behind the gear.
 const settings = byId("settings");

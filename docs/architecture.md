@@ -245,6 +245,11 @@ closed schema:
   against the budget: 8 turns and 14 calls per investigation.
 - Without the model the tools still work, but nothing formulates, chooses or
   revises: the investigation stops.
+- Selecting a root in the tree makes it the focus of the next investigation:
+  the model receives the node, what it rests on, what rests on it, and the
+  results and lessons that touch it. The tree and the context the model reads
+  are two views of the same nodes and revisions; the model never chooses where
+  or how anything is drawn.
 - A new project starts with what the system provides: the executable model,
   its parameters and the invariants. Claims and assumptions come from the
   investigation.

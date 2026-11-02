@@ -307,6 +307,20 @@ th {
   font: inherit;
 }
 
+.focus-chip {
+  margin-top: 6px;
+  align-self: flex-start;
+  padding: 3px 10px;
+  border: 1px solid #2ee6ff;
+  border-radius: 999px;
+  color: #2ee6ff;
+  font-size: 12px;
+}
+
+.focus-chip[hidden] {
+  display: none;
+}
+
 .status {
   color: var(--muted);
   margin: 4px 0 0;

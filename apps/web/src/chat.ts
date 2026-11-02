@@ -46,6 +46,8 @@ export function mountChat(host: HTMLElement, api: () => Api, refresh: () => Prom
   });
   const send = el("button", { type: "submit" }, "Investigate");
   const status = el("p", { class: "status", role: "status" });
+  const chip = el("div", { class: "focus-chip", hidden: true });
+  let focus: { id: string; title: string } | undefined;
   const form = el("form", { class: "ask" }, input, send);
   const toggle = el("button", { type: "button", class: "expand" }, "Expand");
   toggle.addEventListener("click", () => {
@@ -56,6 +58,7 @@ export function mountChat(host: HTMLElement, api: () => Api, refresh: () => Prom
     el("div", { class: "chat-head" }, el("h2", {}, "Investigation"), toggle),
     log,
     status,
+    chip,
     form,
   );
 
@@ -67,7 +70,7 @@ export function mountChat(host: HTMLElement, api: () => Api, refresh: () => Prom
     status.textContent =
       "Muse Spark is investigating. Each move is checked and run by the engine...";
     void api()
-      .investigate(goal)
+      .investigate(goal, focus?.id)
       .then(async (r) => {
         status.textContent = r.ok
           ? `Finished: ${r.investigation.investigation.stop.replace("_", " ")}`
@@ -84,6 +87,12 @@ export function mountChat(host: HTMLElement, api: () => Api, refresh: () => Prom
   });
 
   return {
+    // The root selected in the tree becomes the focus of the next question.
+    setFocus(next: { id: string; title: string } | undefined) {
+      focus = next;
+      chip.hidden = !next;
+      chip.textContent = next ? `Focus: ${next.title}` : "";
+    },
     render(investigations: StoredInvestigation[]) {
       log.replaceChildren(
         ...investigations.flatMap((inv) => [

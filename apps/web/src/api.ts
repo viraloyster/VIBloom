@@ -50,10 +50,10 @@ export class Api {
   seed() {
     return call<{ ok: boolean } | Failure>(`${this.base}/seed`, { method: "POST" });
   }
-  investigate(goal: string) {
+  investigate(goal: string, focus?: string) {
     return call<{ ok: true; investigation: StoredInvestigation } | Failure>(
       `${this.base}/investigations`,
-      { method: "POST", body: JSON.stringify({ goal }) },
+      { method: "POST", body: JSON.stringify({ goal, focus }) },
     );
   }
 }

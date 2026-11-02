@@ -362,6 +362,25 @@ describe("investigation", () => {
     expect(again.view().lastHash).not.toBe("");
   });
 
+  it("gives the model the full context of a selected focus", async () => {
+    const svc = new ProjectService(new MemoryStore(), new MemoryInvestigations(), clock);
+    svc.seed();
+    demo(svc);
+    const provider = new ScriptedProvider([
+      { action: "ask_researcher", question: "Which tolerance?", rationale: "r", cites: [] },
+    ]);
+    await svc.investigate("Why is this assumption here?", provider, "quasi-steady-bromide");
+    const ctx = JSON.parse(provider.requests[0]?.context ?? "{}") as {
+      focus?: { id: string; supports: string[]; restsOn: string[] };
+    };
+    expect(ctx.focus?.id).toBe("quasi-steady-bromide");
+    expect(ctx.focus?.supports).toContain("reduction-keeps-period");
+    expect(await svc.investigate("q", new ScriptedProvider([]), "nowhere")).toMatchObject({
+      ok: false,
+      code: "invalid_input",
+    });
+  });
+
   it("refuses an empty goal", async () => {
     const svc = new ProjectService(new MemoryStore(), new MemoryInvestigations(), clock);
     svc.seed();
