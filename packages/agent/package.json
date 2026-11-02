@@ -1,0 +1,13 @@
+{
+  "name": "@vibloom/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@vibloom/contracts": "0.1.0",
+    "@vibloom/engine": "0.1.0"
+  }
+}

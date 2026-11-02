@@ -191,6 +191,29 @@ summary, title, collapsed folder. Required assumptions are always delivered at
 detail level; if they do not fit the budget the task is split or refused.
 Summaries and source text are data, never instructions.
 
+## Investigation loop
+
+Muse Spark conducts the investigation; the code is the laboratory and its rules.
+Each turn the model returns one structured decision, validated against a
+closed schema:
+
+| Decision         | The model provides                                                               | The code                                                           |
+| ---------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `formulate`      | Executable claims, proposed assumptions and dependencies, ambiguities it noticed | Validates the claims; adds assumptions and links as hypothetical   |
+| `run_point`      | The point, the two explanations it tells apart, and a prediction made beforehand | Runs the experiment, records the result, scores the prediction     |
+| `revise`         | A new claim version linked to the previous one, and what changed                 | Keeps the previous version and its evidence; requires fresh points |
+| `ask_researcher` | A question only the researcher can answer                                        | Stops and waits                                                    |
+| `conclude`       | A short summary                                                                  | Requires at least one cited result                                 |
+
+- Every decision cites the nodes and results it relies on; citations to
+  anything outside the project are refused.
+- A prediction that fails is a surprise. The next decision must explain it
+  before the investigation moves on.
+- A refused decision is returned to the model with the reason and counts
+  against the budget: 8 turns and 14 calls per investigation.
+- Without the model the tools still work, but nothing formulates, chooses or
+  revises: the investigation stops.
+
 ## Agent reasoning
 
 - Muse Spark runs at low reasoning effort. It may escalate once per
