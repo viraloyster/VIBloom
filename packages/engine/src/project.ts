@@ -4,7 +4,7 @@ import type { Contract } from "@vibloom/contracts";
 import type { Actor, Command, Op, Rejection } from "./commands";
 import { canonical, sha256 } from "./hash";
 import { parseCommand } from "./parse";
-import { applyOps, emptyState, type State } from "./state";
+import { applyOps, cloneState, emptyState, type State } from "./state";
 
 export interface Event {
   seq: number;
@@ -29,21 +29,30 @@ function eventHash(e: Omit<Event, "hash">) {
 }
 
 export class Project {
-  readonly contract: Contract;
+  private readonly rules: Contract;
   private current: State = emptyState();
   private readonly log: Event[] = [];
   private readonly commands = new Map<string, Event>();
 
   constructor(contract: Contract) {
-    this.contract = contract;
+    this.rules = structuredClone(contract);
   }
 
+  get contract(): Contract {
+    return structuredClone(this.rules);
+  }
+
+  // Callers get copies: changing them cannot bypass the gate.
   get state(): State {
-    return this.current;
+    return cloneState(this.current);
   }
 
-  get events(): readonly Event[] {
-    return this.log;
+  get head(): number {
+    return this.current.head;
+  }
+
+  get events(): Event[] {
+    return structuredClone(this.log);
   }
 
   // Takes unknown input: commands arrive as JSON from the API and the agent.
@@ -55,7 +64,7 @@ export class Project {
     const seen = this.commands.get(command.commandId);
     if (seen) {
       return seen.digest === digest
-        ? { ok: true, event: seen, duplicate: true }
+        ? { ok: true, event: structuredClone(seen), duplicate: true }
         : { ok: false, code: "duplicate_command", detail: "command id reused with other content" };
     }
     if (command.baseHead !== this.current.head) {
@@ -66,7 +75,7 @@ export class Project {
       };
     }
     const approved = command.approved ?? false;
-    const applied = applyOps(this.current, command.ops, command.actor, approved, this.contract);
+    const applied = applyOps(this.current, command.ops, command.actor, approved, this.rules);
     if (!applied.ok) return applied;
 
     const body = {
@@ -85,7 +94,7 @@ export class Project {
     this.current = applied.state;
     this.log.push(event);
     this.commands.set(command.commandId, event);
-    return { ok: true, event, duplicate: false };
+    return { ok: true, event: structuredClone(event), duplicate: false };
   }
 
   // Rebuilds a project from its log, checking the chain and every op again.
@@ -116,8 +125,9 @@ export class Project {
       applied.state.head = e.seq;
       applied.state.lastHash = hash;
       p.current = applied.state;
-      p.log.push(structuredClone(e));
-      p.commands.set(e.commandId, e);
+      const own = structuredClone(e);
+      p.log.push(own);
+      p.commands.set(e.commandId, own);
     }
     return { ok: true, project: p };
   }

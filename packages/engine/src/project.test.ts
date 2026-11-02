@@ -521,3 +521,31 @@ describe("malformed input fuzzing", () => {
     expect(replayed.ok && snapshot(replayed.project)).toBe(snapshot(p));
   });
 });
+
+describe("encapsulation", () => {
+  it("does not let callers change the canon through returned objects", () => {
+    const sent = send("engine", [{ op: "record_result", result: result("r1") }]);
+    const before = snapshot(p);
+    const trusted = p.state.lastHash;
+
+    const s = p.state;
+    (s.nodes.get("qssa") as { state: string }).state = "off";
+    s.results.get("r1")!.assumptions.length = 0;
+    s.edges.length = 0;
+    p.events[0]!.ops.length = 0;
+    if (sent.ok) sent.event.ops.length = 0;
+    (p.contract.models as Record<string, unknown>).full = undefined;
+
+    expect(snapshot(p)).toBe(before);
+    expect(p.state.lastHash).toBe(trusted);
+    const replayed = Project.replay(contract, p.events);
+    expect(replayed.ok && snapshot(replayed.project)).toBe(before);
+  });
+
+  it("keeps its own copy of the contract", () => {
+    const own = structuredClone(contract);
+    const q = new Project(own);
+    own.initialConditions.length = 0;
+    expect(q.contract.initialConditions).toEqual(["far", "near"]);
+  });
+});

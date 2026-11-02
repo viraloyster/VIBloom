@@ -30,7 +30,7 @@ export function cloneState(s: State): State {
     lastHash: s.lastHash,
     nodes: new Map([...s.nodes].map(([k, v]) => [k, structuredClone(v)])),
     edges: s.edges.map((e) => ({ ...e })),
-    results: new Map(s.results),
+    results: new Map([...s.results].map(([k, v]) => [k, structuredClone(v)])),
   };
 }
 
