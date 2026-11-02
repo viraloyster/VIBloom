@@ -225,6 +225,14 @@ closed schema:
   by request hash. Replaying it on a fresh project reproduces the same trace,
   so an investigation can be reviewed without model access.
 
+## Model spending
+
+A deployment-wide object holds a daily allowance of model calls
+(`MAX_DAILY_MODEL_CALLS`). Each investigation reserves its worst case, 14 calls,
+before it starts and returns what it did not use, so new project names cannot
+multiply the spend. Every call has a timeout, and token usage is stored with
+the investigation even when it does not conclude.
+
 ## Agent reasoning
 
 - Muse Spark runs at low reasoning effort. It may escalate once per

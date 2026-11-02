@@ -3,8 +3,12 @@
   "main": "src/index.ts",
   "compatibility_date": "2025-10-01",
   "durable_objects": {
-    "bindings": [{ "name": "PROJECT", "class_name": "ProjectObject" }],
+    "bindings": [
+      { "name": "PROJECT", "class_name": "ProjectObject" },
+      { "name": "BUDGET", "class_name": "BudgetObject" },
+    ],
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ProjectObject"] }],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ProjectObject", "BudgetObject"] }],
+  "vars": { "MAX_DAILY_MODEL_CALLS": "200" },
   "limits": { "cpu_ms": 30000 },
 }

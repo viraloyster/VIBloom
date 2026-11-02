@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Event, Submission } from "@vibloom/engine";
-import { MetaProvider } from "@vibloom/agent";
+import { BUDGET, MetaProvider } from "@vibloom/agent";
+import { DailyBudget } from "./budget";
 import {
   ProjectService,
   type EventStore,
@@ -10,6 +11,8 @@ import {
 
 interface Env {
   PROJECT: DurableObjectNamespace<ProjectObject>;
+  BUDGET: DurableObjectNamespace<BudgetObject>;
+  MAX_DAILY_MODEL_CALLS?: string;
   // Worker secret; locally in .dev.vars. Never logged or recorded.
   MODEL_API_KEY?: string;
 }
@@ -55,6 +58,35 @@ class SqlInvestigationStore implements InvestigationStore {
   }
 }
 
+// The single object that holds the deployment-wide model allowance.
+export class BudgetObject extends DurableObject<Env> {
+  private readonly budget: DailyBudget;
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    const sql = ctx.storage.sql;
+    sql.exec("CREATE TABLE IF NOT EXISTS days (day TEXT PRIMARY KEY, calls INTEGER NOT NULL)");
+    this.budget = new DailyBudget(
+      {
+        used: (day) =>
+          sql.exec<{ calls: number }>("SELECT calls FROM days WHERE day = ?", day).toArray()[0]
+            ?.calls ?? 0,
+        set: (day, calls) => {
+          sql.exec("INSERT OR REPLACE INTO days (day, calls) VALUES (?, ?)", day, calls);
+        },
+      },
+      Number(env.MAX_DAILY_MODEL_CALLS ?? "200"),
+    );
+  }
+
+  reserve(day: string, calls: number) {
+    return this.budget.reserve(day, calls);
+  }
+  release(day: string, calls: number) {
+    this.budget.release(day, calls);
+  }
+}
+
 // One object per project: its single thread serialises every write.
 export class ProjectObject extends DurableObject<Env> {
   private readonly service: ProjectService;
@@ -92,7 +124,24 @@ export class ProjectObject extends DurableObject<Env> {
     if (!this.env.MODEL_API_KEY) {
       return { ok: false as const, code: "unavailable", detail: "the model is not configured" };
     }
-    return this.service.investigate(goal, new MetaProvider({ apiKey: this.env.MODEL_API_KEY }));
+    const budget = this.env.BUDGET.get(this.env.BUDGET.idFromName("global"));
+    const day = new Date().toISOString().slice(0, 10);
+    if (!(await budget.reserve(day, BUDGET.calls))) {
+      return { ok: false as const, code: "budget", detail: "today's model budget is spent" };
+    }
+    let calls = 0;
+    try {
+      const r = await this.service.investigate(
+        goal,
+        new MetaProvider({ apiKey: this.env.MODEL_API_KEY }),
+      );
+      // A failed call may still have been billed, so it counts too.
+      const inv = r.ok ? r.investigation.investigation : undefined;
+      calls = inv ? inv.trace.length + (inv.stop === "provider_failed" ? 1 : 0) : 0;
+      return r;
+    } finally {
+      await budget.release(day, BUDGET.calls - calls);
+    }
   }
   // As JSON text: recorded model replies are arbitrary JSON, which RPC types
   // cannot describe.
@@ -116,6 +165,7 @@ const STATUS: Record<string, number> = {
   conflict: 409,
   duplicate_command: 409,
   unavailable: 503,
+  budget: 429,
 };
 
 const answer = (r: Submission | { ok: boolean; code?: string }) =>

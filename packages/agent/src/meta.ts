@@ -10,6 +10,7 @@ export interface MetaConfig {
   baseUrl?: string;
   model?: string;
   maxOutputTokens?: number;
+  timeoutMs?: number;
   fetch?: typeof fetch;
 }
 
@@ -116,6 +117,7 @@ export class MetaProvider implements Provider {
       method: "POST",
       headers,
       body: JSON.stringify(this.body(r, turn)),
+      signal: AbortSignal.timeout(this.cfg.timeoutMs ?? 35_000),
     });
     const body = (await res.json().catch(() => ({}))) as ResponseBody;
     if (!res.ok) {
