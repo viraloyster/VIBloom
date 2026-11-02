@@ -73,12 +73,14 @@ point).
 (Oregonator-2) and 7160 (Oregonator-3) in its fast time, and the onset of the
 Oregonator-3 limit cycle at `s` slightly above 0.50047.
 
-Reproduction during the design phase (to be committed with the solver):
+Reproduction. The periods are checked by `npm test`
+(`packages/chem/src/classify.test.ts`); the onset was measured during the design
+phase and is not automated yet.
 
 | Quantity                     | [1]           | This work                  | Difference        |
 | ---------------------------- | ------------- | -------------------------- | ----------------- |
 | Oregonator-2 period, `s = 1` | 7110          | 7087                       | -0.3%             |
-| Oregonator-3 period, `s = 1` | 7160          | 7149                       | -0.2%             |
+| Oregonator-3 period, `s = 1` | 7160          | 7150                       | -0.1%             |
 | Oregonator-3 onset           | above 0.50047 | between 0.50055 and 0.5006 | about 1e-4 in `s` |
 
 The onset lies in a canard explosion, which is exponentially sensitive. Linear

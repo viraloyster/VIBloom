@@ -6,7 +6,8 @@
     "atol": 1e-14,
     "python": "3.13.17",
     "numpy": "2.5.4",
-    "scipy": "1.18.1"
+    "scipy": "1.18.1",
+    "oregonator_period": "mean gap between peaks of log10 x with prominence 0.5, second half of the horizon, sampled every 1e-3"
   },
   "problems": [
     {
@@ -77,6 +78,86 @@
           -0.8356886816811341
         ]
       ]
+    }
+  ],
+  "oregonator": [
+    {
+      "model": "reduced",
+      "params": {
+        "q": 7.62e-05,
+        "eps": 0.0099,
+        "eps_prime": 1.98e-05,
+        "s": 1.0
+      },
+      "ic": "far",
+      "horizon": 300.0,
+      "peaks": 20,
+      "period": 7.447000000035558
+    },
+    {
+      "model": "full",
+      "params": {
+        "q": 7.62e-05,
+        "eps": 0.0099,
+        "eps_prime": 1.98e-05,
+        "s": 1.0
+      },
+      "ic": "far",
+      "horizon": 300.0,
+      "peaks": 19,
+      "period": 7.736500000036941
+    },
+    {
+      "model": "full",
+      "params": {
+        "q": 7.62e-05,
+        "eps": 0.0099,
+        "eps_prime": 0.0001,
+        "s": 1.0
+      },
+      "ic": "far",
+      "horizon": 300.0,
+      "peaks": 17,
+      "period": 8.84675000004224
+    },
+    {
+      "model": "full",
+      "params": {
+        "q": 7.62e-05,
+        "eps": 0.0099,
+        "eps_prime": 0.0001,
+        "s": 2.2
+      },
+      "ic": "far",
+      "horizon": 300.0,
+      "peaks": 16,
+      "period": 9.541066666712226
+    },
+    {
+      "model": "reduced",
+      "params": {
+        "q": 7.62e-05,
+        "eps": 0.001,
+        "eps_prime": 2e-06,
+        "s": 1.0
+      },
+      "ic": "far",
+      "horizon": 300.0,
+      "peaks": 21,
+      "period": 7.087150000033842
+    },
+    {
+      "model": "full",
+      "params": {
+        "q": 7.62e-05,
+        "eps": 0.001,
+        "eps_prime": 2e-06,
+        "s": 1.0
+      },
+      "ic": "far",
+      "horizon": 300.0,
+      "peaks": 21,
+      "period": 7.148900000034134
     }
   ]
 }
