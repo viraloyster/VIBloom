@@ -13,3 +13,5 @@ export {
 } from "./oregonator";
 export type { Classification, ModelPoint, Reading, Run } from "./classify";
 export { DETECTION, PROTOCOL, classify, peaks, read, runOnce } from "./classify";
+export type { PointEvaluation } from "./evaluate";
+export { evaluatePoint } from "./evaluate";
