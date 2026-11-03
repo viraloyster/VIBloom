@@ -21,6 +21,11 @@ export interface Event {
 
 export type Submission = { ok: true; event: Event; duplicate: boolean } | Rejection;
 
+export type Prepared =
+  | { ok: true; event: Event; duplicate: true }
+  | { ok: true; event: Event; duplicate: false; publish: () => void }
+  | Rejection;
+
 const commandDigest = (c: Command) =>
   sha256(canonical({ actor: c.actor, approved: c.approved ?? false, ops: c.ops }));
 
@@ -57,6 +62,16 @@ export class Project {
 
   // Takes unknown input: commands arrive as JSON from the API and the agent.
   submit(input: unknown, at: string): Submission {
+    const prepared = this.prepare(input, at);
+    if (!prepared.ok || prepared.duplicate) return prepared;
+    prepared.publish();
+    return { ok: true, event: prepared.event, duplicate: false };
+  }
+
+  // Validates a command and builds its event without changing the project.
+  // The caller persists the event first and then publishes it, so memory never
+  // runs ahead of storage.
+  prepare(input: unknown, at: string): Prepared {
     const parsed = parseCommand(input);
     if (!parsed.ok) return { ok: false, code: "invalid_input", detail: parsed.detail };
     const command = parsed.command;
@@ -89,12 +104,21 @@ export class Project {
       prevHash: this.current.lastHash,
     };
     const event: Event = { ...body, hash: eventHash(body) };
-    applied.state.head = event.seq;
-    applied.state.lastHash = event.hash;
-    this.current = applied.state;
-    this.log.push(event);
-    this.commands.set(command.commandId, event);
-    return { ok: true, event: structuredClone(event), duplicate: false };
+    const next = applied.state;
+    next.head = event.seq;
+    next.lastHash = event.hash;
+    const base = this.current;
+    return {
+      ok: true,
+      event: structuredClone(event),
+      duplicate: false,
+      publish: () => {
+        if (this.current !== base) throw new Error("the project changed after prepare");
+        this.current = next;
+        this.log.push(event);
+        this.commands.set(command.commandId, event);
+      },
+    };
   }
 
   // Rebuilds a project from its log, checking the chain and every op again.

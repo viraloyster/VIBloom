@@ -176,8 +176,9 @@ commands as `human`, runs are recorded as `engine`, the agent writes as
 `agent`; nothing in a request body can choose its own actor or approve itself.
 Commands are validated at runtime against a closed schema before the gate.
 
-Writes are atomic: validate, check the base revision, then append the event,
-update the projection and record the command id in one transaction. A command
+Writes are atomic: validate and check the base revision, store the event, and
+only then publish the new projection and command id in memory. If storing
+fails, nothing changes and the same command can be retried. A command
 built on an old revision is rejected. Repeating a command id with the same
 content returns the original result; with different content it is rejected.
 

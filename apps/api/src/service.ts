@@ -97,10 +97,17 @@ export class ProjectService {
     this.project = replayed.project;
   }
 
+  // Store first, then publish: memory never holds an event the log lacks.
   private commit(input: unknown): Submission {
-    const r = this.project.submit(input, this.clock());
-    if (r.ok && !r.duplicate) this.store.append(r.event);
-    return r;
+    const r = this.project.prepare(input, this.clock());
+    if (!r.ok || r.duplicate) return r;
+    try {
+      this.store.append(r.event);
+    } catch {
+      return { ok: false, code: "storage_failed", detail: "the event could not be stored" };
+    }
+    r.publish();
+    return { ok: true, event: r.event, duplicate: false };
   }
 
   seed(): Submission {

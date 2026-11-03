@@ -46,7 +46,9 @@ export type RejectionCode =
   | "forbidden"
   | "needs_approval"
   | "invalid_input"
-  | "not_found";
+  | "not_found"
+  // The event could not be stored; nothing changed.
+  | "storage_failed";
 
 export interface Rejection {
   ok: false;

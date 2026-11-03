@@ -729,3 +729,47 @@ describe("lessons", () => {
     expect(lessonView(p.state, "why-period-drifts")?.retired).toEqual({ reason: "superseded" });
   });
 });
+
+describe("prepare and publish", () => {
+  it("changes nothing until the prepared event is published", () => {
+    const before = snapshot(p);
+    const r = p.prepare(
+      {
+        commandId: "later",
+        actor: "engine",
+        baseHead: p.head,
+        ops: [{ op: "record_result", result: result("r1") }],
+      },
+      "t",
+    );
+    expect(r.ok && !r.duplicate).toBe(true);
+    expect(snapshot(p)).toBe(before);
+    if (r.ok && !r.duplicate) r.publish();
+    expect(p.state.results.has("r1")).toBe(true);
+  });
+
+  it("refuses to publish over a project that moved on", () => {
+    const a = p.prepare(
+      {
+        commandId: "a",
+        actor: "engine",
+        baseHead: p.head,
+        ops: [{ op: "record_result", result: result("ra") }],
+      },
+      "t",
+    );
+    const b = p.prepare(
+      {
+        commandId: "b",
+        actor: "engine",
+        baseHead: p.head,
+        ops: [{ op: "record_result", result: result("rb") }],
+      },
+      "t",
+    );
+    if (a.ok && !a.duplicate) a.publish();
+    expect(() => {
+      if (b.ok && !b.duplicate) b.publish();
+    }).toThrow(/changed after prepare/);
+  });
+});

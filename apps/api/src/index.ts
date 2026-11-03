@@ -169,6 +169,7 @@ const STATUS: Record<string, number> = {
   duplicate_command: 409,
   unavailable: 503,
   budget: 429,
+  storage_failed: 503,
 };
 
 const answer = (r: Submission | { ok: boolean; code?: string }) =>

@@ -166,6 +166,36 @@ describe("vertical slice", () => {
     });
   });
 
+  it("keeps memory, log and replay equal when storing an event fails", () => {
+    const store = new MemoryStore();
+    let failNext = false;
+    const flaky = {
+      all: () => store.all(),
+      append: (e: Event) => {
+        if (failNext) {
+          failNext = false;
+          throw new Error("disk full");
+        }
+        store.append(e);
+      },
+    };
+    const svc = new ProjectService(flaky, new MemoryInvestigations(), clock);
+    svc.seed();
+    const cmd = {
+      commandId: "edit",
+      baseHead: svc.view().head,
+      ops: DEMO_OPS,
+    };
+    failNext = true;
+    expect(svc.command(cmd, false)).toMatchObject({ ok: false, code: "storage_failed" });
+    expect(svc.view().head).toBe(1);
+    // The same command can be retried; it was never half applied.
+    expect(svc.command(cmd, false)).toMatchObject({ ok: true, duplicate: false });
+    const rebuilt = new ProjectService(store, new MemoryInvestigations(), clock);
+    expect(rebuilt.view().lastHash).toBe(svc.view().lastHash);
+    expect(svc.verify()).toMatchObject({ ok: true, events: 2 });
+  });
+
   it("refuses to start from a tampered log", () => {
     const store = new MemoryStore();
     const svc = new ProjectService(store, new MemoryInvestigations(), clock);
