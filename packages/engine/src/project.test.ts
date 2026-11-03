@@ -1,7 +1,7 @@
 import type { Contract, ResultRecord } from "@vibloom/contracts";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Actor, Command, NewNode, Op } from "./commands";
-import { basisFor, claimView, lessonView, resultView } from "./derive";
+import { basisFor, claimView, lessonView, resultView, rootStatus } from "./derive";
 import { canonical } from "./hash";
 import { Project } from "./project";
 
@@ -713,6 +713,33 @@ describe("lessons", () => {
     expect(send("agent", [{ op: "add_node", node: partial }])).toMatchObject({
       ok: false,
       detail: expect.stringMatching(/basis must include/) as unknown,
+    });
+  });
+
+  it("blames an assumption only while the lesson is current and not retired", () => {
+    send("agent", [{ op: "add_node", node: lesson() }]);
+    send("engine", [{ op: "record_result", result: refuting("r2", 0.18) }]);
+    expect(rootStatus(p.state, "qssa")).toMatchObject({ blamedBy: ["why-period-drifts"] });
+    send("human", [
+      { op: "retire_lesson", id: "why-period-drifts", expectedRevision: 1, reason: "superseded" },
+    ]);
+    expect(rootStatus(p.state, "qssa")).toMatchObject({ blamedBy: [] });
+  });
+
+  it("reports a region claim without a counterexample as such, not as holding", () => {
+    p = new Project(contract);
+    n = 0;
+    send(
+      "human",
+      Object.values(nodes).map((node) => ({ op: "add_node", node })),
+      { approved: true },
+    );
+    send("engine", [{ op: "record_result", result: result("ok") }]);
+    expect(rootStatus(p.state, "claim")).toEqual({
+      kind: "claim",
+      verdict: "no_counterexample",
+      evaluated: 64,
+      pendingRuns: 0,
     });
   });
 

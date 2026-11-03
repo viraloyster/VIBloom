@@ -27,6 +27,7 @@ import {
   claimView,
   effectivePoint,
   lessonView,
+  rootStatus,
   usedPoints,
   Project,
   resultView,
@@ -429,6 +430,7 @@ export class ProjectService {
       lessons: [...s.nodes.values()]
         .filter((n) => n.kind === "lesson")
         .map((n) => lessonView(s, n.id)),
+      statuses: Object.fromEntries([...s.nodes.keys()].map((id) => [id, rootStatus(s, id)])),
     };
   }
 

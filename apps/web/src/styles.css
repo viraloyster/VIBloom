@@ -11,6 +11,8 @@
   --pending: #f4e46b;
   --open: #e2dcff;
   --off: #4a5563;
+  --tested: #7ee0a3;
+  --inconclusive: #b9a37a;
   --leaf: #2f6b3a;
   color-scheme: dark;
 }
@@ -525,6 +527,15 @@ th {
   stroke: var(--fragile);
 }
 
+.root.tested {
+  stroke: var(--tested);
+}
+
+.root.inconclusive {
+  stroke: var(--inconclusive);
+  stroke-dasharray: 2 6;
+}
+
 .root.broken {
   stroke: var(--broken);
 }
@@ -727,6 +738,14 @@ th {
 
 .node.fragile {
   color: var(--fragile);
+}
+
+.node.tested {
+  color: var(--tested);
+}
+
+.node.inconclusive {
+  color: var(--inconclusive);
 }
 
 .node.broken {

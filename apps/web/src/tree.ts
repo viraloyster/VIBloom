@@ -9,58 +9,62 @@ import { el, svg } from "./dom";
 import { filaments, layout, rootSystem, TRUNK, type Layout } from "./layout";
 
 export type NodeState =
-  "sound" | "hypothetical" | "fragile" | "broken" | "pending" | "open" | "off";
+  | "sound"
+  | "tested"
+  | "inconclusive"
+  | "hypothetical"
+  | "fragile"
+  | "broken"
+  | "pending"
+  | "open"
+  | "off";
 
-const STATE_LABEL: Record<NodeState, string> = {
-  sound: "",
-  hypothetical: "Hypothetical",
-  fragile: "Weak",
-  broken: "Broken",
-  pending: "Pending review",
-  open: "Open",
-  off: "Off",
-};
-
-export function nodeState(v: ProjectView, n: RootNode): NodeState {
-  switch (n.kind) {
-    case "assumption": {
-      if (n.state === "off") return "off";
-      const blamed = v.lessons.some((l) => {
-        if (l?.support.status !== "supported") return false;
-        const lesson = v.nodes.find((x) => x.id === l.id);
-        const candidate = l.support.candidate;
-        return (
-          lesson?.kind === "lesson" &&
-          lesson.candidates.some((c) => c.id === candidate && c.suspects.includes(n.id))
-        );
-      });
-      if (blamed) return "fragile";
-      return n.state === "hypothetical" ? "hypothetical" : "sound";
-    }
-    case "claim": {
-      const verdict = v.claims.find((c) => c?.claim === n.id)?.verdict.verdict;
-      if (verdict === "refuted") return "broken";
-      if (verdict === "holds" || verdict === "no_counterexample") return "sound";
-      return verdict === "inconclusive" ? "fragile" : "open";
-    }
-    case "lesson": {
-      const l = v.lessons.find((x) => x?.id === n.id);
-      if (!l || l.retired) return "off";
-      if (l.currency === "unsupported") return "broken";
-      if (l.currency === "pending_review") return "pending";
-      if (l.support.status === "supported") return "sound";
-      return l.support.status === "open" || l.support.status === "awaiting_test"
-        ? "open"
-        : "fragile";
-    }
+// Visual state and its words, read from the engine's root status. Nothing is
+// inferred here: "no counterexample" is not "sound", "inconclusive" is not "weak".
+export function describe(v: ProjectView, n: RootNode): { state: NodeState; label: string } {
+  const st = v.statuses[n.id];
+  if (!st) return { state: "sound", label: "" };
+  switch (st.kind) {
+    case "assumption":
+      if (st.state === "off") return { state: "off", label: "Off" };
+      if (st.blamedBy.length > 0) return { state: "fragile", label: "Weak" };
+      return st.state === "hypothetical"
+        ? { state: "hypothetical", label: "Hypothetical" }
+        : { state: "sound", label: "" };
+    case "claim":
+      switch (st.verdict) {
+        case "refuted":
+          return { state: "broken", label: "Refuted" };
+        case "holds":
+          return { state: "sound", label: "Holds" };
+        case "no_counterexample":
+          return { state: "tested", label: `No counterexample in ${String(st.evaluated ?? 0)}` };
+        case "inconclusive":
+          return { state: "inconclusive", label: "Inconclusive" };
+        case "unexplored":
+          return st.pendingRuns > 0
+            ? { state: "pending", label: "Pending review" }
+            : { state: "open", label: "Open" };
+      }
+      break;
+    case "lesson":
+      if (st.retired) return { state: "off", label: "Retired" };
+      if (st.currency === "unsupported") return { state: "off", label: "Unsupported" };
+      if (st.currency === "pending_review") return { state: "pending", label: "Pending review" };
+      if (st.support === "supported") return { state: "sound", label: "Supported" };
+      if (st.support === "open" || st.support === "awaiting_test") {
+        return { state: "open", label: st.support === "open" ? "Open" : "Awaiting test" };
+      }
+      return { state: "inconclusive", label: "Not distinguished" };
     case "experiment":
-      return v.results.some((r) => r.record.experiment.id === n.id && r.record.violated)
-        ? "broken"
-        : "sound";
-    default:
-      return "sound";
+      return st.failedChecks > 0
+        ? { state: "broken", label: "Failed check" }
+        : { state: "sound", label: "" };
   }
+  return { state: "sound", label: "" };
 }
+
+export const nodeState = (v: ProjectView, n: RootNode): NodeState => describe(v, n).state;
 
 export type Tone = "sprout" | "probe" | "surprise" | "insight";
 
@@ -201,13 +205,11 @@ const overlaps = (a: Box, b: Box) =>
   a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
 function placeLabel(taken: Box[], x: number, y: number, w: number): { dx: number; dy: number } {
-  const tries = [
-    { dx: 18, dy: -12 },
-    { dx: -18 - w, dy: -12 },
-    { dx: 18, dy: 14 },
-    { dx: -18 - w, dy: 14 },
-    { dx: -w / 2, dy: 20 },
-  ];
+  const tries = [-12, 14, -38, 40, -64, 66].flatMap((dy) => [
+    { dx: 18, dy },
+    { dx: -18 - w, dy },
+  ]);
+  tries.push({ dx: -w / 2, dy: 20 }, { dx: -w / 2, dy: -46 });
   for (const t of tries) {
     const box = { x: x + t.dx, y: y + t.dy, w, h: 24 };
     const inside = box.x >= 4 && box.x + w <= W - 4;
@@ -435,7 +437,7 @@ export function mountTree(host: HTMLElement, actions: RootActions): TreeHandle {
         transform: `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`,
         tabindex: 0,
         role: "button",
-        "aria-label": `${n.title} ${STATE_LABEL[state]}`,
+        "aria-label": `${n.title} ${describe(v, n).label}`,
       });
       const big = n.kind === "claim" || n.kind === "lesson" || n.kind === "assumption";
       g.append(
@@ -444,7 +446,8 @@ export function mountTree(host: HTMLElement, actions: RootActions): TreeHandle {
       );
       // Selection is an outline; the state colour stays.
       if (selected === n.id) g.append(svg("circle", { r: big ? 17 : 13, class: "select" }));
-      const text = `${n.title.length > 30 ? `${n.title.slice(0, 29)}...` : n.title}${STATE_LABEL[state] ? `  ${STATE_LABEL[state]}` : ""}`;
+      const word = describe(v, n).label;
+      const text = `${n.title.length > 30 ? `${n.title.slice(0, 29)}...` : n.title}${word ? `  ${word}` : ""}`;
       // Labels try the right, then the left, then lower, so neighbours never
       // cover each other.
       const width = text.length * 6.6 + 20;
@@ -529,7 +532,7 @@ export function mountTree(host: HTMLElement, actions: RootActions): TreeHandle {
     }
     const rows: [string, string][] = [
       ["kind", n.kind],
-      ["state", STATE_LABEL[nodeState(v, n)] || "Sound"],
+      ["state", describe(v, n).label || "Sound"],
       ["revision", String(n.revision)],
     ];
     if (n.kind === "assumption") rows.push(["statement", n.statement], ["scope", n.scope]);

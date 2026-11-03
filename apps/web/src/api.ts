@@ -1,6 +1,6 @@
 import type { Investigation } from "@vibloom/agent";
 import type { DependsOn, ExperimentNode, ResultRecord, RootNode } from "@vibloom/contracts";
-import type { ClaimView, LessonView, ResultView } from "@vibloom/engine";
+import type { ClaimView, LessonView, ResultView, RootStatus } from "@vibloom/engine";
 
 export interface ProjectView {
   head: number;
@@ -11,6 +11,7 @@ export interface ProjectView {
   claims: (ClaimView | undefined)[];
   experiments: ExperimentNode[];
   lessons: (LessonView | undefined)[];
+  statuses: Record<string, RootStatus | undefined>;
 }
 
 export interface StoredInvestigation {

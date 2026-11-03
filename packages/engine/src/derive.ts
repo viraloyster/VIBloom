@@ -242,3 +242,67 @@ export function usedPoints(s: State, claimId: string): Set<string> {
   }
   return used;
 }
+
+// The meaning of each root, derived once and shared by the interface and the
+// model's context. Colours and words come from this, never from guesses.
+export type RootStatus =
+  | { kind: "assumption"; state: "adopted" | "hypothetical" | "off"; blamedBy: string[] }
+  | { kind: "claim"; verdict: Verdict["verdict"]; evaluated?: number; pendingRuns: number }
+  | {
+      kind: "lesson";
+      support: LessonSupport["status"];
+      currency: Currency;
+      retired: boolean;
+    }
+  | { kind: "experiment"; failedChecks: number }
+  | { kind: "invariant" | "model" | "source" };
+
+export function rootStatus(s: State, id: string): RootStatus | undefined {
+  const n = s.nodes.get(id);
+  if (!n) return undefined;
+  switch (n.kind) {
+    case "assumption": {
+      // Blamed only by a lesson that is current, not retired, and whose
+      // supported candidate names this assumption.
+      const blamedBy = [...s.nodes.values()].flatMap((l) => {
+        if (l.kind !== "lesson" || l.retired) return [];
+        const v = lessonView(s, l.id);
+        if (v?.currency !== "current" || v.support.status !== "supported") return [];
+        const candidate = v.support.candidate;
+        return l.candidates.some((c) => c.id === candidate && c.suspects.includes(id))
+          ? [l.id]
+          : [];
+      });
+      return { kind: "assumption", state: n.state, blamedBy };
+    }
+    case "claim": {
+      const v = claimView(s, id);
+      const verdict = v?.verdict ?? { verdict: "unexplored" as const };
+      const out: RootStatus = {
+        kind: "claim",
+        verdict: verdict.verdict,
+        pendingRuns: v?.notCurrent.length ?? 0,
+      };
+      if (verdict.verdict === "no_counterexample") out.evaluated = verdict.evaluated;
+      return out;
+    }
+    case "lesson": {
+      const v = lessonView(s, id);
+      return {
+        kind: "lesson",
+        support: v?.support.status ?? "open",
+        currency: v?.currency ?? "current",
+        retired: n.retired !== undefined,
+      };
+    }
+    case "experiment":
+      return {
+        kind: "experiment",
+        failedChecks: [...s.results.values()].filter(
+          (r) => r.experiment.id === id && r.violated !== undefined,
+        ).length,
+      };
+    default:
+      return { kind: n.kind };
+  }
+}

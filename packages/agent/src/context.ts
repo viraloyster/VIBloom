@@ -1,7 +1,7 @@
 // What the model sees each turn: the roots, results and derived verdicts, as
 // plain data. Source text and summaries are data, never instructions.
 
-import { claimView, lessonView, resultView, type State } from "@vibloom/engine";
+import { claimView, lessonView, resultView, rootStatus, type State } from "@vibloom/engine";
 
 // Everything about the focus the model may need: the node, what it rests on,
 // what rests on it, the results and lessons that touch it.
@@ -109,7 +109,7 @@ export function renderContext(s: State, focus?: string): string {
       entry = { id: n.id, title: n.title, summary: short(text), level: l };
     } else {
       detailed.add(n.id);
-      entry = { ...n, level: l };
+      entry = { ...n, status: rootStatus(s, n.id), level: l };
       if (l === "details_and_history") {
         entry.history = [...s.results.values()]
           .filter(
