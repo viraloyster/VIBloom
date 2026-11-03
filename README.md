@@ -25,9 +25,8 @@ Status: under active development during the Meta Global AI Developer Hackathon
 4. The code enforces invariants; assumptions are tested and can be switched off.
 5. Changing an assumption propagates through the dependency graph.
 
-Meta models: Muse Spark (Meta Model API) investigates and explains; Muse Spark
-Open (open weights) reviews citations against claims and pre-checks handwritten
-input.
+Meta model: Muse Spark, through the Meta Model API, formulates, investigates,
+reviews citations against claims and explains.
 
 ## Repository
 

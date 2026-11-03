@@ -72,7 +72,7 @@ Each evaluation reports its denominators, its cases and its limits.
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Search         | Halton with transition refinement vs uniform sampling, same budget, counting all solver work                                                                              |
 | Context        | Layered context vs full context, counting expansions                                                                                                                      |
-| Evidence check | Strict parser vs open-weight review on messy sources                                                                                                                      |
+| Evidence check | Strict parser vs Muse Spark review on messy sources                                                                                                                       |
 | Agent          | Adaptive Muse Spark investigation vs a fixed policy with the same tools, domain and budget: distinct counterexamples, valid decisions, inconclusive points, cost and time |
 
 Results are added here as each evaluation lands, with the command that

@@ -199,7 +199,7 @@ Three signals are stored separately and never merged:
 
 - Fragility: how a property behaves under perturbation (counted pass to fail
   transitions).
-- Reviewer signal (experimental): the open-weight model reviews a citation
+- Reviewer signal (experimental): Muse Spark reviews a citation
   against a claim and answers supports, contradicts or insufficient, with the
   relevant fragment and the discrepancy. Token probabilities, when available,
   are attached as an experimental score that only orders the review queue.
