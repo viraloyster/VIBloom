@@ -5,17 +5,18 @@ useful map too.
 
 ## Project
 
-VIBloom tests executable claims about chemical models and keeps every
-conclusion linked to the assumptions it rests on. Read
+VIBloom decomposes any goal into the assumptions it rests on and keeps every
+conclusion linked to them; chemistry is its first specialised domain. Read
 [docs/architecture.md](docs/architecture.md) before changing the engine and
 [docs/science.md](docs/science.md) before changing the chemistry.
 
 ## Layout
 
 - `packages/contracts`: shared types and boundary validation. Imports nothing.
-- `packages/engine`, `chem`, `search`, `agent`: see the package table in
+- `packages/engine`, `chem`, `search`, `agent`, `ideas`: see the package table in
   `docs/architecture.md`. Import boundaries are enforced by lint.
-- `apps/api`, `apps/web`: Cloudflare Worker and interface.
+- `apps/web`: static app; `index.html` is the idea tree, `bench.html` the
+  chemistry bench. `apps/api`: Cloudflare Worker behind the bench.
 - `tools/reference`: the only Python, used to generate SciPy reference data.
 
 ## Commands
@@ -24,7 +25,7 @@ conclusion linked to the assumptions it rests on. Read
 npm ci
 npm run check   # types, lint, format, text check
 npm test
-npm run build                 # the interface, served by the Worker
+npm run build                 # the static app (dist/), deployable anywhere
 npm run dev -w @vibloom/api   # Worker and Durable Object on a local workerd
 npm run dev                   # interface with hot reload, proxying /api
 ```

@@ -36,9 +36,23 @@ the record.
 
 ## What exists today
 
-The first domain is chemistry, chosen for its mathematical depth and because
-it can be seen: oscillating reactions (Belousov-Zhabotinsky, Oregonator
-models) with a stiff solver checked against an independent SciPy reference.
+**Any idea, as a static web app.** The landing page asks "What do you want to
+build?". Muse Spark decomposes the goal into the assumptions it rests on,
+following a fixed protocol (the same axes, every number with its unit and
+origin, reference or assumed), and the roots grow on screen as Muse writes
+them. Opening a root asks Muse for the assumptions under it, one level closer
+to first principles. Where an assumption can be tested by arithmetic, Muse
+writes the calculation; the browser runs it in an isolated worker with no
+network or storage, and a root turns red only when that calculation fails.
+Editing a value re-runs every check that read it, and everything resting on a
+broken root is marked. If one of its calculations fails to run, Muse repairs
+it once, in a single request. Everything is recorded in a hash-chained log
+that can be exported and replayed.
+
+**Chemistry, in depth.** The first specialised domain, chosen for its
+mathematical depth and because it can be seen: oscillating reactions
+(Belousov-Zhabotinsky, Oregonator models) with a stiff solver checked against
+an independent SciPy reference.
 
 1. A claim in natural language becomes a predicate the engine can execute.
 2. A deterministic engine runs the experiments and records the evidence in a
@@ -50,21 +64,33 @@ models) with a stiff solver checked against an independent SciPy reference.
 6. Every run can be re-computed in the browser and shown as twin beakers and
    spiral waves, drawn only from the recorded parameters.
 
-The investigation loop (formulate, predict before each experiment, diagnose
-surprises, write lessons, conclude) is implemented against Muse Spark on the
-Meta Model API and tested with scripted and recorded runs.
+The chemistry investigation loop (formulate, predict before each experiment,
+diagnose surprises, write lessons, conclude) is implemented against Muse Spark
+and tested with scripted and recorded runs. It still runs behind the API in
+`apps/api` (`bench.html`); joining it to the static app is the next step.
+
+## Try it
+
+- Without a key: open the app and choose "Watch a recorded example". It
+  replays a real Muse session; the calculations are re-run in your browser.
+- With your own Meta Model API key: grow any idea. The key stays in the tab
+  (or on the device, if you ask) and is sent only to api.meta.ai. Every
+  request reserves its worst-case cost first and the session stops at the
+  budget you set. Standard mode keeps your content out of Meta's training;
+  contributor mode is about 20 times cheaper and lets Meta train on it.
+- Locally: `npm ci && npm run dev`, then open the printed address.
+
+A recorded session cost about $0.03 for a decomposition and one expansion.
 
 ## Not built yet
 
 These are directions, not features:
 
-- Any idea as a starting point ("What do you want to build?"), decomposed by
-  Muse into projects within projects, expanded on demand down to first
-  principles.
-- Checks written by Muse and run in isolation, so a premise turns red because
-  a computation shows it fails, not because a model says so.
 - Views of each experiment designed by Muse and run isolated from the app.
+- Specialists that review a discrepancy from different angles, and a final
+  review of broad conclusions.
 - Branches of a tree to experiment without touching the main one.
+- The chemistry loop and the idea tree in one static app.
 
 Status: under active development during the Meta Global AI Developer Hackathon
 (October 27 - November 4, 2026). See [HACKATHON.md](HACKATHON.md).
@@ -72,9 +98,9 @@ Status: under active development during the Meta Global AI Developer Hackathon
 ## Repository
 
 ```
-apps/web          interface: roots map, monitor, chat
+apps/web          static app: idea tree (index.html), chemistry bench (bench.html)
 apps/api          Cloudflare Worker and Durable Objects
-packages/         contracts, engine, chem, search, agent
+packages/         contracts, engine, chem, search, agent, ideas
 evals/            evaluation cases, runners and results
 tools/reference   SciPy reference data generator
 docs/             architecture, science, validation
