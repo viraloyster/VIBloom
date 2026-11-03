@@ -88,4 +88,11 @@ describe("search", () => {
       search(plan({ dims: [{ name: "x", min: 0, max: 1, scale: "log" }] }), threshold),
     ).toThrow(RangeError);
   });
+
+  it("never samples excluded points", () => {
+    const r = search(plan({ exclude: (p) => (p.s ?? 0) < 1.2 }), () => "holds");
+    for (const e of r.evaluated.filter((x) => x.stage === "sample")) {
+      expect(e.point.s).toBeGreaterThanOrEqual(1.2);
+    }
+  });
 });

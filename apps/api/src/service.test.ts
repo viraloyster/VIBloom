@@ -138,6 +138,64 @@ describe("vertical slice", () => {
     });
   });
 
+  it("searches a revised claim only on points its earlier version did not use", () => {
+    const svc = new ProjectService(new MemoryStore(), new MemoryInvestigations(), clock);
+    svc.seed();
+    demo(svc);
+    const v1 = svc.stressTest({ experiment: "reduction-keeps-period-runs", budget: 2, seed: 9 });
+    expect(v1.ok).toBe(true);
+    const claim = svc.view().nodes.find((n) => n.id === "reduction-keeps-period");
+    if (claim?.kind !== "claim") throw new Error("missing claim");
+    const v2 = svc.command(
+      {
+        commandId: "v2",
+        baseHead: svc.view().head,
+        ops: [
+          {
+            op: "add_node",
+            node: {
+              kind: "claim",
+              id: "claim-v2",
+              title: "Version 2",
+              version: 2,
+              text: claim.text,
+              predicate: claim.predicate,
+              protocol: claim.protocol,
+              supersedes: { id: claim.id, revision: 1 },
+            },
+          },
+          {
+            op: "add_node",
+            node: {
+              kind: "experiment",
+              id: "claim-v2-runs",
+              title: "v2 runs",
+              spec: {
+                model: { id: "oregonator", revision: 1 },
+                claim: { id: "claim-v2", revision: 1 },
+                solver: "s",
+                detector: "d",
+                protocol: "p",
+              },
+              results: [],
+            },
+          },
+        ],
+      },
+      false,
+    );
+    expect(v2).toMatchObject({ ok: true });
+    // Same region, same seed: without the exclusion it would repeat v1's points.
+    svc.stressTest({ experiment: "claim-v2-runs", budget: 2, seed: 9 });
+    const points = (id: string) =>
+      svc
+        .view()
+        .results.filter((r) => r.record.claim.id === id)
+        .map((r) => JSON.stringify(r.record.point));
+    const old = new Set(points("reduction-keeps-period"));
+    expect(points("claim-v2").some((p) => old.has(p))).toBe(false);
+  });
+
   it("tests a claim only under its own initial condition", () => {
     const svc = new ProjectService(new MemoryStore(), new MemoryInvestigations(), clock);
     svc.seed();

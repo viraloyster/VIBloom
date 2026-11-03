@@ -25,7 +25,9 @@ import {
   basisFor,
   canonical,
   claimView,
+  effectivePoint,
   lessonView,
+  usedPoints,
   Project,
   resultView,
   sha256,
@@ -225,13 +227,20 @@ export class ProjectService {
       scale: CONTRACT.domain[name]?.scale ?? "linear",
     }));
     const ids = new Map<string, string>();
-    const report = search({ dims, budget: request.budget, seed: request.seed }, (point) => {
-      const r = this.runForResult({ experiment: request.experiment, point });
-      if (!r.ok) return "invalid";
-      ids.set(canonical(point), r.result.id);
-      if (r.result.execution.status !== "completed" || r.result.violated) return "invalid";
-      return r.result.outcome ?? "inconclusive";
-    });
+    // A revised claim is searched only on points its earlier versions did not use.
+    const used = usedPoints(this.project.state, claim.id);
+    const exclude = (p: Record<string, number>) =>
+      used.has(effectivePoint(this.project.state, claim.id, p));
+    const report = search(
+      { dims, budget: request.budget, seed: request.seed, exclude },
+      (point) => {
+        const r = this.runForResult({ experiment: request.experiment, point });
+        if (!r.ok) return "invalid";
+        ids.set(canonical(point), r.result.id);
+        if (r.result.execution.status !== "completed" || r.result.violated) return "invalid";
+        return r.result.outcome ?? "inconclusive";
+      },
+    );
     const summary: SearchSummary = {
       region: report.region,
       results: report.evaluated.flatMap((e) => ids.get(canonical(e.point)) ?? []),

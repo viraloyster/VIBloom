@@ -28,6 +28,9 @@ export interface SearchPlan {
   seed: number;
   // Where reduction moves a counterexample toward; the region centre by default.
   reference?: Point;
+  // Points that must not be evaluated, for example those that shaped a
+  // revised claim. Sampling skips them.
+  exclude?: (p: Point) => boolean;
 }
 
 export interface Reduction {
@@ -99,7 +102,13 @@ export function search(plan: SearchPlan, evaluate: (p: Point) => Outcome): Searc
   const shift = rotation(plan.seed, dims.length);
   const samples = Math.max(1, Math.ceil(budget * 0.6));
   let next = 1;
-  const sample = () => run(halton(next++, dims.length, shift), "sample");
+  const sample = () => {
+    let u = halton(next++, dims.length, shift);
+    for (let guard = 0; plan.exclude?.(toPoint(dims, u)) && guard < 1000; guard++) {
+      u = halton(next++, dims.length, shift);
+    }
+    return run(u, "sample");
+  };
   while (next <= samples) sample();
 
   // Refine between the closest pairs that disagree, where the boundary is.

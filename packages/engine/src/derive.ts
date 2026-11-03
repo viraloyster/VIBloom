@@ -219,3 +219,26 @@ export function lessonView(s: State, id: string): LessonView | undefined {
   if (n.retired) view.retired = n.retired;
   return view;
 }
+
+// The point as the engine stores it: claim fixed values filled, keys sorted.
+export function effectivePoint(s: State, claimId: string, point: Record<string, number>): string {
+  const c = s.nodes.get(claimId);
+  const fixed = c?.kind === "claim" && c.predicate.kind === "FOR_ALL" ? c.predicate.fixed : {};
+  return canonical({ ...point, ...fixed });
+}
+
+// Points already used on earlier versions of a claim. A revised claim must be
+// tested on other points: re-running them is regression, not new evidence.
+// Initial conditions need no check, as a claim is tested only under its own.
+export function usedPoints(s: State, claimId: string): Set<string> {
+  const used = new Set<string>();
+  let node = s.nodes.get(claimId);
+  while (node?.kind === "claim" && node.supersedes) {
+    const prevId = node.supersedes.id;
+    for (const r of s.results.values()) {
+      if (r.claim.id === prevId && r.point) used.add(canonical(r.point));
+    }
+    node = s.nodes.get(prevId);
+  }
+  return used;
+}

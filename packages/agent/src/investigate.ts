@@ -13,8 +13,9 @@ import {
 } from "@vibloom/contracts";
 import {
   basisFor,
-  canonical,
   claimView,
+  effectivePoint,
+  usedPoints,
   resultView,
   type Op,
   type Rejection,
@@ -307,28 +308,6 @@ function checkConclusion(s: State, d: Extract<Decision, { action: "conclude" }>)
   }
 }
 
-// The point as the engine stores it: claim fixed values filled, keys sorted.
-function effectivePoint(s: State, claimId: string, point: Record<string, number>): string {
-  const c = s.nodes.get(claimId);
-  const fixed = c?.kind === "claim" && c.predicate.kind === "FOR_ALL" ? c.predicate.fixed : {};
-  return canonical({ ...point, ...fixed });
-}
-
-// Points already used on earlier versions of a claim cannot test a new
-// version. Initial conditions need no check: a claim is only tested under its own.
-function usedPoints(s: State, claimId: string): string[] {
-  const used: string[] = [];
-  let node = s.nodes.get(claimId);
-  while (node?.kind === "claim" && node.supersedes) {
-    const prevId = node.supersedes.id;
-    for (const r of s.results.values()) {
-      if (r.claim.id === prevId && r.point) used.push(canonical(r.point));
-    }
-    node = s.nodes.get(prevId);
-  }
-  return used;
-}
-
 export async function investigate(
   goal: string,
   provider: Provider,
@@ -445,7 +424,7 @@ export async function investigate(
           const exp = state.nodes.get(d.experiment);
           if (exp?.kind === "experiment") {
             const key = effectivePoint(state, exp.spec.claim.id, d.point);
-            if (usedPoints(state, exp.spec.claim.id).includes(key)) {
+            if (usedPoints(state, exp.spec.claim.id).has(key)) {
               refuse("a new claim version must be tested on fresh points");
             }
           }
