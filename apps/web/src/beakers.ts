@@ -5,6 +5,7 @@
 
 import type { ClaimNode, ModelNode, ResultRecord } from "@vibloom/contracts";
 import { catalystOffThread } from "./compute";
+import { createDish, STEPS_PER_FRAME } from "./dish";
 import { el, fmt, pct, svg } from "./dom";
 
 const RED = [184, 32, 42];
@@ -61,6 +62,7 @@ export function twinBeakers(
   );
   const gap = el("p", { class: "phase" }, "Integrating both models in your browser...");
   host.append(
+    ...dishes(r.point, model, models),
     el(
       "div",
       { class: "pair" },
@@ -113,4 +115,55 @@ export function twinBeakers(
     requestAnimationFrame(frame);
   });
   return host;
+}
+
+// The same kinetics and parameters spread over a plate. Diffusion is added only
+// for display; the tested claim is about the well-mixed system in the beakers.
+function dishes(
+  point: Record<string, number>,
+  m: ModelNode,
+  models: ("full" | "reduced")[],
+): HTMLElement[] {
+  const p = {
+    s: point.s ?? NaN,
+    q: m.params.q ?? NaN,
+    eps: m.params.eps ?? NaN,
+    eps_prime: point.eps_prime ?? NaN,
+  };
+  if (!Object.values(p).every(Number.isFinite)) return [];
+  const made = models.map((name) => ({ name, dish: createDish(name === "full", p) }));
+  if (made.some((d) => !d.dish)) return [];
+  const pair = el(
+    "div",
+    { class: "pair dishes" },
+    ...made.map(({ name, dish }) =>
+      el(
+        "figure",
+        { class: "dish-box" },
+        dish?.canvas ?? "",
+        el("figcaption", {}, name === "full" ? "Full model" : "Reduced model"),
+      ),
+    ),
+  );
+  const note = el(
+    "p",
+    { class: "provenance" },
+    `Spiral waves: the run's kinetics at s ${String(p.s)}, eps_prime ${String(p.eps_prime)}, q ${String(p.q)}, eps ${String(p.eps)} on a plate, integrated on your GPU. Diffusion is added only to show the chemistry in space; the claim is tested in the well-mixed beakers below.`,
+  );
+  // Wait briefly for the bench to show the pair, run while it is shown, and
+  // free the GPU contexts once it is gone.
+  let waits = 120;
+  const frame = () => {
+    if (!pair.isConnected && (waits-- <= 0 || pair.dataset.ran)) {
+      for (const { dish } of made) dish?.dispose();
+      return;
+    }
+    if (pair.isConnected) {
+      pair.dataset.ran = "1";
+      for (const { dish } of made) dish?.step(STEPS_PER_FRAME);
+    }
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+  return [pair, note];
 }

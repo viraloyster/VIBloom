@@ -918,3 +918,26 @@ th {
   font-size: 11px;
   color: var(--muted);
 }
+
+.dishes {
+  margin-bottom: 6px;
+}
+
+.dish-box {
+  margin: 0;
+  width: 48%;
+  max-width: 320px;
+  text-align: center;
+}
+
+.dish-box canvas {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  box-shadow: 0 0 28px rgb(70 110 230 / 35%);
+}
+
+.dish-box figcaption {
+  font-size: 12px;
+  color: var(--text);
+}

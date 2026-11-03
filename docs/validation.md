@@ -42,6 +42,13 @@ real Belousov-Zhabotinsky solution). Both are computed in the browser from the
 run's recorded point, model revision and initial condition; the phase gap shown
 under them comes from the recorded periods. Nothing is a prepared animation.
 
+Above the beakers, two dishes show the same kinetics with the same parameters
+(s and eps_prime from the run, q and eps from the model) spread over a plate,
+integrated on the GPU from a fixed seeded start, so spiral waves form. The
+diffusion term exists only for this display: the tested claim is about the
+well-mixed system in the beakers, and the dishes say so. Without WebGL2 float
+buffers the dishes are left out.
+
 ## Robust classification protocol
 
 A point is classified only when three runs agree: the base run, a run with
