@@ -79,3 +79,25 @@ export function signal(
   const s = resample(tr, 0, 1 / 40);
   return { t: s.t, v: s.v.map((x) => Math.log10(Math.max(x, 1e-12))) };
 }
+
+// The oxidised catalyst z(t), the variable that turns a real Belousov-
+// Zhabotinsky solution from red to blue. Same solver, point and initial
+// condition as the recorded run.
+export function catalyst(
+  kind: OregonatorModel,
+  claim: ClaimNode,
+  m: ModelNode,
+  point: Record<string, number>,
+  horizon = 80,
+): { t: number[]; z: number[] } {
+  const { q = NaN, eps = NaN } = m.params;
+  const params = { q, eps, s: point.s ?? NaN, eps_prime: point.eps_prime ?? NaN };
+  const ic = claim.predicate.ic as InitialCondition;
+  const tr = solve(model(kind, params), initialState(kind, params, ic), horizon, {
+    rtol: 1e-7,
+    atol: 1e-12,
+    hmax: 1,
+  });
+  const s = resample(tr, kind === "full" ? 2 : 1, 1 / 20);
+  return { t: s.t, z: s.v };
+}

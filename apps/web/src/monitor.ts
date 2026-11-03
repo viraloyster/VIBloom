@@ -5,6 +5,7 @@ import type { TraceEntry } from "@vibloom/agent";
 import type { ClaimNode, ModelNode, ResultRecord } from "@vibloom/contracts";
 import type { ProjectView, StoredInvestigation } from "./api";
 import { el, fmt, pct, svg } from "./dom";
+import { twinBeakers } from "./beakers";
 import { signalOffThread, verifyOffThread } from "./compute";
 import { REPRODUCTION_TOLERANCE } from "./verify";
 
@@ -189,6 +190,7 @@ export function mountMonitor(host: HTMLElement): MonitorHandle {
   let investigations: StoredInvestigation[] = [];
   let focused: string | undefined;
   let shown: { entry: TraceEntry; label: string } | undefined;
+  let beakers: { id: string; el: HTMLElement } | undefined;
   const bench = el("div", { class: "bench" });
 
   function benchFor(r: ResultRecord | undefined) {
@@ -244,6 +246,15 @@ export function mountMonitor(host: HTMLElement): MonitorHandle {
         );
       });
     }
+    // The beakers of a run are built once and kept across redraws, so the
+    // animation is not restarted by every refresh.
+    if (claim && m && beakers?.id !== r.id) {
+      const restsOn = r.basis.flatMap((b) => {
+        const node = view?.nodes.find((x) => x.id === b.id);
+        return node?.kind === "assumption" ? [`${node.title} (${node.state})`] : [];
+      });
+      beakers = { id: r.id, el: twinBeakers(r, claim, m, restsOn) };
+    }
     bench.replaceChildren(
       el("h3", {}, `Run ${r.id}`),
       el(
@@ -251,6 +262,7 @@ export function mountMonitor(host: HTMLElement): MonitorHandle {
         {},
         `point ${JSON.stringify(r.point)}, ${r.ic ?? "-"}, outcome ${r.outcome ?? r.execution.status}`,
       ),
+      ...(beakers?.id === r.id ? [beakers.el] : []),
       el(
         "table",
         {},

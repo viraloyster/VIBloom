@@ -34,6 +34,14 @@ within a relative 1e-6: JavaScript engines differ in the last digits of `exp`
 and `log`, so bit-for-bit equality across engines is not expected (a run
 recorded in Node and recomputed in Chromium differed by about 1e-7).
 
+## Twin beakers
+
+The monitor shows a selected run as two beakers, the full and the reduced
+model, coloured by the oxidised catalyst z(t) (red to blue, as ferroin in a
+real Belousov-Zhabotinsky solution). Both are computed in the browser from the
+run's recorded point, model revision and initial condition; the phase gap shown
+under them comes from the recorded periods. Nothing is a prepared animation.
+
 ## Robust classification protocol
 
 A point is classified only when three runs agree: the base run, a run with

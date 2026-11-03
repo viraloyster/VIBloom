@@ -2,13 +2,21 @@
 // tree's animations never wait for an integration.
 
 import type { ClaimNode, ModelNode, ResultRecord } from "@vibloom/contracts";
-import { signal, verify } from "./verify";
+import { catalyst, signal, verify } from "./verify";
 
 export type Job =
   | { id: number; kind: "verify"; result: ResultRecord; claim: ClaimNode; model: ModelNode }
   | {
       id: number;
       kind: "signal";
+      models: ("full" | "reduced")[];
+      claim: ClaimNode;
+      model: ModelNode;
+      point: Record<string, number>;
+    }
+  | {
+      id: number;
+      kind: "catalyst";
       models: ("full" | "reduced")[];
       claim: ClaimNode;
       model: ModelNode;
@@ -24,6 +32,11 @@ scope.onmessage = (e) => {
   const job = e.data;
   if (job.kind === "verify") {
     scope.postMessage({ id: job.id, value: verify(job.result, job.claim, job.model) });
+  } else if (job.kind === "catalyst") {
+    scope.postMessage({
+      id: job.id,
+      value: job.models.map((k) => ({ name: k, ...catalyst(k, job.claim, job.model, job.point) })),
+    });
   } else {
     scope.postMessage({
       id: job.id,

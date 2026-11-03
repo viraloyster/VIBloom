@@ -34,3 +34,17 @@ export const signalOffThread = (
   model: ModelNode,
   point: Record<string, number>,
 ) => ask<Series>({ kind: "signal", models, claim, model, point });
+
+export const catalystOffThread = (
+  models: ("full" | "reduced")[],
+  claim: ClaimNode,
+  model: ModelNode,
+  point: Record<string, number>,
+) =>
+  ask<{ name: "full" | "reduced"; t: number[]; z: number[] }[]>({
+    kind: "catalyst",
+    models,
+    claim,
+    model,
+    point,
+  });
