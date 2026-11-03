@@ -279,6 +279,9 @@ the investigation even when it does not conclude.
 ## Execution limits
 
 Each integration has limits on steps, function evaluations and rejected steps.
+A point evaluation runs both models under the robust protocol, about 0.7 s of
+CPU on a laptop; a stress test is capped at 12 points (about 8 s), inside the
+30 s CPU limit configured for the Worker.
 The unit of work for search and recovery is one point. Cancellation is checked
 between points. A result computed on an older revision is kept as history and
 does not update current conclusions.
