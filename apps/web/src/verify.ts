@@ -26,6 +26,10 @@ export interface Verification {
   ms: number;
 }
 
+// Re-running a simulation must agree within a declared tolerance, not to the
+// last bit: engines differ in the last digits of exp and log.
+export const REPRODUCTION_TOLERANCE = 1e-6;
+
 export function verify(r: ResultRecord, claim: ClaimNode, m: ModelNode): Verification {
   const t0 = performance.now();
   const { q = NaN, eps = NaN } = m.params;
@@ -50,7 +54,9 @@ export function verify(r: ResultRecord, claim: ClaimNode, m: ModelNode): Verific
   if (e.outcome) outcome.recomputed = e.outcome;
   const agrees =
     outcome.recorded === outcome.recomputed &&
-    periods.every((p) => p.relativeDifference === undefined || p.relativeDifference < 1e-9);
+    periods.every(
+      (p) => p.relativeDifference === undefined || p.relativeDifference < REPRODUCTION_TOLERANCE,
+    );
   return { outcome, periods, agrees, ms: performance.now() - t0 };
 }
 

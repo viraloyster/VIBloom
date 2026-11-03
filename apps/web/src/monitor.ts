@@ -5,7 +5,8 @@ import type { TraceEntry } from "@vibloom/agent";
 import type { ClaimNode, ModelNode, ResultRecord } from "@vibloom/contracts";
 import type { ProjectView, StoredInvestigation } from "./api";
 import { el, fmt, pct, svg } from "./dom";
-import { signal, verify } from "./verify";
+import { signalOffThread, verifyOffThread } from "./compute";
+import { REPRODUCTION_TOLERANCE } from "./verify";
 
 export interface MonitorHandle {
   render(view: ProjectView, investigations: StoredInvestigation[]): void;
@@ -216,20 +217,23 @@ export function mountMonitor(host: HTMLElement): MonitorHandle {
     button.addEventListener("click", () => {
       if (!claim || !m) return;
       status.textContent = "Running the solver in your browser...";
-      setTimeout(() => {
-        const v = verify(r, claim, m);
+      void verifyOffThread(r, claim, m).then((v) => {
+        // A newer selection replaced this bench; drop the old answer.
+        if (!status.isConnected) return;
         status.className = `verify-status ${v.agrees ? "ok" : "bad"}`;
-        status.textContent = `${v.agrees ? "Matches the record" : "Differs from the record"}: outcome ${v.outcome.recomputed ?? "-"}, ${v.periods
+        status.textContent = `${v.agrees ? `Matches the record within ${String(REPRODUCTION_TOLERANCE)}` : "Differs from the record"}: outcome ${v.outcome.recomputed ?? "-"}, ${v.periods
           .map((p) => `${p.model} ${fmt(p.recomputed, 6)} (diff ${fmt(p.relativeDifference, 2)})`)
           .join(", ")}, ${v.ms.toFixed(0)} ms`;
-      }, 20);
+      });
     });
     const plotHost = el("div", { class: "plot-host" });
     if (claim && m && r.point) {
-      setTimeout(() => {
-        const series = (["full", "reduced"] as const)
-          .filter((k) => (r.measurements ?? []).some((mm) => mm.model === k))
-          .map((k) => ({ name: k, ...signal(k, claim, m, r.point ?? {}) }));
+      const models = (["full", "reduced"] as const).filter((k) =>
+        (r.measurements ?? []).some((mm) => mm.model === k),
+      );
+      plotHost.replaceChildren(el("p", { class: "hint" }, "Integrating both models..."));
+      void signalOffThread([...models], claim, m, r.point).then((series) => {
+        if (!plotHost.isConnected) return;
         plotHost.replaceChildren(
           plot(series),
           el(
@@ -238,7 +242,7 @@ export function mountMonitor(host: HTMLElement): MonitorHandle {
             "log10 x over time: full model (bright) and reduced model (dim)",
           ),
         );
-      }, 0);
+      });
     }
     bench.replaceChildren(
       el("h3", {}, `Run ${r.id}`),

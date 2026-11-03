@@ -26,6 +26,14 @@ Three validations are kept separate:
   inconclusive) and the cases used for each error statistic.
 - Speed comparisons state tolerances, horizons, outputs, hardware and versions.
 
+## Reproduction in the browser
+
+Any recorded run can be recomputed in the reader's browser ("Verify it
+yourself"), off the main thread. The outcome must match and periods must agree
+within a relative 1e-6: JavaScript engines differ in the last digits of `exp`
+and `log`, so bit-for-bit equality across engines is not expected (a run
+recorded in Node and recomputed in Chromium differed by about 1e-7).
+
 ## Robust classification protocol
 
 A point is classified only when three runs agree: the base run, a run with
