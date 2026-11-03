@@ -381,6 +381,56 @@ describe("investigation", () => {
     });
   });
 
+  it("never applies a decision made on a state the model did not see", async () => {
+    const svc = new ProjectService(new MemoryStore(), new MemoryInvestigations(), clock);
+    svc.seed();
+    demo(svc);
+    let calls = 0;
+    const provider = {
+      name: "slow",
+      decide(): Promise<{ decision: unknown }> {
+        calls++;
+        if (calls === 1) {
+          // The researcher switches an assumption off while the model thinks.
+          svc.command(
+            {
+              commandId: "meanwhile",
+              baseHead: svc.view().head,
+              ops: [
+                {
+                  op: "set_assumption",
+                  id: "quasi-steady-bromide",
+                  expectedRevision: 1,
+                  change: { state: "off" },
+                },
+              ],
+            },
+            false,
+          );
+          return Promise.resolve({
+            decision: {
+              action: "run_point",
+              experiment: "reduction-keeps-period-runs",
+              point: { s: 1 },
+              distinguishes: ["a", "b"],
+              prediction: { outcome: "holds", because: "b", assumes: [] },
+              rationale: "r",
+              cites: [],
+            },
+          });
+        }
+        return Promise.resolve({
+          decision: { action: "ask_researcher", question: "q", rationale: "r", cites: [] },
+        });
+      },
+    };
+    const r = await svc.investigate("q", provider);
+    expect(r.ok && r.investigation.investigation.trace[0]?.rejection).toMatch(
+      /changed while you were deciding/,
+    );
+    expect(svc.view().results).toHaveLength(0);
+  });
+
   it("refuses an empty goal", async () => {
     const svc = new ProjectService(new MemoryStore(), new MemoryInvestigations(), clock);
     svc.seed();

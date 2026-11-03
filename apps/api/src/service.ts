@@ -71,6 +71,12 @@ export interface RunRequest {
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
+const stale = (seen: number, head: number): Exclude<Submission, { ok: true }> => ({
+  ok: false,
+  code: "stale_base",
+  detail: `decided on revision ${String(seen)}, project is at ${String(head)}`,
+});
+
 export class ProjectService {
   private readonly store: EventStore;
   private readonly clock: Clock;
@@ -135,15 +141,16 @@ export class ProjectService {
     let n = 0;
     const workspace: Workspace = {
       state: () => this.project.state,
-      submitAsAgent: (ops) =>
+      // The head the model saw, never the current one: stale decisions fail.
+      submitAsAgent: (ops, seenHead) =>
         this.commit({
           commandId: `${id}-${String(++n)}`,
           actor: "agent",
-          baseHead: this.project.head,
+          baseHead: seenHead,
           ops,
         }),
-      runPoint: (request) => this.runForResult(request),
-      stressTest: (request) => this.stressTest(request),
+      runPoint: (request, seenHead) => this.runForResult(request, seenHead),
+      stressTest: (request, seenHead) => this.stressTest(request, seenHead),
     };
     const recorder = new RecordingProvider(provider);
     const started = this.clock();
@@ -170,8 +177,9 @@ export class ProjectService {
 
   private runForResult(
     request: unknown,
+    seenHead?: number,
   ): { ok: true; result: ResultRecord } | Exclude<Submission, { ok: true }> {
-    const r = this.run(request);
+    const r = this.run(request, seenHead);
     if (!r.ok) return r;
     const op = r.event.ops[0];
     return op?.op === "record_result"
@@ -180,11 +188,12 @@ export class ProjectService {
   }
 
   // Halton search over the claim region; every evaluated point is recorded.
-  stressTest(request: {
-    experiment: string;
-    budget: number;
-    seed: number;
-  }): { ok: true; search: SearchSummary } | Exclude<Submission, { ok: true }> {
+  stressTest(
+    request: { experiment: string; budget: number; seed: number },
+    seenHead?: number,
+  ): { ok: true; search: SearchSummary } | Exclude<Submission, { ok: true }> {
+    if (seenHead !== undefined && seenHead !== this.project.head)
+      return stale(seenHead, this.project.head);
     const exp = this.project.state.nodes.get(request.experiment);
     const claim =
       exp?.kind === "experiment" ? this.project.state.nodes.get(exp.spec.claim.id) : undefined;
@@ -244,7 +253,9 @@ export class ProjectService {
     return this.commit({ commandId, baseHead, ops, actor: "human", approved: approvedByPerson });
   }
 
-  run(body: unknown): Submission {
+  run(body: unknown, seenHead?: number): Submission {
+    if (seenHead !== undefined && seenHead !== this.project.head)
+      return stale(seenHead, this.project.head);
     if (!isObj(body) || typeof body.experiment !== "string" || !isObj(body.point)) {
       return { ok: false, code: "invalid_input", detail: "needs experiment and point" };
     }

@@ -1,7 +1,13 @@
 import type { Contract, ResultRecord } from "@vibloom/contracts";
 import { basisFor, lessonView, Project, type Op } from "@vibloom/engine";
 import { describe, expect, it } from "vitest";
-import { BUDGET, investigate, type Workspace } from "./investigate";
+import {
+  BUDGET,
+  investigate,
+  type TurnReply,
+  type TurnRequest,
+  type Workspace,
+} from "./investigate";
 import { ScriptedProvider } from "./scripted";
 
 const contract: Contract = {
@@ -18,9 +24,9 @@ const contract: Contract = {
 function workspace(): Workspace & { project: Project } {
   const project = new Project(contract);
   let n = 0;
-  const submit = (actor: string, ops: Op[], approved = false) =>
+  const submit = (actor: string, ops: Op[], approved = false, baseHead = project.head) =>
     project.submit(
-      { commandId: `c${String(++n)}`, actor, baseHead: project.head, ops, approved },
+      { commandId: `c${String(++n)}`, actor, baseHead, ops, approved },
       `t${String(n)}`,
     );
   submit(
@@ -45,7 +51,7 @@ function workspace(): Workspace & { project: Project } {
   const ws: Workspace & { project: Project } = {
     project,
     state: () => project.state,
-    submitAsAgent: (ops) => submit("agent", ops),
+    submitAsAgent: (ops, seen) => submit("agent", ops, false, seen),
     // An evenly spaced sweep stands in for the Halton search here.
     stressTest: ({ experiment, budget }) => {
       const claim = project.state.nodes.get(
@@ -58,10 +64,10 @@ function workspace(): Workspace & { project: Project } {
       const { min, max } = claim.predicate.region.s!;
       const results: ResultRecord[] = [];
       for (let i = 0; i < budget; i++) {
-        const r = ws.runPoint({
-          experiment,
-          point: { s: min + ((max - min) * (i + 0.5)) / budget },
-        });
+        const r = ws.runPoint(
+          { experiment, point: { s: min + ((max - min) * (i + 0.5)) / budget } },
+          project.head,
+        );
         if (r.ok) results.push(r.result);
       }
       const fails = results.filter((r) => r.outcome === "fails");
@@ -92,7 +98,8 @@ function workspace(): Workspace & { project: Project } {
         },
       };
     },
-    runPoint: ({ experiment, point }) => {
+    runPoint: ({ experiment, point }, seen) => {
+      if (seen !== project.head) return { ok: false, code: "stale_base", detail: "moved on" };
       const s = project.state;
       const exp = s.nodes.get(experiment);
       if (exp?.kind !== "experiment") return { ok: false, code: "not_found", detail: experiment };
@@ -490,5 +497,57 @@ describe("investigate", () => {
     expect(inv.trace[1]?.search?.results).toHaveLength(8);
     expect(inv.trace[2]?.rejection).toMatch(/diagnose it/);
     expect(inv.stop).toBe("asked_researcher");
+  });
+
+  it("refuses a decision made on a project that changed while the model was thinking", async () => {
+    const ws = workspace();
+    let n = 0;
+    const provider = {
+      name: "slow",
+      requests: [] as TurnRequest[],
+      async decide(r: TurnRequest): Promise<TurnReply> {
+        provider.requests.push(r);
+        n++;
+        if (n === 2) {
+          // A person edits the map while the model is still deciding.
+          await Promise.resolve();
+          ws.project.submit(
+            {
+              commandId: "edit",
+              actor: "human",
+              baseHead: ws.project.head,
+              ops: [
+                {
+                  op: "set_assumption",
+                  id: "fast-bromide",
+                  expectedRevision: 1,
+                  change: { state: "off" },
+                },
+              ],
+            },
+            "t",
+          );
+        }
+        const script = [
+          formulate,
+          run("keeps-period-runs", 1.0, "holds"),
+          run("keeps-period-runs", 1.0, "holds"),
+        ];
+        return {
+          decision: script[n - 1] ?? {
+            action: "ask_researcher",
+            question: "q",
+            rationale: "r",
+            cites: [],
+          },
+        };
+      },
+    };
+    const inv = await investigate("q", provider, ws);
+    expect(inv.trace[1]?.rejection).toMatch(/project changed while you were deciding/);
+    // Nothing from the stale decision reached the record.
+    expect(ws.project.state.results.size).toBe(1);
+    // The next request carries the new state, including the edit.
+    expect(provider.requests[2]?.context).toContain('"state":"off"');
   });
 });

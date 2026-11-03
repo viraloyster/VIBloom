@@ -242,6 +242,9 @@ closed schema:
 - A prediction names the assumptions it rests on. A prediction that fails is
   a surprise, and the next decision must diagnose it (or ask the researcher)
   before the investigation moves on.
+- Every action carries the revision the model saw. If the project changed
+  while the model was deciding (for example, a person switched an assumption
+  off), the decision is refused and the model decides again on the new context.
 - A refused decision is returned to the model with the reason and counts
   against the budget: 8 turns and 14 calls per investigation.
 - Without the model the tools still work, but nothing formulates, chooses or

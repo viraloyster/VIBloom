@@ -25,22 +25,25 @@ import { renderContext } from "./context";
 
 export type Effort = "low" | "medium";
 
+// Every action carries the head the model saw. If the project moved on while
+// the model was deciding, the action is refused with "stale_base".
 export interface Workspace {
   state(): State;
   // The implementation submits these as the "agent" actor.
-  submitAsAgent(ops: Op[]): Submission;
-  runPoint(request: {
-    experiment: string;
-    point: Record<string, number>;
-    ic?: string;
-  }): { ok: true; result: ResultRecord } | Rejection;
+  submitAsAgent(ops: Op[], seenHead: number): Submission;
+  runPoint(
+    request: { experiment: string; point: Record<string, number>; ic?: string },
+    seenHead: number,
+  ): { ok: true; result: ResultRecord } | Rejection;
   // Falsification search over the claim region; every point becomes a result.
-  stressTest(request: {
-    experiment: string;
-    budget: number;
-    seed: number;
-  }): { ok: true; search: SearchSummary } | Rejection;
+  stressTest(
+    request: { experiment: string; budget: number; seed: number },
+    seenHead: number,
+  ): { ok: true; search: SearchSummary } | Rejection;
 }
+
+const STALE = "the project changed while you were deciding; decide again on the new context";
+const failure = (r: Rejection) => (r.code === "stale_base" ? STALE : `${r.code}: ${r.detail}`);
 
 export interface SearchSummary {
   region: RegionStatus;
@@ -389,26 +392,29 @@ export async function investigate(
         case "formulate":
         case "revise": {
           const ops = d.action === "formulate" ? formulateOps(state, d) : reviseOps(state, d);
-          const r = workspace.submitAsAgent(ops);
-          if (!r.ok) refuse(`${r.code}: ${r.detail}`);
+          const r = workspace.submitAsAgent(ops, state.head);
+          if (!r.ok) refuse(failure(r));
           break;
         }
         case "diagnose": {
           if (!surprise) return refuse("there is no failed prediction to diagnose");
-          const r = workspace.submitAsAgent(diagnoseOps(state, d, surprise));
-          if (!r.ok) refuse(`${r.code}: ${r.detail}`);
+          const r = workspace.submitAsAgent(diagnoseOps(state, d, surprise), state.head);
+          if (!r.ok) refuse(failure(r));
           break;
         }
         case "stress_test": {
           for (const a of d.prediction.assumes) {
             if (state.nodes.get(a)?.kind !== "assumption") refuse(`${a} is not an assumption`);
           }
-          const r = workspace.stressTest({
-            experiment: d.experiment,
-            budget: d.budget,
-            seed: d.seed,
-          });
-          if (!r.ok) refuse(`${r.code}: ${r.detail}`);
+          const r = workspace.stressTest(
+            {
+              experiment: d.experiment,
+              budget: d.budget,
+              seed: d.seed,
+            },
+            state.head,
+          );
+          if (!r.ok) refuse(failure(r));
           else {
             const observed = r.search.region.status;
             const verdict: PredictionVerdict =
@@ -448,8 +454,8 @@ export async function investigate(
             point: d.point,
             ...(d.ic ? { ic: d.ic } : {}),
           };
-          const r = workspace.runPoint(request);
-          if (!r.ok) refuse(`${r.code}: ${r.detail}`);
+          const r = workspace.runPoint(request, state.head);
+          if (!r.ok) refuse(failure(r));
           else {
             const verdict = scorePrediction(d.prediction.outcome, r.result.outcome);
             entry.result = r.result.id;
