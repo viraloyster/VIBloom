@@ -41,13 +41,23 @@ build?". Muse Spark decomposes the goal into the assumptions it rests on,
 following a fixed protocol (the same axes, every number with its unit and
 origin, reference or assumed), and the roots grow on screen as Muse writes
 them. Opening a root asks Muse for the assumptions under it, one level closer
-to first principles. Where an assumption can be tested by arithmetic, Muse
-writes the calculation; the browser runs it in an isolated worker with no
-network or storage, and a root turns red only when that calculation fails.
-Editing a value re-runs every check that read it, and everything resting on a
-broken root is marked. If one of its calculations fails to run, Muse repairs
-it once, in a single request. Everything is recorded in a hash-chained log
-that can be exported and replayed.
+to first principles.
+
+Where an assumption can be tested by arithmetic, Muse writes two expressions
+and how they must compare (for example `delta_p * radius / thickness <=
+strength`). VIBloom parses them with its own small arithmetic language,
+evaluates them and decides pass or fail; no code written by the model is ever
+executed. A root turns red only when that comparison is false. The formula and
+its numbers still come from the model, and the interface says so: a correct
+evaluation does not prove they model the problem well.
+
+Each parameter exists once in the whole tree. A deeper root that needs it uses
+the same value, and if Muse thinks the value is wrong it appears as a
+suggestion a person can adopt, never as a silent copy. Editing a value
+re-runs every check that read it, and everything resting on a broken root is
+marked. If a formula fails to evaluate, Muse repairs it once, in a single
+request. Everything is recorded in a hash-chained log that can be exported
+and replayed.
 
 **Chemistry, in depth.** The first specialised domain, chosen for its
 mathematical depth and because it can be seen: oscillating reactions
@@ -74,9 +84,11 @@ and tested with scripted and recorded runs. It still runs behind the API in
 - Without a key: open the app and choose "Watch a recorded example". It
   replays a real Muse session; the calculations are re-run in your browser.
 - With your own Meta Model API key: grow any idea. The key stays in the tab
-  (or on the device, if you ask) and is sent only to api.meta.ai. Every
-  request reserves its worst-case cost first and the session stops at the
-  budget you set. Standard mode keeps your content out of Meta's training;
+  (or on the device, if you ask) and is sent only to api.meta.ai. Before each
+  request the API counts its input tokens, and the session reserves that
+  input plus the maximum output at full price, so it stops at the budget you
+  set. This is a limit for the tab, not for your account: set a spend limit
+  in your Meta billing settings too. Standard mode keeps your content out of Meta's training;
   contributor mode is about 20 times cheaper and lets Meta train on it.
 - Locally: `npm ci && npm run dev`, then open the printed address.
 

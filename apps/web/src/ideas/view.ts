@@ -72,7 +72,7 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
   const roots = svg("g", { class: "roots" });
   const marks = svg("g", { class: "marks" });
   const crown = svg("image", {
-    href: "/crown.webp",
+    href: "crown.webp",
     x: -CROWN_W / 2,
     y: -CROWN_H - 30,
     width: CROWN_W,

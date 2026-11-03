@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { evaluate, lockdown, toResult } from "./check";
+import { runCheck } from "./check";
 import { BudgetExceeded, cost, Ledger } from "./cost";
+import { evaluate } from "./expr";
+import { Muse } from "./muse";
 import type { GrownNode } from "./protocol";
 import { ArrayItems } from "./stream";
 import { IdeaTree } from "./tree";
 import type { Usage } from "./types";
 
+const noCheck = { description: "", value: "", op: "none", limit: "", unit: "" };
 const grown = (key: string, extra: Partial<GrownNode> = {}): GrownNode => ({
   key,
   title: `T ${key}`,
@@ -16,7 +19,7 @@ const grown = (key: string, extra: Partial<GrownNode> = {}): GrownNode => ({
   risk: "high",
   rationale: "",
   params: [],
-  check: { description: "", code: "" },
+  check: noCheck,
   basis: [],
   ...extra,
 });
@@ -28,25 +31,26 @@ const usage: Usage = {
   reasoning: 0,
   cost: 0,
 };
+const p = (name: string, value: number, origin = "assumed") => ({
+  name,
+  value,
+  unit: "MPa",
+  origin,
+  source: origin === "reference" ? "Roark" : "ignored",
+});
 
 function planted() {
   const t = new IdeaTree();
   t.append("person", { type: "goal", text: "Cardboard airliner", mode: "standard" });
   const nodes = t.admit("goal", [
     grown("skin", {
-      params: [
-        {
-          name: "stress need",
-          value: 55,
-          unit: "MPa",
-          origin: "reference",
-          source: "Laplace pR/t",
-        },
-        { name: "strength", value: 12, unit: "MPa", origin: "assumed", source: "ignored" },
-      ],
+      params: [p("stress need", 55, "reference"), p("strength", 12)],
       check: {
-        description: "",
-        code: "return { value: p.strength, limit: p.stress_need, unit: 'MPa', pass: p.strength >= p.stress_need, detail: '' };",
+        description: "hoop stress against strength",
+        value: "stress_need",
+        op: "<=",
+        limit: "strength",
+        unit: "MPa",
       },
     }),
     grown("cost", { risk: "low", basis: ["skin", "nowhere"] }),
@@ -56,19 +60,46 @@ function planted() {
 }
 
 const run = (t: IdeaTree, id: string) => {
-  const code = t.nodes.get(id)?.check?.code ?? "";
-  const { raw, read } = evaluate(code, t.scope(id));
-  t.append("engine", { type: "check", node: id, result: toResult(raw, read) });
+  const spec = t.nodes.get(id)?.check;
+  if (!spec) throw new Error("no check");
+  t.append("engine", { type: "check", node: id, result: runCheck(spec, t.scope()) });
 };
+
+describe("arithmetic checks", () => {
+  it("evaluates expressions over named parameters and records what they read", () => {
+    const read: Record<string, number> = {};
+    expect(evaluate("delta_p * r / t + 2^3 - -1", { delta_p: 60, r: 2, t: 0.01, z: 9 }, read)).toBe(
+      12009,
+    );
+    expect(read).toEqual({ delta_p: 60, r: 2, t: 0.01 });
+    expect(evaluate("sqrt(max(4, 9)) * pi", {})).toBeCloseTo(3 * Math.PI);
+    expect(evaluate("p.a * 2", { a: 3 })).toBe(6);
+  });
+
+  it("refuses anything that is not arithmetic", () => {
+    for (const bad of ["fetch('x')", "a; b", "constructor", "this.x", "a[0]", "`x`", "a = 1"]) {
+      expect(() => evaluate(bad, { a: 1, b: 2 })).toThrow();
+    }
+  });
+
+  it("decides pass from the comparison, never from the model", () => {
+    const spec = { description: "", value: "a", op: "<=" as const, limit: "b", unit: "" };
+    expect(runCheck(spec, { a: 1, b: 2 })).toMatchObject({ pass: true, value: 1, limit: 2 });
+    expect(runCheck({ ...spec, op: ">" }, { a: 1, b: 2 })).toMatchObject({ pass: false });
+    expect(runCheck({ ...spec, value: "a / 0" }, { a: 1, b: 2 })).toHaveProperty("error");
+    expect(runCheck({ ...spec, value: "missing" }, { a: 1, b: 2 })).toHaveProperty("error");
+  });
+});
 
 describe("idea tree", () => {
   it("admits model output only on protocol, with clean names and resolved basis", () => {
     const t = planted();
     const skin = t.nodes.get("skin");
-    expect(skin?.params.map((p) => p.name)).toEqual(["stress_need", "strength"]);
+    expect(skin?.params.map((x) => x.name)).toEqual(["stress_need", "strength"]);
     // An assumed value never keeps a source.
     expect(skin?.params[1]?.source).toBe("");
     expect(t.nodes.get("cost")?.basis).toEqual(["skin"]);
+    expect(t.nodes.get("cost")?.check).toBeUndefined();
     expect(t.admit("goal", [{ ...grown("bad"), axis: "astrology" }])).toEqual([]);
   });
 
@@ -78,23 +109,50 @@ describe("idea tree", () => {
     expect(t.status("skin")).toBe("broken");
     expect(t.status("cost")).toBe("affected");
     expect(t.status("goal")).toBe("affected");
-    expect(t.assumedInputs("skin").map((p) => p.name)).toEqual(["strength"]);
+    expect(t.assumedInputs("skin").map((x) => x.name)).toEqual(["strength"]);
   });
 
-  it("marks a result stale when a value it read changes, and recomputes", () => {
+  it("never copies an existing parameter: a deeper node uses it or suggests a value", () => {
     const t = planted();
     run(t, "skin");
-    t.append("person", { type: "set_param", node: "skin", name: "strength", value: 60 });
+    const under = t.admit("skin", [
+      grown("liner", { params: [p("strength", 8, "reference"), p("liner_plies", 3)] }),
+      grown("same", { params: [p("strength", 12)] }),
+    ]);
+    t.append("muse", { type: "grow", under: "skin", nodes: under, summary: "", usage });
+    const liner = t.nodes.get("skin.liner");
+    expect(liner?.params.map((x) => x.name)).toEqual(["liner_plies"]);
+    expect(liner?.uses).toEqual(["strength"]);
+    expect(liner?.suggestions.map((x) => x.value)).toEqual([8]);
+    expect(t.nodes.get("skin.same")?.suggestions).toEqual([]);
+    expect(t.owner("strength")?.id).toBe("skin");
+    // Adopting the deeper value changes the one parameter the parent reads.
+    t.append("person", { type: "set_param", name: "strength", value: 60, source: "adopted" });
     expect(t.status("skin")).toBe("stale");
     run(t, "skin");
     expect(t.status("skin")).toBe("holds");
     expect(t.status("goal")).toBe("goal");
   });
 
+  it("refuses a log that defines a parameter twice", () => {
+    const t = planted();
+    const copy = structuredClone(t.nodes.get("skin"));
+    if (!copy) throw new Error("missing");
+    expect(() =>
+      t.append("muse", {
+        type: "grow",
+        under: "skin",
+        nodes: [{ ...copy, id: "skin.copy", parent: "skin" }],
+        summary: "",
+        usage,
+      }),
+    ).toThrow(/already exists/);
+  });
+
   it("replays its own log and refuses a tampered one", () => {
     const t = planted();
     run(t, "skin");
-    t.append("person", { type: "set_param", node: "skin", name: "strength", value: 60 });
+    t.append("person", { type: "set_param", name: "strength", value: 60, source: "edit" });
     const copy = IdeaTree.replay(structuredClone(t.events));
     expect(copy.head).toBe(t.head);
     const bad = structuredClone(t.events);
@@ -116,13 +174,16 @@ describe("idea tree", () => {
     expect(t.nodes.has("newton.doubt")).toBe(false);
   });
 
-  it("accepts repairs only for checks that failed to run", () => {
+  it("accepts repairs only for checks that failed to evaluate", () => {
     const t = planted();
-    t.append("engine", { type: "check", node: "skin", result: { error: "boom" } });
+    const skin = t.nodes.get("skin");
+    if (!skin?.check) throw new Error("missing");
+    skin.check.limit = "strenght";
+    run(t, "skin");
     expect(t.broken().map((b) => b.id)).toEqual(["skin"]);
     const fixes = t.admitFixes([
-      { id: "skin", code: "return { value: 1, limit: 2, unit: '', pass: true, detail: '' };" },
-      { id: "cost", code: "return 1;" },
+      { id: "skin", value: "stress_need", limit: "strength * 10" },
+      { id: "cost", value: "1", limit: "2" },
     ]);
     expect(fixes.map((f) => f.node)).toEqual(["skin"]);
     t.append("muse", { type: "repair", fixes, usage });
@@ -152,6 +213,31 @@ describe("cost", () => {
     l.cancel(c);
     expect(l.left).toBeCloseTo(0.04);
   });
+
+  it("reserves from the API's own token count and the output ceiling", async () => {
+    const seen: string[] = [];
+    const fake = (url: string) => {
+      seen.push(url);
+      if (url.endsWith("/input_tokens")) {
+        return Promise.resolve(new Response(JSON.stringify({ input_tokens: 1000 })));
+      }
+      // The ledger must already hold the ceiling when the request goes out.
+      expect(ledger.left).toBeCloseTo(1 - cost("muse-spark-1.3", 1000, 0, 2000));
+      return Promise.resolve(new Response(null, { status: 401 }));
+    };
+    const ledger = new Ledger(1);
+    const muse = new Muse({ fetch: fake as typeof fetch }, ledger);
+    await expect(
+      muse.ask(
+        { instructions: "i", input: "x", mode: "standard", effort: "low", maxOutput: 2000 },
+        "t",
+        {},
+      ),
+    ).rejects.toThrow();
+    expect(seen.map((u) => u.split("/v1")[1])).toEqual(["/responses/input_tokens", "/responses"]);
+    // Refused before inference: nothing counts as spent.
+    expect(ledger.total).toBe(0);
+  });
 });
 
 describe("streamed array items", () => {
@@ -166,29 +252,5 @@ describe("streamed array items", () => {
       for (let i = 0; i < json.length; i += size) out.push(...items.push(json.slice(i, i + size)));
       expect(out).toEqual([{ key: "x", t: "[}" }, { key: "y" }]);
     }
-  });
-});
-
-describe("checks", () => {
-  it("records which parameters a check read and validates its result", () => {
-    const { raw, read } = evaluate(
-      "return { value: p.a * 2, limit: 3, unit: 'm', pass: true, detail: '' };",
-      { a: 1, b: 2 },
-    );
-    expect(read).toEqual({ a: 1 });
-    expect(toResult(raw, read)).toMatchObject({ value: 2, pass: true });
-    expect(toResult({ value: NaN, limit: 1, pass: true }, {})).toHaveProperty("error");
-  });
-
-  it("cannot write to the parameters", () => {
-    expect(() => evaluate("p.a = 5; return null;", { a: 1 })).toThrow();
-  });
-
-  it("removes network and storage from the global scope", () => {
-    const scope = { fetch: () => 1, WebSocket: 1, keep: 2 };
-    lockdown(scope);
-    expect(scope.fetch).toBeUndefined();
-    expect(scope.WebSocket).toBeUndefined();
-    expect(scope.keep).toBe(2);
   });
 });

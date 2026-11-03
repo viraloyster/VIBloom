@@ -2,11 +2,11 @@
 // what the model returns is validated here before it becomes a node.
 
 import { canonical, sha256 } from "@vibloom/engine";
+import { MAX_EXPR, OPS, type Op } from "./expr";
 import { AXES, type GrownNode } from "./protocol";
 import type { CheckResult, EventBody, IdeaEvent, IdeaNode, Mode, Param, Usage } from "./types";
 
 const GENESIS = "0".repeat(64);
-const MAX_CODE = 4000;
 
 export type Status =
   | "goal"
@@ -69,6 +69,8 @@ export class IdeaTree {
           risk: "medium",
           rationale: "",
           params: [],
+          uses: [],
+          suggestions: [],
           basis: [],
           proposed: false,
           expanded: false,
@@ -78,7 +80,12 @@ export class IdeaTree {
         const under = this.nodes.get(b.under);
         if (!under) throw new Error(`unknown node ${b.under}`);
         // Copies, so later edits never alter the recorded event.
-        for (const n of b.nodes) this.nodes.set(n.id, structuredClone(n));
+        for (const n of b.nodes) {
+          for (const p of n.params) {
+            if (this.owner(p.name)) throw new Error(`parameter ${p.name} already exists`);
+          }
+          this.nodes.set(n.id, structuredClone(n));
+        }
         under.expanded = true;
         break;
       }
@@ -90,16 +97,16 @@ export class IdeaTree {
         for (const f of b.fixes) {
           const n = this.nodes.get(f.node);
           if (!n?.check) throw new Error(`no check on ${f.node}`);
-          n.check = { ...n.check, code: f.code };
+          n.check = { ...n.check, value: f.value, limit: f.limit };
           this.results.delete(f.node);
         }
         break;
       case "set_param": {
-        const p = this.nodes.get(b.node)?.params.find((x) => x.name === b.name);
-        if (!p || !Number.isFinite(b.value)) throw new Error(`no param ${b.name} on ${b.node}`);
+        const p = this.owner(b.name)?.params.find((x) => x.name === b.name);
+        if (!p || !Number.isFinite(b.value)) throw new Error(`no parameter ${b.name}`);
         p.value = b.value;
         p.origin = "assumed";
-        p.source = "set by a person";
+        p.source = b.source;
         break;
       }
       case "accept":
@@ -133,19 +140,21 @@ export class IdeaTree {
     return out;
   }
 
-  // Parameters a check may read: its own, its ancestors' and its basis nodes'.
-  // The nearest definition of a name wins.
-  scope(id: string): Record<string, number> {
-    const n = this.nodes.get(id);
-    if (!n) return {};
-    const from = [...this.ancestors(id)].reverse();
-    for (const b of n.basis) {
-      const x = this.nodes.get(b);
-      if (x) from.push(x);
-    }
-    from.push(n);
+  // The node that introduced a parameter. Each name has exactly one.
+  owner(name: string): IdeaNode | undefined {
+    for (const n of this.nodes.values()) if (n.params.some((p) => p.name === name)) return n;
+    return undefined;
+  }
+
+  param(name: string): Param | undefined {
+    return this.owner(name)?.params.find((p) => p.name === name);
+  }
+
+  // Every parameter in the tree, one value per name, so a change anywhere
+  // reaches every check that reads it.
+  scope(): Record<string, number> {
     const out: Record<string, number> = {};
-    for (const x of from) for (const p of x.params) out[p.name] = p.value;
+    for (const n of this.nodes.values()) for (const p of n.params) out[p.name] = p.value;
     return out;
   }
 
@@ -153,8 +162,9 @@ export class IdeaTree {
   assumedInputs(id: string): Param[] {
     const r = this.results.get(id);
     if (!r || "error" in r) return [];
-    const all = [this.nodes.get(id), ...this.ancestors(id)].flatMap((n) => n?.params ?? []);
-    return all.filter((p) => p.origin === "assumed" && p.name in r.inputs);
+    return Object.keys(r.inputs)
+      .map((k) => this.param(k))
+      .filter((p): p is Param => p?.origin === "assumed");
   }
 
   status(id: string, seen = new Set<string>()): Status {
@@ -164,7 +174,7 @@ export class IdeaTree {
     if (n.proposed) return "proposed";
     const r = this.results.get(id);
     if (r && !("error" in r)) {
-      const scope = this.scope(id);
+      const scope = this.scope();
       if (Object.entries(r.inputs).some(([k, v]) => scope[k] !== v)) return "stale";
       if (!r.pass) return "broken";
     }
@@ -195,10 +205,13 @@ export class IdeaTree {
   }
 
   // Turn what the model returned into nodes, refusing anything off-protocol.
+  // A parameter that already exists is never copied: the node uses it, and a
+  // different value becomes a suggestion for a person to adopt.
   admit(under: string, grown: GrownNode[]): IdeaNode[] {
     const parent = this.nodes.get(under);
     if (!parent) throw new Error(`unknown node ${under}`);
     const keys = new Map<string, string>();
+    const taken = new Set(Object.keys(this.scope()));
     const out: IdeaNode[] = [];
     for (const g of grown.slice(0, 8)) {
       if (!isGrown(g)) continue;
@@ -210,6 +223,40 @@ export class IdeaTree {
       let id = under === "goal" ? slug : `${under}.${slug}`;
       while (this.nodes.has(id) || keys.has(id)) id += "x";
       keys.set(g.key, id);
+      const params: Param[] = [];
+      const uses: string[] = [];
+      const suggestions: Param[] = [];
+      for (const raw of g.params.slice(0, 12)) {
+        if (!raw.name || !Number.isFinite(raw.value)) continue;
+        const p: Param = {
+          name: raw.name.replace(/\W+/g, "_").slice(0, 64),
+          value: raw.value,
+          unit: raw.unit.slice(0, 24),
+          origin: raw.origin === "reference" ? "reference" : "assumed",
+          source: raw.origin === "reference" ? raw.source.slice(0, 200) : "",
+        };
+        if (!taken.has(p.name)) {
+          taken.add(p.name);
+          params.push(p);
+          continue;
+        }
+        if (!uses.includes(p.name)) uses.push(p.name);
+        const current =
+          this.param(p.name) ?? out.flatMap((o) => o.params).find((x) => x.name === p.name);
+        if (
+          current &&
+          Math.abs(current.value - p.value) > 1e-9 * Math.max(1, Math.abs(current.value))
+        ) {
+          suggestions.push(p);
+        }
+      }
+      const c = g.check;
+      const computable =
+        (OPS as readonly string[]).includes(c.op) &&
+        c.value.trim() !== "" &&
+        c.limit.trim() !== "" &&
+        c.value.length <= MAX_EXPR &&
+        c.limit.length <= MAX_EXPR;
       out.push({
         id,
         parent: under,
@@ -220,18 +267,19 @@ export class IdeaTree {
         criticality: g.criticality,
         risk: g.risk,
         rationale: g.rationale.slice(0, 600),
-        params: g.params
-          .filter((p) => p.name && Number.isFinite(p.value))
-          .slice(0, 12)
-          .map((p) => ({
-            name: p.name.replace(/\W+/g, "_").slice(0, 64),
-            value: p.value,
-            unit: p.unit.slice(0, 24),
-            origin: p.origin === "reference" ? "reference" : "assumed",
-            source: p.origin === "reference" ? p.source.slice(0, 200) : "",
-          })),
-        ...(g.check.code.trim() && g.check.code.length <= MAX_CODE
-          ? { check: { description: g.check.description.slice(0, 400), code: g.check.code } }
+        params,
+        uses,
+        suggestions,
+        ...(computable
+          ? {
+              check: {
+                description: c.description.slice(0, 400),
+                value: c.value,
+                op: c.op as Op,
+                limit: c.limit,
+                unit: c.unit.slice(0, 24),
+              },
+            }
           : {}),
         basis: g.basis,
         // Questioning a law of nature is always only a proposal.
@@ -249,24 +297,34 @@ export class IdeaTree {
     return out;
   }
 
-  // Checks that failed to run, with what a repair needs to see.
-  broken(): { id: string; code: string; error: string; params: string[] }[] {
+  // Checks that failed to evaluate, with what a repair needs to see.
+  broken(): { id: string; value: string; limit: string; error: string; params: string[] }[] {
     const out = [];
+    const names = Object.keys(this.scope());
     for (const [id, r] of this.results) {
       const n = this.nodes.get(id);
       if (n?.check && "error" in r) {
-        out.push({ id, code: n.check.code, error: r.error, params: Object.keys(this.scope(id)) });
+        out.push({ id, value: n.check.value, limit: n.check.limit, error: r.error, params: names });
       }
     }
     return out;
   }
 
   // Admits only fixes for checks that are failing, within the size limit.
-  admitFixes(fixes: { id: string; code: string }[]): { node: string; code: string }[] {
+  admitFixes(
+    fixes: { id: string; value: string; limit: string }[],
+  ): { node: string; value: string; limit: string }[] {
     const failing = new Set(this.broken().map((b) => b.id));
     return fixes
-      .filter((f) => failing.has(f.id) && f.code.trim() && f.code.length <= MAX_CODE)
-      .map((f) => ({ node: f.id, code: f.code }));
+      .filter(
+        (f) =>
+          failing.has(f.id) &&
+          f.value.trim() &&
+          f.limit.trim() &&
+          f.value.length <= MAX_EXPR &&
+          f.limit.length <= MAX_EXPR,
+      )
+      .map((f) => ({ node: f.id, value: f.value, limit: f.limit }));
   }
 
   // What the model sees when it expands a node: the path from the goal, the
@@ -288,6 +346,9 @@ export class IdeaTree {
         rationale: n.rationale,
       },
       existing: [...this.nodes.values()].filter((x) => x.id !== id).map(line),
+      params: [...this.nodes.values()].flatMap((x) =>
+        x.params.map((p) => `${p.name} = ${String(p.value)} ${p.unit}`),
+      ),
     });
   }
 }
@@ -310,7 +371,10 @@ function isGrown(g: GrownNode): boolean {
     str(g.rationale) &&
     Array.isArray(g.params) &&
     typeof g.check === "object" &&
-    str(g.check.code) &&
+    str(g.check.value) &&
+    str(g.check.limit) &&
+    str(g.check.op) &&
+    str(g.check.unit) &&
     str(g.check.description) &&
     Array.isArray(g.basis) &&
     g.basis.every(str)

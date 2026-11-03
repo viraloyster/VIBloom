@@ -17,19 +17,22 @@ export interface Param {
   source: string;
 }
 
-// Arithmetic the model wrote to test the assumption from the parameters in
-// scope. Runs isolated, with no I/O.
+// The assumption holds when value op limit. The model writes the two
+// expressions and the comparison; the engine evaluates and decides.
 export interface CheckSpec {
   description: string;
-  code: string;
+  value: string;
+  op: "<" | "<=" | ">" | ">=";
+  limit: string;
+  unit: string;
 }
 
 export interface CheckResult {
   pass: boolean;
   value: number;
   limit: number;
+  op: CheckSpec["op"];
   unit: string;
-  detail: string;
   // Parameters the check read, as they were when it ran.
   inputs: Record<string, number>;
 }
@@ -44,7 +47,12 @@ export interface IdeaNode {
   criticality: Criticality;
   risk: Risk;
   rationale: string;
+  // Parameters this node introduced. Names are unique across the tree.
   params: Param[];
+  // Existing parameters this node relies on or explains.
+  uses: string[];
+  // Values the model proposed for existing parameters; a person decides.
+  suggestions: Param[];
   check?: CheckSpec;
   // Other nodes this one rests on, beyond its own children.
   basis: string[];
@@ -66,8 +74,8 @@ export type EventBody =
   | { type: "goal"; text: string; mode: Mode }
   | { type: "grow"; under: string; nodes: IdeaNode[]; summary: string; usage: Usage }
   | { type: "check"; node: string; result: CheckResult | { error: string } }
-  | { type: "repair"; fixes: { node: string; code: string }[]; usage: Usage }
-  | { type: "set_param"; node: string; name: string; value: number }
+  | { type: "repair"; fixes: { node: string; value: string; limit: string }[]; usage: Usage }
+  | { type: "set_param"; name: string; value: number; source: string }
   | { type: "accept"; node: string }
   | { type: "reject"; node: string };
 

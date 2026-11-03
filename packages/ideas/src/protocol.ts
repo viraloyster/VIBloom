@@ -25,16 +25,22 @@ Protocol (follow it exactly; it keeps trees comparable between people):
 - Each node states ONE assumption that could be false, as a plain sentence
   ("Corrugated cardboard spars carry the 2.5 g limit load"), not a topic.
 - Put every number you rely on in params with its unit. Param names are
-  snake_case identifiers (letters, digits, underscore) and are referenced in
-  check code as p.name. origin "reference"
+  snake_case identifiers (letters, digits, underscore). origin "reference"
   only when you can name a specific source (handbook, standard, textbook,
   measured dataset) in source; otherwise origin "assumed" and source "".
   Prefer published typical values over guesses. Never hide a number in text.
-- When the assumption can be tested by arithmetic on params in scope (this
-  node, its ancestors, or nodes listed in basis), write check.code: the body of
-  a JavaScript function of one argument p (params by name) that returns
-  { value, limit, unit, pass, detail }. Pure arithmetic, no loops over 10000
-  steps, no I/O. Otherwise check.code is "" and check.description says why.
+- Parameters are shared by the whole tree. If a quantity already exists (see
+  "params" in the input), use exactly that name and do not redefine it. If you
+  think its value is wrong, still list it under that name with your value and
+  source: VIBloom shows it as a suggestion, never a silent copy.
+- When the assumption can be tested by arithmetic on parameters, write a
+  check: value and limit are arithmetic expressions over parameter names
+  (+ - * / ^, parentheses, sqrt abs min max log log10 exp pow sin cos tan, pi),
+  op says how they must compare for the assumption to hold (value op limit),
+  unit is the unit of both. Example: value "delta_p * radius / skin_thickness",
+  op "<=", limit "skin_strength". You do not decide pass or fail; the engine
+  computes it. Otherwise op is "none", value and limit are "", and description
+  says why it cannot be computed.
 - role "bedrock" only for laws of nature, axioms, definitions or measured
   constants. Bedrock can still be questioned later.
 - criticality: critical if the goal fails without it. risk: how likely it is to
@@ -56,11 +62,11 @@ Task: expand ONE node of an existing tree. Return 2 to 5 assumptions that this
 node directly rests on, one level deeper, moving toward bedrock. If the node is
 already bedrock, return what it would take to question it.`;
 
-export const REPAIR = `You are Muse inside VIBloom. Calculations you wrote failed to run. For each,
-return corrected code: the body of a JavaScript function of one argument p
-(the parameters listed, by name) that returns { value, limit, unit, pass,
-detail } with finite numbers and a boolean pass. Pure arithmetic, no I/O. Use
-only the parameter names given. If a fix is impossible, return code "".`;
+export const REPAIR = `You are Muse inside VIBloom. Checks you wrote failed to evaluate. For each,
+return corrected value and limit expressions: arithmetic over the parameter
+names listed (+ - * / ^, parentheses, sqrt abs min max log log10 exp pow sin cos
+tan, pi), evaluating to finite numbers. Keep the meaning and the comparison.
+If a fix is impossible, return both as "".`;
 
 export const REPAIR_SCHEMA = {
   type: "object",
@@ -72,8 +78,12 @@ export const REPAIR_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "code"],
-        properties: { id: { type: "string" }, code: { type: "string" } },
+        required: ["id", "value", "limit"],
+        properties: {
+          id: { type: "string" },
+          value: { type: "string" },
+          limit: { type: "string" },
+        },
       },
     },
   },
@@ -121,8 +131,14 @@ const node = {
     check: {
       type: "object",
       additionalProperties: false,
-      required: ["description", "code"],
-      properties: { description: { type: "string" }, code: { type: "string" } },
+      required: ["description", "value", "op", "limit", "unit"],
+      properties: {
+        description: { type: "string" },
+        value: { type: "string" },
+        op: { type: "string", enum: ["<", "<=", ">", ">=", "none"] },
+        limit: { type: "string" },
+        unit: { type: "string" },
+      },
     },
     basis: { type: "array", items: { type: "string" } },
   },
@@ -148,6 +164,6 @@ export interface GrownNode {
   risk: "low" | "medium" | "high";
   rationale: string;
   params: { name: string; value: number; unit: string; origin: string; source: string }[];
-  check: { description: string; code: string };
+  check: { description: string; value: string; op: string; limit: string; unit: string };
   basis: string[];
 }

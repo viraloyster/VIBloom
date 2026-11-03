@@ -21,137 +21,39 @@
         "under": "goal",
         "nodes": [
           {
-            "id": "pressurization-strength",
+            "id": "primary-strength",
             "parent": "goal",
-            "title": "Pressurization hoop strength",
-            "statement": "Triple-wall cardboard fuselage skin carries the cruise pressurization hoop stress.",
-            "axis": "materials",
-            "role": "assumption",
-            "criticality": "critical",
-            "risk": "high",
-            "rationale": "Pressurization sizes fuselage skin. If hoop stress exceeds cardboard strength the fuselage bursts on first cruise climb.",
-            "params": [
-              {
-                "name": "pressure_diff_kpa",
-                "value": 60,
-                "unit": "kPa",
-                "origin": "reference",
-                "source": "FAA / Boeing 787 cabin differential ~8-9 psi"
-              },
-              {
-                "name": "fuselage_radius_m",
-                "value": 2,
-                "unit": "m",
-                "origin": "reference",
-                "source": "Airbus A320 fuselage diameter ~4 m handbook"
-              },
-              {
-                "name": "skin_thickness_mm",
-                "value": 10,
-                "unit": "mm",
-                "origin": "assumed",
-                "source": ""
-              },
-              {
-                "name": "cardboard_tensile_strength_mpa",
-                "value": 7,
-                "unit": "MPa",
-                "origin": "assumed",
-                "source": ""
-              }
-            ],
-            "check": {
-              "description": "Thin-wall hoop stress p*R/t compared to cardboard tensile strength.",
-              "code": "const stress = p.pressure_diff_kpa*1000*p.fuselage_radius_m/(p.skin_thickness_mm/1000)/1e6; return {value: stress, limit: p.cardboard_tensile_strength_mpa, unit: 'MPa', pass: stress <= p.cardboard_tensile_strength_mpa, detail: `Hoop stress ${stress.toFixed(1)} MPa vs cardboard strength ${p.cardboard_tensile_strength_mpa} MPa`};"
-            },
-            "basis": [],
-            "proposed": false,
-            "expanded": false
-          },
-          {
-            "id": "wing-bending-load",
-            "parent": "goal",
-            "title": "Wing limit load capacity",
-            "statement": "Cardboard wing spar box carries the 2.5 g limit bending load without crushing.",
+            "title": "Cardboard carries flight loads",
+            "statement": "Corrugated cardboard primary structure carries FAR 25 limit flight and pressure loads without crushing or buckling",
             "axis": "loads",
             "role": "assumption",
             "criticality": "critical",
             "risk": "high",
-            "rationale": "Wings must carry 2.5g limit load without collapse. Cardboard crush strength is orders below aluminum, so spars would buckle.",
+            "rationale": "Flight, gust, and pressurization loads size an airliner at ~100 MPa; corrugated board is two orders weaker and buckles, so this alone fails the goal.",
             "params": [
               {
-                "name": "mtow_kg",
-                "value": 70000,
-                "unit": "kg",
-                "origin": "reference",
-                "source": "Airbus A320 MTOW ~78000 kg datasheet"
-              },
-              {
-                "name": "gravity_m_s2",
-                "value": 9.81,
-                "unit": "m/s2",
-                "origin": "reference",
-                "source": "NIST SI value of g"
-              },
-              {
-                "name": "load_factor",
-                "value": 2.5,
-                "unit": "g",
-                "origin": "reference",
-                "source": "FAR Part 25 limit maneuver load factor 2.5g"
-              },
-              {
-                "name": "spar_cap_area_m2",
-                "value": 0.2,
-                "unit": "m2",
-                "origin": "assumed",
-                "source": ""
-              },
-              {
-                "name": "cardboard_compressive_strength_mpa",
-                "value": 5,
+                "name": "design_stress_mpa",
+                "value": 120,
                 "unit": "MPa",
-                "origin": "assumed",
-                "source": ""
-              }
-            ],
-            "check": {
-              "description": "Limit-load compressive stress in idealized spar caps compared to cardboard edge-crush strength.",
-              "code": "const load = p.mtow_kg*p.gravity_m_s2*p.load_factor/p.spar_cap_area_m2/1e6; return {value: load, limit: p.cardboard_compressive_strength_mpa, unit: 'MPa', pass: load <= p.cardboard_compressive_strength_mpa, detail: `Spar stress ${load.toFixed(1)} MPa vs cardboard ${p.cardboard_compressive_strength_mpa} MPa`};"
-            },
-            "basis": [],
-            "proposed": false,
-            "expanded": false
-          },
-          {
-            "id": "moisture-durability",
-            "parent": "goal",
-            "title": "Moisture resistance",
-            "statement": "Cardboard retains certified strength and stiffness after rain, humidity and condensation.",
-            "axis": "risks",
-            "role": "assumption",
-            "criticality": "critical",
-            "risk": "high",
-            "rationale": "Airliners sit in rain, de-icing fluid and 90% humidity. Cellulose wicks water and loses most stiffness, so shape and buckling capacity vanish.",
-            "params": [
-              {
-                "name": "wet_retention_ratio",
-                "value": 0.2,
-                "unit": "fraction",
-                "origin": "assumed",
-                "source": ""
+                "origin": "reference",
+                "source": "Bruhn Airplane Structures / Niu Airframe - Al fuselage hoop+bending stress ~100-150 MPa"
               },
               {
-                "name": "required_retention_ratio",
-                "value": 0.9,
-                "unit": "fraction",
-                "origin": "assumed",
-                "source": ""
+                "name": "cardboard_strength_mpa",
+                "value": 2,
+                "unit": "MPa",
+                "origin": "reference",
+                "source": "TAPPI T811 ECT data - double-wall corrugated edge-crush derived strength ~1-3 MPa"
               }
             ],
+            "uses": [],
+            "suggestions": [],
             "check": {
-              "description": "Compare wet strength retention to minimum needed for certified structure.",
-              "code": "const retained = p.wet_retention_ratio; return {value: retained, limit: p.required_retention_ratio, unit: 'fraction', pass: retained >= p.required_retention_ratio, detail: `Wet retention ${retained} vs required ${p.required_retention_ratio}`};"
+              "description": "Limit-load skin and spar stress must not exceed cardboard compressive strength",
+              "value": "design_stress_mpa",
+              "op": "<=",
+              "limit": "cardboard_strength_mpa",
+              "unit": "MPa"
             },
             "basis": [],
             "proposed": false,
@@ -160,62 +62,154 @@
           {
             "id": "fire-certification",
             "parent": "goal",
-            "title": "Fire certification",
-            "statement": "Uncoated cardboard cabin and structure passes airliner fire, smoke and burn-through certification.",
+            "title": "Cardboard passes fire rules",
+            "statement": "Cardboard fuselage and cabin meet FAR 25.853 flammability, smoke and toxicity rules without negating cost savings",
             "axis": "constraints",
             "role": "assumption",
             "criticality": "critical",
             "risk": "high",
-            "rationale": "Certification forbids readily flammable structure and interiors. Cardboard is fuel and cannot get a type certificate unprotected.",
+            "rationale": "Certification forbids flammable primary structure and cabin liners; untreated paper ignites at low temperature and propagates flame.",
             "params": [
               {
-                "name": "max_burn_time_s",
-                "value": 15,
-                "unit": "s",
+                "name": "cardboard_burn_rate_mm_min",
+                "value": 110,
+                "unit": "mm/min",
                 "origin": "reference",
-                "source": "FAR 25.853 12-second vertical burn test limit 15 s"
+                "source": "TAPPI / literature - untreated corrugated paper burns ~100-150 mm/min"
               },
               {
-                "name": "cardboard_ignition_temp_c",
-                "value": 230,
-                "unit": "C",
-                "origin": "assumed",
-                "source": ""
+                "name": "far_max_burn_rate_mm_min",
+                "value": 63.5,
+                "unit": "mm/min",
+                "origin": "reference",
+                "source": "FAR 25.853 Appendix F vertical burn - 2.5 in/min limit for cabin materials"
               }
             ],
+            "uses": [],
+            "suggestions": [],
+            "check": {
+              "description": "Burn rate must meet FAR 25.853 vertical test; cardboard burns far faster unless heavily treated",
+              "value": "cardboard_burn_rate_mm_min",
+              "op": "<=",
+              "limit": "far_max_burn_rate_mm_min",
+              "unit": "mm/min"
+            },
             "basis": [],
             "proposed": false,
             "expanded": false
           },
           {
-            "id": "fatigue-cycles",
+            "id": "moisture-durability",
             "parent": "goal",
-            "title": "Fatigue life",
-            "statement": "Cardboard fuselage survives 60000 pressurization cycles without fatigue failure.",
+            "title": "Cardboard survives wet environment",
+            "statement": "Cardboard retains adequate strength and stiffness after prolonged humidity, rain, and condensation exposure",
             "axis": "materials",
+            "role": "assumption",
+            "criticality": "critical",
+            "risk": "high",
+            "rationale": "Airliners sit in rain, humidity, condensation and de-icing fluid; paper wicks water and loses most strength and supports mold.",
+            "params": [
+              {
+                "name": "wet_retention_ratio",
+                "value": 0.2,
+                "unit": "ratio",
+                "origin": "reference",
+                "source": "Paper physics handbook - kraft liner loses 70-90% stiffness/strength at high RH/wetting"
+              },
+              {
+                "name": "required_retention_ratio",
+                "value": 0.85,
+                "unit": "ratio",
+                "origin": "assumed",
+                "source": ""
+              }
+            ],
+            "uses": [],
+            "suggestions": [],
+            "check": {
+              "description": "Wet strength retention must stay above structural knockdown allowance",
+              "value": "wet_retention_ratio",
+              "op": ">=",
+              "limit": "required_retention_ratio",
+              "unit": "ratio"
+            },
+            "basis": [],
+            "proposed": false,
+            "expanded": false
+          },
+          {
+            "id": "stiffness-aeroelastic",
+            "parent": "goal",
+            "title": "Wings stay stiff enough",
+            "statement": "Cardboard wings are stiff enough to prevent excessive bending and aeroelastic flutter in the flight envelope",
+            "axis": "principles",
+            "role": "assumption",
+            "criticality": "critical",
+            "risk": "high",
+            "rationale": "Wing bending stiffness scales with modulus; cardboard is ~100x softer than aluminum, causing huge deflection, control loss and flutter.",
+            "params": [
+              {
+                "name": "cardboard_modulus_mpa",
+                "value": 500,
+                "unit": "MPa",
+                "origin": "reference",
+                "source": "Corrugated board mechanics literature - effective out-of-plane/in-plane modulus ~0.3-1.0 GPa"
+              },
+              {
+                "name": "required_modulus_mpa",
+                "value": 20000,
+                "unit": "MPa",
+                "origin": "assumed",
+                "source": ""
+              }
+            ],
+            "uses": [],
+            "suggestions": [],
+            "check": {
+              "description": "Available bending modulus must meet that needed to limit deflection and avoid flutter",
+              "value": "cardboard_modulus_mpa",
+              "op": ">=",
+              "limit": "required_modulus_mpa",
+              "unit": "MPa"
+            },
+            "basis": [],
+            "proposed": false,
+            "expanded": false
+          },
+          {
+            "id": "fatigue-pressurization",
+            "parent": "goal",
+            "title": "Cardboard lasts service life",
+            "statement": "Cardboard pressure vessel survives 60000 pressurization cycles without delamination or creep failure",
+            "axis": "requirements",
             "role": "assumption",
             "criticality": "major",
             "risk": "high",
-            "rationale": "Pressurization, vibration and creep delaminate paper fibers quickly. A 100-cycle life would ground the aircraft daily.",
+            "rationale": "Pressurization plus vibration delaminates paper and glue quickly; cardboard has no meaningful fatigue endurance like metal or composite.",
             "params": [
               {
-                "name": "required_cycles",
+                "name": "lifetime_cycles",
                 "value": 60000,
                 "unit": "cycles",
                 "origin": "reference",
-                "source": "Airbus A320 design service goal ~60000 flights"
+                "source": "A320/737 design service goal ~60000 flights / pressurization cycles"
               },
               {
                 "name": "cardboard_endurance_cycles",
-                "value": 100,
+                "value": 200,
                 "unit": "cycles",
                 "origin": "assumed",
                 "source": ""
               }
             ],
+            "uses": [],
+            "suggestions": [],
             "check": {
-              "description": "Compare cardboard fatigue life under cyclic humidity and pressurization to airliner design life.",
-              "code": "return {value: p.cardboard_endurance_cycles, limit: p.required_cycles, unit: 'cycles', pass: p.cardboard_endurance_cycles >= p.required_cycles, detail: `Cardboard ${p.cardboard_endurance_cycles} cycles vs required ${p.required_cycles}`};"
+              "description": "Required pressurization lifetime must fit within cardboard fatigue / creep life",
+              "value": "lifetime_cycles",
+              "op": "<=",
+              "limit": "cardboard_endurance_cycles",
+              "unit": "cycles"
             },
             "basis": [],
             "proposed": false,
@@ -224,28 +218,14 @@
           {
             "id": "lifecycle-cost",
             "parent": "goal",
-            "title": "Lifecycle cost saving",
-            "statement": "Cardboard airframe replacement cost stays below aluminum cost per flight.",
+            "title": "Cardboard actually cuts cost",
+            "statement": "Cardboard airframe lowers total lifecycle cost versus aluminum despite frequent replacement and upkeep",
             "axis": "economics",
             "role": "assumption",
             "criticality": "major",
             "risk": "high",
-            "rationale": "Cheap material does not mean cheap airplane if moisture, fatigue and damage force replacement every 100 flights plus inspections.",
+            "rationale": "Cheap per sheet does not mean cheap per life; constant replacement, inspection, waterproofing, and grounding would erase material savings.",
             "params": [
-              {
-                "name": "aluminum_airframe_cost_usd",
-                "value": 30000000,
-                "unit": "USD",
-                "origin": "assumed",
-                "source": ""
-              },
-              {
-                "name": "aluminum_life_flights",
-                "value": 60000,
-                "unit": "flights",
-                "origin": "reference",
-                "source": "Narrowbody design service goal ~60000 flights"
-              },
               {
                 "name": "cardboard_airframe_cost_usd",
                 "value": 500000,
@@ -254,84 +234,98 @@
                 "source": ""
               },
               {
-                "name": "cardboard_life_flights",
-                "value": 100,
-                "unit": "flights",
+                "name": "replacement_interval_years",
+                "value": 0.5,
+                "unit": "years",
+                "origin": "assumed",
+                "source": ""
+              },
+              {
+                "name": "service_life_years",
+                "value": 25,
+                "unit": "years",
+                "origin": "reference",
+                "source": "Typical narrowbody economic life ~25 years"
+              },
+              {
+                "name": "aluminum_airframe_cost_usd",
+                "value": 10000000,
+                "unit": "USD",
                 "origin": "assumed",
                 "source": ""
               }
             ],
+            "uses": [],
+            "suggestions": [],
             "check": {
-              "description": "Amortized airframe cost per flight for cardboard versus aluminum.",
-              "code": "const alu = p.aluminum_airframe_cost_usd/p.aluminum_life_flights; const card = p.cardboard_airframe_cost_usd/p.cardboard_life_flights; return {value: card, limit: alu, unit: 'USD/flight', pass: card <= alu, detail: `Cardboard $${card.toFixed(0)}/flight vs aluminum $${alu.toFixed(0)}/flight`};"
+              "description": "Lifetime cardboard replacements plus waterproofing and fireproofing must still be cheaper than aluminum airframe",
+              "value": "cardboard_airframe_cost_usd * service_life_years / replacement_interval_years",
+              "op": "<=",
+              "limit": "aluminum_airframe_cost_usd",
+              "unit": "USD"
             },
             "basis": [],
             "proposed": false,
             "expanded": false
           }
         ],
-        "summary": "A cardboard airliner is not feasible: cardboard is far too weak for pressurization and wing loads, collapses when wet, burns, fatigues in ~100 cycles, and would cost more per flight than aluminum.",
+        "summary": "A cardboard airliner is not viable: cardboard is ~60x too weak and ~100x too soft, rots when wet, burns, and fatigues, so it cannot be certified or actually save money.",
         "usage": {
           "model": "muse-spark-1.3",
-          "input": 828,
-          "cached": 753,
-          "output": 3982,
-          "reasoning": 1936,
-          "cost": 0.0171302
+          "input": 969,
+          "cached": 0,
+          "output": 3554,
+          "reasoning": 1806,
+          "cost": 0.01631575
         }
       },
-      "hash": "42cd5b3a8a806845ec62ff91d09564c2f05d5985a952d21fed6f4f1521d40d10"
+      "hash": "23269e81d0e76e1b833ec405f9a9dfb14b5ec3e8bb36b354f9a4730a7e585ed1"
     },
     {
       "seq": 2,
-      "prev": "42cd5b3a8a806845ec62ff91d09564c2f05d5985a952d21fed6f4f1521d40d10",
+      "prev": "23269e81d0e76e1b833ec405f9a9dfb14b5ec3e8bb36b354f9a4730a7e585ed1",
       "actor": "engine",
       "body": {
         "type": "check",
-        "node": "pressurization-strength",
+        "node": "primary-strength",
         "result": {
           "pass": false,
-          "value": 12,
-          "limit": 7,
+          "value": 120,
+          "limit": 2,
+          "op": "<=",
           "unit": "MPa",
-          "detail": "Hoop stress 12.0 MPa vs cardboard strength 7 MPa",
           "inputs": {
-            "pressure_diff_kpa": 60,
-            "fuselage_radius_m": 2,
-            "skin_thickness_mm": 10,
-            "cardboard_tensile_strength_mpa": 7
+            "design_stress_mpa": 120,
+            "cardboard_strength_mpa": 2
           }
         }
       },
-      "hash": "28f9f7d6fbc970acdaf98e6ca99909b2935afdc10e172b5c8625b629ae3dd047"
+      "hash": "75f700ba8c27c6088fc482b14fa7bf88b7028b68bdc912171372b1b8e73b13e3"
     },
     {
       "seq": 3,
-      "prev": "28f9f7d6fbc970acdaf98e6ca99909b2935afdc10e172b5c8625b629ae3dd047",
+      "prev": "75f700ba8c27c6088fc482b14fa7bf88b7028b68bdc912171372b1b8e73b13e3",
       "actor": "engine",
       "body": {
         "type": "check",
-        "node": "wing-bending-load",
+        "node": "fire-certification",
         "result": {
           "pass": false,
-          "value": 8.58375,
-          "limit": 5,
-          "unit": "MPa",
-          "detail": "Spar stress 8.6 MPa vs cardboard 5 MPa",
+          "value": 110,
+          "limit": 63.5,
+          "op": "<=",
+          "unit": "mm/min",
           "inputs": {
-            "mtow_kg": 70000,
-            "gravity_m_s2": 9.81,
-            "load_factor": 2.5,
-            "spar_cap_area_m2": 0.2,
-            "cardboard_compressive_strength_mpa": 5
+            "cardboard_burn_rate_mm_min": 110,
+            "far_max_burn_rate_mm_min": 63.5
           }
         }
       },
-      "hash": "ee3eaf27a02a0707c1aff4180bfeba9b2603fab85f529696805787174e4c29f9"
+      "hash": "f1ff6af5e4ff610d9458a63d3e0cd980696f0f5b80dd225d1347f4adf7d60f4d"
     },
     {
       "seq": 4,
-      "prev": "ee3eaf27a02a0707c1aff4180bfeba9b2603fab85f529696805787174e4c29f9",
+      "prev": "f1ff6af5e4ff610d9458a63d3e0cd980696f0f5b80dd225d1347f4adf7d60f4d",
       "actor": "engine",
       "body": {
         "type": "check",
@@ -339,206 +333,294 @@
         "result": {
           "pass": false,
           "value": 0.2,
-          "limit": 0.9,
-          "unit": "fraction",
-          "detail": "Wet retention 0.2 vs required 0.9",
+          "limit": 0.85,
+          "op": ">=",
+          "unit": "ratio",
           "inputs": {
             "wet_retention_ratio": 0.2,
-            "required_retention_ratio": 0.9
+            "required_retention_ratio": 0.85
           }
         }
       },
-      "hash": "c7ed2dd2cf3673b0590d775d99a1d306c73a2cee969164e558353d10cbc41de5"
+      "hash": "71dffe492b2cad818a957854cc5892cdf1d98c677876bd9c42ce9ccd27914d26"
     },
     {
       "seq": 5,
-      "prev": "c7ed2dd2cf3673b0590d775d99a1d306c73a2cee969164e558353d10cbc41de5",
+      "prev": "71dffe492b2cad818a957854cc5892cdf1d98c677876bd9c42ce9ccd27914d26",
       "actor": "engine",
       "body": {
         "type": "check",
-        "node": "fatigue-cycles",
+        "node": "stiffness-aeroelastic",
         "result": {
           "pass": false,
-          "value": 100,
-          "limit": 60000,
-          "unit": "cycles",
-          "detail": "Cardboard 100 cycles vs required 60000",
+          "value": 500,
+          "limit": 20000,
+          "op": ">=",
+          "unit": "MPa",
           "inputs": {
-            "cardboard_endurance_cycles": 100,
-            "required_cycles": 60000
+            "cardboard_modulus_mpa": 500,
+            "required_modulus_mpa": 20000
           }
         }
       },
-      "hash": "9ee45e353cc0bdb2690fcba22efefaadf408c0fd46289425a86416c5484f2f1a"
+      "hash": "9629ea15ee6ac05ec3baba92cbf3d20adbbd8b954db99e34340aa5c39fccf544"
     },
     {
       "seq": 6,
-      "prev": "9ee45e353cc0bdb2690fcba22efefaadf408c0fd46289425a86416c5484f2f1a",
+      "prev": "9629ea15ee6ac05ec3baba92cbf3d20adbbd8b954db99e34340aa5c39fccf544",
+      "actor": "engine",
+      "body": {
+        "type": "check",
+        "node": "fatigue-pressurization",
+        "result": {
+          "pass": false,
+          "value": 60000,
+          "limit": 200,
+          "op": "<=",
+          "unit": "cycles",
+          "inputs": {
+            "lifetime_cycles": 60000,
+            "cardboard_endurance_cycles": 200
+          }
+        }
+      },
+      "hash": "4fc14d7b6a63c7ad36b293094d408a5710c9dcbf5bc38739f06dc57baf0bf190"
+    },
+    {
+      "seq": 7,
+      "prev": "4fc14d7b6a63c7ad36b293094d408a5710c9dcbf5bc38739f06dc57baf0bf190",
       "actor": "engine",
       "body": {
         "type": "check",
         "node": "lifecycle-cost",
         "result": {
           "pass": false,
-          "value": 5000,
-          "limit": 500,
-          "unit": "USD/flight",
-          "detail": "Cardboard $5000/flight vs aluminum $500/flight",
+          "value": 25000000,
+          "limit": 10000000,
+          "op": "<=",
+          "unit": "USD",
           "inputs": {
-            "aluminum_airframe_cost_usd": 30000000,
-            "aluminum_life_flights": 60000,
             "cardboard_airframe_cost_usd": 500000,
-            "cardboard_life_flights": 100
+            "service_life_years": 25,
+            "replacement_interval_years": 0.5,
+            "aluminum_airframe_cost_usd": 10000000
           }
         }
       },
-      "hash": "f20ea9eb487ecb0e8c82fd002414dd7bd98ae23602a96379e50bcbd759870a62"
+      "hash": "989cf16f503ebe11d2897db65094151cdda973d03368943877503e3d5c1890cf"
     },
     {
-      "seq": 7,
-      "prev": "f20ea9eb487ecb0e8c82fd002414dd7bd98ae23602a96379e50bcbd759870a62",
+      "seq": 8,
+      "prev": "989cf16f503ebe11d2897db65094151cdda973d03368943877503e3d5c1890cf",
       "actor": "muse:muse-spark-1.3",
       "body": {
         "type": "grow",
-        "under": "pressurization-strength",
+        "under": "primary-strength",
         "nodes": [
           {
-            "id": "pressurization-strength.pressure-differential-value",
-            "parent": "pressurization-strength",
-            "title": "Cabin pressure differential load",
-            "statement": "Cruise cabin-to-ambient differential pressure does not exceed 60 kPa.",
-            "axis": "loads",
-            "role": "assumption",
-            "criticality": "critical",
-            "risk": "low",
-            "rationale": "Hoop stress scales directly with differential pressure. If cruise differential exceeds 60 kPa the computed burst margin is unconservative.",
-            "params": [
-              {
-                "name": "pressure_diff_kpa",
-                "value": 60,
-                "unit": "kPa",
-                "origin": "reference",
-                "source": "FAA 25.841 / Boeing 787 cabin differential ~8-9 psi"
-              }
-            ],
-            "basis": [],
-            "proposed": false,
-            "expanded": false
-          },
-          {
-            "id": "pressurization-strength.cardboard-tensile-strength",
-            "parent": "pressurization-strength",
-            "title": "Cardboard tensile capacity",
-            "statement": "Triple-wall corrugated board provides at least 7 MPa tensile strength in the hoop direction when dry.",
+            "id": "primary-strength.bending-crush-strength",
+            "parent": "primary-strength",
+            "title": "Bending compression strength",
+            "statement": "Corrugated board in wings and fuselage carries limit flight bending compression without crushing",
             "axis": "materials",
             "role": "assumption",
             "criticality": "critical",
             "risk": "high",
-            "rationale": "Cardboard strength is the allowable that hoop stress is compared against. Published linerboard values are single-digit MPa and drop sharply with moisture, so 7 MPa is optimistic.",
-            "params": [
-              {
-                "name": "cardboard_tensile_strength_mpa",
-                "value": 7,
-                "unit": "MPa",
-                "origin": "assumed",
-                "source": ""
-              }
-            ],
+            "rationale": "Limit maneuver and gust bending sizes skins, spars and stringers in compression, and board crushes at very low stress compared with airframe metal.",
+            "params": [],
+            "uses": ["design_stress_mpa", "cardboard_strength_mpa"],
+            "suggestions": [],
+            "check": {
+              "description": "Limit flight stress must not exceed cardboard compressive strength",
+              "value": "design_stress_mpa",
+              "op": "<=",
+              "limit": "cardboard_strength_mpa",
+              "unit": "MPa"
+            },
             "basis": [],
             "proposed": false,
             "expanded": false
           },
           {
-            "id": "pressurization-strength.fuselage-radius-size",
-            "parent": "pressurization-strength",
-            "title": "Fuselage size and skin thickness",
-            "statement": "Commercial fuselage needs 2 m radius with only 10 mm of load-bearing cardboard skin thickness.",
-            "axis": "requirements",
+            "id": "primary-strength.pressure-hoop-strength",
+            "parent": "primary-strength",
+            "title": "Pressure hoop strength",
+            "statement": "Fuselage skin hoop tension from cabin pressurization is carried by corrugated board without rupture",
+            "axis": "loads",
             "role": "assumption",
-            "criticality": "major",
-            "risk": "low",
-            "rationale": "Hoop stress scales with radius and inversely with thickness. A smaller radius or much thicker skin could lower stress, but 2 m radius and 10 mm skin represent a commercial 6-abreast fuselage with practical board thickness.",
+            "criticality": "critical",
+            "risk": "high",
+            "rationale": "Pressurized fuselage acts as a thin pressure vessel, so hoop tension is unavoidable at any practical skin thickness and exceeds paperboard strength.",
             "params": [
+              {
+                "name": "cabin_delta_p_mpa",
+                "value": 0.06,
+                "unit": "MPa",
+                "origin": "reference",
+                "source": "FAR 25.365 / Boeing 737 - cabin delta-p ~55-60 kPa"
+              },
+              {
+                "name": "cardboard_thickness_m",
+                "value": 0.01,
+                "unit": "m",
+                "origin": "assumed",
+                "source": ""
+              },
               {
                 "name": "fuselage_radius_m",
                 "value": 2,
                 "unit": "m",
                 "origin": "reference",
-                "source": "Airbus A320 fuselage diameter ~4 m handbook"
-              },
-              {
-                "name": "skin_thickness_mm",
-                "value": 10,
-                "unit": "mm",
-                "origin": "assumed",
-                "source": ""
+                "source": "Boeing 737 - fuselage radius ~1.9 m"
               }
             ],
+            "uses": ["cardboard_strength_mpa"],
+            "suggestions": [],
+            "check": {
+              "description": "Thin-wall hoop stress from cabin pressure must not exceed board tensile strength",
+              "value": "cabin_delta_p_mpa * fuselage_radius_m / cardboard_thickness_m",
+              "op": "<=",
+              "limit": "cardboard_strength_mpa",
+              "unit": "MPa"
+            },
             "basis": [],
             "proposed": false,
             "expanded": false
           },
           {
-            "id": "pressurization-strength.thin-wall-hoop-law",
-            "parent": "pressurization-strength",
-            "title": "Thin-wall hoop stress law",
-            "statement": "Thin-wall hoop membrane stress equals differential pressure times radius divided by thickness.",
+            "id": "primary-strength.panel-buckling-stability",
+            "parent": "primary-strength",
+            "title": "Panel buckling stability",
+            "statement": "Thin corrugated panels between frames remain stable against buckling at limit compression",
             "axis": "principles",
-            "role": "bedrock",
+            "role": "assumption",
             "criticality": "critical",
-            "risk": "low",
-            "rationale": "Pressurization claim rests on membrane equilibrium sigma = p*r/t. With r/t = 200 the thin-wall formula applies, predicting about 12 MPa stress which already exceeds cardboard strength.",
+            "risk": "high",
+            "rationale": "Airliner skins are thin panels between frames and stringers, and low board modulus makes elastic buckling critical long before material crushing.",
             "params": [
               {
-                "name": "thin_wall_threshold_ratio",
-                "value": 10,
+                "name": "buckling_k",
+                "value": 4,
                 "unit": "ratio",
                 "origin": "reference",
-                "source": "Gere and Goodno Mechanics of Materials thin-wall criterion r/t > 10"
+                "source": "Bruhn Airplane Structures Ch.5 - simply supported plate k ~4"
+              },
+              {
+                "name": "panel_thickness_m",
+                "value": 0.01,
+                "unit": "m",
+                "origin": "assumed",
+                "source": ""
+              },
+              {
+                "name": "panel_width_m",
+                "value": 0.5,
+                "unit": "m",
+                "origin": "assumed",
+                "source": ""
+              },
+              {
+                "name": "poisson_ratio",
+                "value": 0.3,
+                "unit": "ratio",
+                "origin": "assumed",
+                "source": ""
               }
             ],
+            "uses": ["cardboard_modulus_mpa", "design_stress_mpa"],
+            "suggestions": [],
             "check": {
-              "description": "Checks thin-wall applicability r/t against threshold; if valid, sigma = p*r/t governs burst.",
-              "code": "const r_mm = p.fuselage_radius_m * 1000; const ratio = r_mm / p.skin_thickness_mm; return {value: ratio, limit: p.thin_wall_threshold_ratio, unit: \"ratio\", pass: ratio >= p.thin_wall_threshold_ratio, detail: \"r/t = \" + ratio.toFixed(1) + \" vs minimum \" + p.thin_wall_threshold_ratio + \" for sigma = p*r/t\"};"
+              "description": "Applied limit stress must not exceed plate buckling critical stress",
+              "value": "design_stress_mpa",
+              "op": "<=",
+              "limit": "buckling_k * pi ^ 2 * cardboard_modulus_mpa / (12 * (1 - poisson_ratio ^ 2)) * (panel_thickness_m / panel_width_m) ^ 2",
+              "unit": "MPa"
             },
-            "basis": ["pressurization-strength"],
+            "basis": [],
             "proposed": false,
             "expanded": false
           }
         ],
-        "summary": "Pressurization burst rests on a 60 kPa load, 2 m commercial radius with 10 mm skin, only ~7 MPa cardboard strength, and the sigma = p*r/t law that predicts ~12 MPa stress and failure.",
+        "summary": "Cardboard primary structure fails on direct compression, pressure hoop tension, and panel buckling, each by more than an order of magnitude.",
         "usage": {
           "model": "muse-spark-1.3",
-          "input": 1103,
-          "cached": 753,
-          "output": 3525,
-          "reasoning": 2473,
-          "cost": 0.0155317
+          "input": 1407,
+          "cached": 881,
+          "output": 3548,
+          "reasoning": 2363,
+          "cost": 0.015868649999999998
         }
       },
-      "hash": "4411291d1e5b940b024128bfc5caa744b0cd2942bd744ac0def93f7bd4f19b22"
+      "hash": "aa63de069ae36244f684e2f95b09a7a71d00526359f1aa59aeb66332fe65bf8a"
     },
     {
-      "seq": 8,
-      "prev": "4411291d1e5b940b024128bfc5caa744b0cd2942bd744ac0def93f7bd4f19b22",
+      "seq": 9,
+      "prev": "aa63de069ae36244f684e2f95b09a7a71d00526359f1aa59aeb66332fe65bf8a",
       "actor": "engine",
       "body": {
         "type": "check",
-        "node": "pressurization-strength.thin-wall-hoop-law",
+        "node": "primary-strength.bending-crush-strength",
         "result": {
-          "pass": true,
-          "value": 200,
-          "limit": 10,
-          "unit": "ratio",
-          "detail": "r/t = 200.0 vs minimum 10 for sigma = p*r/t",
+          "pass": false,
+          "value": 120,
+          "limit": 2,
+          "op": "<=",
+          "unit": "MPa",
           "inputs": {
-            "fuselage_radius_m": 2,
-            "skin_thickness_mm": 10,
-            "thin_wall_threshold_ratio": 10
+            "design_stress_mpa": 120,
+            "cardboard_strength_mpa": 2
           }
         }
       },
-      "hash": "29c64f9bb4ca7abc846a2406fc3dbab08c738a807a0c803f6c019ea00685f8da"
+      "hash": "7205aeabb612619700df4bd408afb4c6004bb2ffb011d5aa5f1e4142f03f1fdd"
+    },
+    {
+      "seq": 10,
+      "prev": "7205aeabb612619700df4bd408afb4c6004bb2ffb011d5aa5f1e4142f03f1fdd",
+      "actor": "engine",
+      "body": {
+        "type": "check",
+        "node": "primary-strength.pressure-hoop-strength",
+        "result": {
+          "pass": false,
+          "value": 12,
+          "limit": 2,
+          "op": "<=",
+          "unit": "MPa",
+          "inputs": {
+            "cabin_delta_p_mpa": 0.06,
+            "fuselage_radius_m": 2,
+            "cardboard_thickness_m": 0.01,
+            "cardboard_strength_mpa": 2
+          }
+        }
+      },
+      "hash": "ebe7ac3ca3aefd9713a77d78d1f4ac00e62f5ef6c2075ba6b90840bd4e802f51"
+    },
+    {
+      "seq": 11,
+      "prev": "ebe7ac3ca3aefd9713a77d78d1f4ac00e62f5ef6c2075ba6b90840bd4e802f51",
+      "actor": "engine",
+      "body": {
+        "type": "check",
+        "node": "primary-strength.panel-buckling-stability",
+        "result": {
+          "pass": false,
+          "value": 120,
+          "limit": 0.7230479414717479,
+          "op": "<=",
+          "unit": "MPa",
+          "inputs": {
+            "design_stress_mpa": 120,
+            "buckling_k": 4,
+            "cardboard_modulus_mpa": 500,
+            "poisson_ratio": 0.3,
+            "panel_thickness_m": 0.01,
+            "panel_width_m": 0.5
+          }
+        }
+      },
+      "hash": "620eb1d572baebba02abbffc63c034dc89221db0a7ff9c056a4baf27191c03d1"
     }
   ]
 }

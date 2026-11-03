@@ -1,7 +1,7 @@
 // Muse Spark on the Meta Model API (Responses, streamed). The browser calls it
 // directly with the person's own key; nothing passes through a server of ours.
 
-import { cost, Ledger, worstCase } from "./cost";
+import { cost, estimateTokens, Ledger } from "./cost";
 import { GROWTH_SCHEMA, type GrownNode } from "./protocol";
 import { ArrayItems } from "./stream";
 import type { Mode, Usage } from "./types";
@@ -81,7 +81,28 @@ export class Muse {
     };
   }
 
-  // One structured request: reserve, stream, settle, parse.
+  // Exact input tokens from the API's tokenizer; it runs no inference and is
+  // not billed. Undefined when it cannot answer.
+  private async count(body: object, headers: Record<string, string>): Promise<number | undefined> {
+    try {
+      const res = await (this.cfg.fetch ?? fetch)(
+        `${this.cfg.baseUrl ?? "https://api.meta.ai/v1"}/responses/input_tokens`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(15_000),
+        },
+      );
+      if (!res.ok) return undefined;
+      const j = (await res.json()) as { input_tokens?: unknown };
+      return typeof j.input_tokens === "number" ? j.input_tokens : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  // One structured request: count, reserve, stream, settle, parse.
   async ask(
     r: AskRequest,
     name: string,
@@ -89,10 +110,29 @@ export class Muse {
     onText?: (delta: string) => void,
   ): Promise<{ value: unknown; usage: Usage }> {
     const model = modelFor(r.mode);
-    const reserved = worstCase(model, r.instructions + r.input, r.maxOutput);
-    const ticket = this.ledger.reserve(reserved);
+    const body = {
+      model,
+      // Fixed instructions first, so the cache can serve them.
+      instructions: r.instructions,
+      input: r.input,
+      reasoning: { effort: r.effort, summary: "concise" },
+      text: { format: { type: "json_schema", name, strict: true, schema } },
+      max_output_tokens: r.maxOutput,
+      prompt_cache_key: "vibloom-ideas-1",
+      store: false,
+    };
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (this.cfg.apiKey) headers.authorization = `Bearer ${this.cfg.apiKey}`;
+    // The ceiling: the counted input (which includes tokens Meta does not
+    // bill) at the uncached price, plus every output token allowed.
+    const counted = await this.count(body, headers);
+    const reserved = cost(
+      model,
+      counted ?? estimateTokens(r.instructions + r.input),
+      0,
+      r.maxOutput,
+    );
+    const ticket = this.ledger.reserve(reserved);
     let res: Response;
     try {
       res = await (this.cfg.fetch ?? fetch)(
@@ -101,20 +141,7 @@ export class Muse {
           method: "POST",
           headers,
           signal: AbortSignal.timeout(this.cfg.timeoutMs ?? 120_000),
-          body: JSON.stringify({
-            model,
-            // Fixed instructions first, so the cache can serve them.
-            instructions: r.instructions,
-            input: r.input,
-            reasoning: { effort: r.effort, summary: "concise" },
-            text: {
-              format: { type: "json_schema", name, strict: true, schema },
-            },
-            max_output_tokens: r.maxOutput,
-            prompt_cache_key: "vibloom-ideas-1",
-            store: false,
-            stream: true,
-          }),
+          body: JSON.stringify({ ...body, stream: true }),
         },
       );
     } catch (e) {

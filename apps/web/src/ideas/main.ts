@@ -13,13 +13,15 @@ import {
   modelFor,
   REPAIR,
   REPAIR_SCHEMA,
-  worstCase,
+  estimate,
+  runCheck,
+  type CheckResult,
   type IdeaEvent,
   type IdeaNode,
+  type Param,
   type Mode,
 } from "@vibloom/ideas";
 import { el } from "../dom";
-import { runCheck } from "./sandbox";
 import { mountTreeView, statusLabel, type Ghost } from "./view";
 
 const EXAMPLES = [
@@ -125,7 +127,7 @@ function landing() {
       el(
         "section",
         { class: "hero" },
-        el("img", { src: "/crown.webp", alt: "", class: "hero-crown" }),
+        el("img", { src: "crown.webp", alt: "", class: "hero-crown" }),
         el("p", { class: "brand" }, "VIBloom"),
         el("h1", {}, "What do you want to build?"),
         el(
@@ -285,7 +287,7 @@ async function grow(under: string, kind: "decompose" | "expand") {
     });
     refresh();
     if (thought) thought.textContent = r.summary;
-    for (const n of nodes) await check(n);
+    for (const n of nodes) check(n);
     refresh();
     await repair();
   } catch (e) {
@@ -331,11 +333,13 @@ async function repair() {
     "repair",
     REPAIR_SCHEMA,
   );
-  const fixes = tree.admitFixes((value as { fixes?: { id: string; code: string }[] }).fixes ?? []);
+  const fixes = tree.admitFixes(
+    (value as { fixes?: { id: string; value: string; limit: string }[] }).fixes ?? [],
+  );
   tree.append(`muse:${usage.model}`, { type: "repair", fixes, usage });
   for (const f of fixes) {
     const n = tree.nodes.get(f.node);
-    if (n) await check(n);
+    if (n) check(n);
   }
   refresh();
   thinking.replaceChildren(
@@ -348,10 +352,9 @@ async function repair() {
   );
 }
 
-async function check(n: IdeaNode) {
+function check(n: IdeaNode) {
   if (!n.check) return;
-  const result = await runCheck(n.check.code, tree.scope(n.id));
-  tree.append("engine", { type: "check", node: n.id, result });
+  tree.append("engine", { type: "check", node: n.id, result: runCheck(n.check, tree.scope()) });
 }
 
 async function start(goal: string, mode: Mode) {
@@ -374,9 +377,11 @@ function select(id: string) {
   const status = tree.status(id);
   const result = tree.results.get(id);
   const assumed = tree.assumedInputs(id);
-  const est = worstCase(modelFor(tree.mode), EXPAND + tree.context(id), MAX_OUT.expand);
+  const est = estimate(modelFor(tree.mode), EXPAND + tree.context(id), MAX_OUT.expand);
 
-  const params = n.params.map((p) => {
+  // One row per parameter: the ones this node introduced, then the shared
+  // ones it uses, which edit the same single value wherever they appear.
+  const row = (p: Param, shared: boolean) => {
     const input = el("input", {
       type: "number",
       value: String(p.value),
@@ -386,13 +391,24 @@ function select(id: string) {
     input.addEventListener("change", () => {
       const v = Number(input.value);
       if (!Number.isFinite(v) || v === p.value) return;
-      tree.append("person", { type: "set_param", node: id, name: p.name, value: v });
-      void recheck();
+      tree.append("person", {
+        type: "set_param",
+        name: p.name,
+        value: v,
+        source: "set by a person",
+      });
+      recheck();
     });
+    const owner = tree.owner(p.name);
     return el(
       "tr",
       {},
-      el("td", { class: "pname" }, p.name.replace(/_/g, " ")),
+      el(
+        "td",
+        { class: "pname" },
+        p.name.replace(/_/g, " "),
+        shared && owner ? el("small", {}, `shared, from ${owner.title}`) : null,
+      ),
       el("td", {}, input),
       el("td", { class: "unit" }, p.unit),
       el(
@@ -401,9 +417,39 @@ function select(id: string) {
         el(
           "span",
           { class: `origin ${p.origin}`, title: p.source || "chosen without a named source" },
-          p.origin === "reference" ? "reference" : "assumed",
+          p.origin,
         ),
       ),
+    );
+  };
+  const params = [
+    ...n.params.map((p) => row(p, false)),
+    ...n.uses.flatMap((name) => {
+      const p = tree.param(name);
+      return p ? [row(p, true)] : [];
+    }),
+  ];
+  const suggestions = n.suggestions.map((sg) => {
+    const current = tree.param(sg.name);
+    return el(
+      "div",
+      { class: "suggestion" },
+      el(
+        "span",
+        {},
+        `Muse suggests ${sg.name.replace(/_/g, " ")} = ${fmt(sg.value)} ${sg.unit}`,
+        current ? ` (now ${fmt(current.value)})` : "",
+        sg.source ? el("small", {}, sg.source) : null,
+      ),
+      button("Adopt", () => {
+        tree.append("person", {
+          type: "set_param",
+          name: sg.name,
+          value: sg.value,
+          source: `adopted from ${n.title}`,
+        });
+        recheck();
+      }),
     );
   });
 
@@ -412,7 +458,7 @@ function select(id: string) {
     { class: "primary", disabled: busy || n.expanded },
     n.expanded ? "Expanded" : "Open with Muse",
   );
-  expand.title = `Reserves up to ${usd(est)}; usually much less.`;
+  expand.title = "The exact ceiling is counted by the API and reserved before the request.";
   expand.addEventListener("click", () => void grow(id, "expand"));
 
   const proposal = n.proposed
@@ -450,7 +496,7 @@ function select(id: string) {
     result
       ? "error" in result
         ? el("div", { class: "result error" }, `Check could not run: ${result.error}`)
-        : gauge(result.value, result.limit, result.unit, result.pass, result.detail, assumed.length)
+        : gauge(result, n.check?.description ?? "", assumed.length)
       : n.check
         ? null
         : el(
@@ -459,18 +505,24 @@ function select(id: string) {
             n.role === "goal" ? "" : "No calculation: this one is argued, not computed.",
           ),
     params.length ? el("table", { class: "params" }, el("tbody", {}, ...params)) : null,
+    ...suggestions,
     n.check
       ? el(
           "details",
           { class: "code" },
-          el("summary", {}, "Calculation written by Muse"),
-          el("pre", {}, n.check.code),
+          el("summary", {}, "Formula written by Muse, evaluated by VIBloom"),
+          el("pre", {}, `${n.check.value}\n  ${n.check.op}\n${n.check.limit}`),
         )
       : null,
     proposal,
     n.role === "goal"
       ? null
-      : el("div", { class: "row" }, expand, el("span", { class: "fine" }, `up to ${usd(est)}`)),
+      : el(
+          "div",
+          { class: "row" },
+          expand,
+          el("span", { class: "fine" }, `about ${usd(est)} at most`),
+        ),
   ];
   panel.replaceChildren(...parts.filter((x): x is Node => x !== null));
   panel.querySelector(".close")?.addEventListener("click", () => {
@@ -486,15 +538,8 @@ function button(label: string, f: () => void) {
   return b;
 }
 
-function gauge(
-  value: number,
-  limit: number,
-  unit: string,
-  pass: boolean,
-  detail: string,
-  assumed: number,
-) {
-  const ratio = limit === 0 ? 1 : Math.abs(value / limit);
+function gauge(r: CheckResult, description: string, assumed: number) {
+  const ratio = r.limit === 0 ? 1 : Math.abs(r.value / r.limit);
   const fill = Math.min(1, ratio / 2);
   const bar = el(
     "div",
@@ -504,11 +549,20 @@ function gauge(
   );
   return el(
     "div",
-    { class: `result ${pass ? "pass" : "fail"}` },
-    el("p", { class: "verdict" }, pass ? "Passes the calculation" : "Fails the calculation"),
-    el("p", { class: "nums" }, `${fmt(value)} vs limit ${fmt(limit)} ${unit}`),
+    { class: `result ${r.pass ? "pass" : "fail"}` },
+    el("p", { class: "verdict" }, r.pass ? "Passes the calculation" : "Fails the calculation"),
+    el(
+      "p",
+      { class: "nums" },
+      `${fmt(r.value)} ${r.op} ${fmt(r.limit)} ${r.unit} is ${r.pass ? "true" : "false"}`,
+    ),
     bar,
-    el("p", { class: "fine" }, detail),
+    el("p", { class: "fine" }, description),
+    el(
+      "p",
+      { class: "fine" },
+      "The formula and its numbers come from Muse; a correct evaluation does not prove they model the problem well.",
+    ),
     assumed
       ? el(
           "p",
@@ -525,8 +579,8 @@ const fmt = (x: number) =>
     : String(Math.round(x * 1000) / 1000);
 
 // After a person edits a number, every check that read it runs again.
-async function recheck() {
-  for (const n of tree.nodes.values()) if (tree.status(n.id) === "stale") await check(n);
+function recheck() {
+  for (const n of tree.nodes.values()) if (tree.status(n.id) === "stale") check(n);
   refresh();
   if (selectedId) select(selectedId);
 }
@@ -545,7 +599,7 @@ function exportTree() {
 // A recorded session replays event by event; checks are re-run here, in this
 // browser, so the reds are computed now rather than shown from the recording.
 async function playRecorded() {
-  const res = await fetch("/examples/cardboard-airliner.json");
+  const res = await fetch("examples/cardboard-airliner.json");
   const data = (await res.json()) as { events: IdeaEvent[] };
   const full = IdeaTree.replay(data.events);
   recorded = true;
@@ -572,7 +626,7 @@ async function playRecorded() {
       tree.append(e.actor, g);
       ledger.entries.push(g.usage);
       refresh();
-      for (const n of g.nodes) await check(n);
+      for (const n of g.nodes) check(n);
       refresh();
       await sleep(900);
     } else if (e.body.type === "repair") {
@@ -580,7 +634,7 @@ async function playRecorded() {
       ledger.entries.push(e.body.usage);
       for (const f of e.body.fixes) {
         const n = tree.nodes.get(f.node);
-        if (n) await check(n);
+        if (n) check(n);
       }
       refresh();
     } else tree.append(e.actor, e.body);

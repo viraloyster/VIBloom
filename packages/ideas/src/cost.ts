@@ -21,11 +21,12 @@ export function cost(model: string, input: number, cached: number, output: numbe
   return ((input - cached) * p.input + cached * p.cached + output * p.output) / 1e6;
 }
 
-// Characters per token is about 4 for English JSON; 3 keeps the estimate high.
-export const estimateTokens = (text: string) => Math.ceil(text.length / 3);
+// Only a fallback when the API cannot count: about 4 characters per token for
+// English JSON, so 2 per token plus the schema and injected context stays high.
+export const estimateTokens = (text: string) => Math.ceil(text.length / 2) + 3000;
 
-// The most a request can cost: all input uncached, all output used.
-export function worstCase(model: string, inputText: string, maxOutput: number): number {
+// Shown before a request, from local text only, so it is labelled an estimate.
+export function estimate(model: string, inputText: string, maxOutput: number): number {
   return cost(model, estimateTokens(inputText), 0, maxOutput);
 }
 
