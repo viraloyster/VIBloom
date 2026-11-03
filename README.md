@@ -1,32 +1,73 @@
 # VIBloom
 
-VIBloom turns hypotheses about chemical models into executable claims, tests them
-with reproducible computational experiments, and keeps every conclusion linked to
-the assumptions it depends on and the invariants it must respect.
+> Every conclusion rests on assumptions. The most common assumption is that
+> the assumptions are fine, and it is the one almost nobody tests.
 
-The interface is a guanacaste tree. The canopy shows what has been built. The
-roots are the map: a network of assumptions, invariants, sources and experiments.
-When a root changes or breaks, the conclusions that depend on it are marked for
-review.
+VIBloom is an engine for thinking with evidence. You state what you believe,
+what it rests on and what must never be violated; VIBloom keeps every
+conclusion tied to those roots, tests them, and shows what breaks when one of
+them changes.
 
-VIBloom is meant as a research layer that other technical projects can build
-on: a place to state what they expect, test it and keep what each failure
-taught, tied to the assumptions behind it. The current implementation works
-with chemical models; other domains are future work.
+The interface is a guanacaste tree. The canopy is what has been built. The
+roots are the map: assumptions, invariants, sources, experiments and lessons.
+
+## Mission
+
+Make the assumptions behind any conclusion visible, testable and accountable,
+so that people and AI models can build on each other's work knowing exactly
+what it rests on.
+
+## Vision
+
+A place where any idea, from an engineering project to a mathematical
+conjecture or a philosophical argument, can be decomposed into its premises
+down to first principles, with each premise marked by how it is known:
+computed and reproducible, cited from a source, or only argued. Lessons from
+every failure stay attached to the premises they depend on, so knowledge
+accumulates instead of being rediscovered. Over time this becomes a record of
+predictions, outcomes and corrections that can also help evaluate and improve
+the AI models doing the research.
+
+Meta's models do the open intellectual work: understanding an idea in text,
+handwriting, figures or documents, structuring it, predicting, designing
+experiments, diagnosing surprises and explaining. Code does what can be
+checked: running experiments, deriving every status from evidence and keeping
+the record.
+
+## What exists today
+
+The first domain is chemistry, chosen for its mathematical depth and because
+it can be seen: oscillating reactions (Belousov-Zhabotinsky, Oregonator
+models) with a stiff solver checked against an independent SciPy reference.
+
+1. A claim in natural language becomes a predicate the engine can execute.
+2. A deterministic engine runs the experiments and records the evidence in a
+   hash-chained log.
+3. Claim status is derived from evidence; models propose, code decides.
+4. The code enforces invariants; assumptions are tested and can be switched
+   off.
+5. Changing an assumption propagates through the dependency graph.
+6. Every run can be re-computed in the browser and shown as twin beakers and
+   spiral waves, drawn only from the recorded parameters.
+
+The investigation loop (formulate, predict before each experiment, diagnose
+surprises, write lessons, conclude) is implemented against Muse Spark on the
+Meta Model API and tested with scripted and recorded runs.
+
+## Not built yet
+
+These are directions, not features:
+
+- Any idea as a starting point ("What do you want to build?"), decomposed by
+  Muse into projects within projects, expanded on demand down to first
+  principles.
+- Checks written by Muse and run in isolation, so a premise turns red because
+  a computation shows it fails, not because a model says so.
+- Views of each experiment designed by Muse and run isolated from the app.
+- Branches of a tree to experiment without touching the main one.
 
 Status: under active development during the Meta Global AI Developer Hackathon
 (October 27 - November 4, 2026). See [HACKATHON.md](HACKATHON.md).
-
-## How it works
-
-1. A claim in natural language becomes a predicate the engine can execute.
-2. A deterministic engine runs the experiments and records the evidence.
-3. Claim status is derived from evidence; models propose, code decides.
-4. The code enforces invariants; assumptions are tested and can be switched off.
-5. Changing an assumption propagates through the dependency graph.
-
-Meta model: Muse Spark, through the Meta Model API, formulates, investigates,
-reviews citations against claims and explains.
 
 ## Repository
 
