@@ -168,7 +168,12 @@ export function mapRecord(
   return {
     type: "map",
     node: setup.node.id,
-    center: { ...setup.recipe },
+    // The middle cell: a re-centred map is about its own centre.
+    center: {
+      ...setup.recipe,
+      bromate: setup.axes.bromate[3] ?? setup.recipe.bromate,
+      malonic_acid: setup.axes.malonic_acid[3] ?? setup.recipe.malonic_acid,
+    },
     axes: { malonic_acid: [...setup.axes.malonic_acid], bromate: [...setup.axes.bromate] },
     span: setup.span,
     ...(limit !== undefined ? { limit } : {}),

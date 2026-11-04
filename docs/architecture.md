@@ -161,11 +161,23 @@ every experiment while Muse is connected, with these rules in
   derived from.
 - The recipe map (`packages/ideas/src/map.ts`) runs the reduction experiment
   on recipes around the tree's and evaluates the tree's own target and other
-  recipe-dependent checks at each, with the period taken from that run. It is
-  computed in the browser and not recorded. Choosing a recipe appends the
-  person's changes and the chosen run (`check` with `via: "map"`); a question
-  that run already settles is run without asking Muse, since a prediction
-  could not be blind.
+  recipe-dependent checks at each, with the period taken from that run. A
+  finished map is appended as a `map` event: centre, axes, the person's
+  concentration limit, recipe and solver versions, and each cell's period,
+  gap and verdicts; `npm run verify` replays the log up to it and runs every
+  cell again. Choosing a recipe appends the person's changes and the chosen
+  run (`check` with `via: "map"`); a question that run already settles is run
+  without asking Muse, since a prediction could not be blind.
+- Every chat request is read by Muse first (`route`): answer from the
+  record, run recipe values (the person confirms; then the usual predict,
+  run, explain loop), or open the recipe map. The engine keeps only roots and
+  parameters that exist. The answer gets the selected root, the roots the
+  read chose and those whose runs match values in the question, in full, plus
+  every run in the tree; the prompt says that what is not in the input was not
+  shown, not that it does not exist.
+- A root's text is Muse's, written once. The engine keeps the values each
+  root was written with; when a value its text quotes has changed, the
+  monitor says so next to the verdict, which is always for today's values.
 
 ## Claim versions
 

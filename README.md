@@ -130,15 +130,16 @@ explanation: the engine only verifies. Each task is Muse's (Meta Model API,
 `muse-spark-1.3`, streamed JSON with strict schemas); the right column is what
 code does with it.
 
-| Muse                                                            | The engine                                                                  |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Reads a handwritten recipe or formula (vision)                  | Accepts a formula only in the tree's own parameter names                    |
-| Decomposes the question into assumptions with units and sources | Admits only protocol-valid nodes; one value per parameter name              |
-| Chooses which experiment tests each assumption                  | Runs the stiff solver and the classification protocol; decides pass or fail |
-| Predicts each run with a confidence, before it runs             | Settles it with the run, permanently; scores blind ones only                |
-| After a surprise, proposes two explanations and one test        | Refuses them without a contradicted prediction; runs the test; decides      |
-| Designs an illustration of the mechanism, then checks a picture | Runs it sandboxed (no network, storage or key); allows one redraw           |
-| Answers questions in the chat, seeing the monitor               | Flags numbers absent from the data Muse was given (a heuristic detector)    |
+| Muse                                                             | The engine                                                                    |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Reads a handwritten recipe or formula (vision)                   | Accepts a formula only in the tree's own parameter names                      |
+| Decomposes the question into assumptions with units and sources  | Admits only protocol-valid nodes; one value per parameter name                |
+| Chooses which experiment tests each assumption                   | Runs the stiff solver and the classification protocol; decides pass or fail   |
+| Predicts each run with a confidence, before it runs              | Settles it with the run, permanently; scores blind ones only                  |
+| After a surprise, proposes two explanations and one test         | Refuses them without a contradicted prediction; runs the test; decides        |
+| Designs an illustration of the mechanism, then checks a picture  | Runs it sandboxed (no network, storage or key); allows one redraw             |
+| Reads every chat request first, as JSON: intent and roots needed | Keeps only roots and parameters that exist; a recipe run waits for the person |
+| Answers questions in the chat, seeing the monitor                | Gives it every run in the tree; flags numbers absent from its data            |
 
 Cost is controlled per request: the API counts input tokens first, the
 session reserves the most the request could cost and stops at its budget. The
