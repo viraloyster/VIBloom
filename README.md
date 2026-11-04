@@ -27,14 +27,14 @@ Built during the Meta Global AI Developer Hackathon, from November 2, 2026
 
 ## Results
 
-| What                                         | Result                                                                                                                                                                                                             | Where to check                                                                         |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
-| Handwritten BZ lab notes, tested             | Period 6.5 min against a 60 s target; at 0.2 M malonic acid 67 s, but the two-variable model is then 42% off (tolerance 15%)                                                                                       | [recorded session](apps/web/public/examples/chemical-clock.json), `npm run verify`     |
-| Muse proven wrong, then a discriminating run | Muse predicted the reduction would hold (82%, blind); it failed. Its test (five times the bromate, gap 6.4%) contradicts one explanation and is consistent with the other                                          | Same session, Process view                                                             |
-| Do lessons change Muse's predictions?        | On a grid frozen before the run: Muse 67% right with no lesson, 76% with one, 85% with two. A rule fitted on the same numbers gets 89% if told the right variable, 67% if not: Muse comes close without being told | [evaluation](docs/evaluation.md)                                                       |
-| Solver against an independent reference      | Oregonator periods agree with SciPy (Radau) to a relative 5e-4                                                                                                                                                     | [validation](docs/validation.md)                                                       |
-| Every recorded run reproduces                | Re-run in the browser and by `npm run verify`, to a relative 1e-4                                                                                                                                                  | [`packages/ideas/eval/verify.ts`](packages/ideas/eval/verify.ts)                       |
-| Tests                                        | 219, including a regression for every issue found in review                                                                                                                                                        | [`packages/ideas/src/ideas.test.ts`](packages/ideas/src/ideas.test.ts) and per package |
+| What                                         | Result                                                                                                                                                                                                                                                               | Where to check                                                                         |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Handwritten BZ lab notes, tested             | Period 6.5 min against a 60 s target; at 0.2 M malonic acid 67 s, but the two-variable model is then 42% off (tolerance 15%)                                                                                                                                         | [recorded session](apps/web/public/examples/chemical-clock.json), `npm run verify`     |
+| Muse proven wrong, then a discriminating run | Muse predicted the reduction would hold (82%, blind); it failed. Its test (five times the bromate, gap 6.4%) contradicts one explanation and is consistent with the other                                                                                            | Same session, Process view                                                             |
+| Do lessons change Muse's predictions?        | On a grid frozen before the run: Muse 67% right with no lesson (the same as always answering "holds"), 76% with one, 85% with two. Two numerical fits on the same lesson runs reach 89% and 67%; how Muse attributes the change between q and eps is not established | [evaluation](docs/evaluation.md)                                                       |
+| Solver against an independent reference      | Oregonator periods agree with SciPy (Radau) to a relative 5e-4                                                                                                                                                                                                       | [validation](docs/validation.md)                                                       |
+| Every recorded run reproduces                | Re-run in the browser and by `npm run verify`, to a relative 1e-4                                                                                                                                                                                                    | [`packages/ideas/eval/verify.ts`](packages/ideas/eval/verify.ts)                       |
+| Tests                                        | 219, including a regression for every issue found in review                                                                                                                                                                                                          | [`packages/ideas/src/ideas.test.ts`](packages/ideas/src/ideas.test.ts) and per package |
 
 ## The problem
 
@@ -144,9 +144,10 @@ recorded chemistry sessions cost $0.04 and $0.07.
   two-variable reduction keeps the period. Temperature and reagent depletion
   are not modelled.
 - **The evaluation is small.** One question type, two lessons, four grids.
-  Lessons clearly change Muse's predictions, but Muse does not beat a rule
-  fitted on the right variables; it comes close without being told which
-  they are. It does not show general learning.
+  Lessons clearly change Muse's predictions, but Muse stays below the best
+  numerical fit evaluated (85% against 89%), and the evaluation does not show
+  how it attributes a change between parameters the lessons moved together.
+  It does not show general learning.
 - **Outside chemistry, checks compute on assumed numbers.** The app accepts
   any goal and computes the comparisons Muse writes, but there are no
   experiments outside chemistry, so those results are only as good as the

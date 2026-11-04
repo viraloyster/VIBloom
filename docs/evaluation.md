@@ -8,11 +8,11 @@ cases.
 
 **Result in one line.** Lessons change Muse's predictions clearly: on the
 fourth grid, frozen before the run, Muse was right on 67% of new predictions
-with no lesson, 76% with one lesson and 85% with two. Rules with no model that
-fit the same lesson numbers score 67% (one lesson), 89% (two lessons, change
-attributed to q) and 67% (two lessons, change attributed to eps). Muse does not
-beat the correctly specified rule; it comes close to it without being told
-which parameter carried the change.
+with no lesson, 76% with one lesson and 85% with two. Without lessons Muse
+ties always answering "holds" (67%); with two it reaches 85%, below the best
+numerical fit evaluated. The two alternative fits on the same four lesson runs
+reach 89% (on eps_prime and q) and 67% (on eps_prime and eps). This evaluation
+does not establish how Muse attributes the change between q and eps.
 
 ## Fourth evaluation: two lessons, against rules that fit their numbers
 
@@ -38,17 +38,20 @@ conclusive and none shared with a lesson run; 24 hold.
 | Rule: fit on eps_prime, first lesson's two runs | 24/36 |      67% |     - |               - |
 | Rule: fit on eps_prime and q, all four runs     | 32/36 |      89% |     - |               - |
 | Rule: fit on eps_prime and eps, all four runs   | 24/36 |      67% |     - |               - |
+| Always "holds"                                  | 24/36 |      67% |     - |               - |
 | Always "fails"                                  | 12/36 |      33% |     - |               - |
 
 ### Reading it honestly
 
 - **The second lesson helps Muse**: from 76% to 85%, Brier from 0.185 to
   0.138. Muse cited a lesson on 70 of 72 predictions with both.
-- **A rule fitted on the right variables does better (89%).** Because the two
-  lessons changed q and eps together, a rule has to choose which one carries
-  the change: q gives 89%, eps gives 67%, no better than one lesson. Muse was
-  not told which; its 85% is close to the right choice and far from the wrong
-  one. That is the measured value of Muse here, and it is modest.
+- **Without lessons Muse ties the majority answer.** Always "holds" scores
+  67% on this grid, as Muse with no lesson does.
+- **The best numerical fit does better (89%).** The two lessons changed q and
+  eps together, so a fit has to choose a variable: fitting on q gives 89%, on
+  eps 67%. That one fit predicts better on this grid does not identify which
+  parameter causes the difference. Muse reaches 85%; this evaluation does not
+  establish how it attributes the change between q and eps.
 - **Where Muse still misses** is near the tolerance: at q 1.5e-4, eps 0.005,
   eps_prime 5e-5 the gap is 5.5% to 5.8% and it said "holds"; at q 6e-4, eps
   0.02, eps_prime 1.5e-4 the gap is 4.5% to 4.7% and it said "fails".
@@ -75,6 +78,7 @@ eps 0.01, s 1, only eps_prime changed).
 | Lesson, outcomes only ("binary")                       | 54/72 |      75% | 0.192 |             67% |
 | Lesson with its measured contrast ("quantitative")     | 60/72 |      83% | 0.158 |             67% |
 | Model-free rule: log-log interpolation of the two gaps | 28/36 |      78% |     - |               - |
+| Always "holds"                                         | 20/36 |      56% | 0.444 |               - |
 | Always "fails"                                         | 16/36 |      44% | 0.556 |               - |
 | Constant P(holds) = 0.286, from the first grid         |     - |      44% | 0.320 |               - |
 
