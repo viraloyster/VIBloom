@@ -4,6 +4,7 @@ import { BudgetExceeded, cost, Ledger } from "./cost";
 import { evaluate } from "./expr";
 import { Muse } from "./muse";
 import type { GrownNode } from "./protocol";
+import { unsupportedNumbers } from "./numbers";
 import { ArrayItems } from "./stream";
 import { IdeaTree } from "./tree";
 import type { IdeaEvent, Usage } from "./types";
@@ -857,4 +858,36 @@ describe("recorded sessions", () => {
       for (const l of t.lessons) expect(t.lessonState(l)).toBe("current");
     }, 60000);
   }
+});
+
+describe("numbers Muse writes", () => {
+  it("flags a figure that is not in the data, and accepts honest rounding", () => {
+    const data = [11.545, 7.447, 0.55014, 0.05, 2e-4];
+    expect(unsupportedNumbers("the gap was 55% against a 5% tolerance", data)).toEqual([]);
+    expect(unsupportedNumbers("periods 11.5 and 7.45 at eps_prime 2e-4", data)).toEqual([]);
+    expect(unsupportedNumbers("about 35% of the period is lost", data)).toEqual(["35%"]);
+    expect(unsupportedNumbers("the error scales like 0.003 per step", data)).toEqual(["0.003"]);
+    // Counts and digits inside names are prose, not claims.
+    expect(unsupportedNumbers("two explanations, 3 runs, eps_prime2 and s1", data)).toEqual([]);
+  });
+
+  it("derives the flags from the log, so a recorded answer is checked on every replay", () => {
+    const t = new IdeaTree();
+    t.append("person", { type: "goal", text: "g", mode: "standard" });
+    const nodes = t.admit("goal", [grown("beam", { params: [p("load", 5), p("strength", 3)] })]);
+    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    const chat = (answer: string) => ({
+      type: "chat" as const,
+      focus: "beam",
+      question: "why?",
+      answer,
+      cites: ["beam"],
+      asked: t.scope(),
+      usage,
+    });
+    t.append("muse", chat("The load of 5 MPa exceeds 3 MPa."));
+    t.append("muse", chat("It would need 4.2 MPa."));
+    const copy = IdeaTree.replay(structuredClone(t.events));
+    expect(copy.chat.map((c) => c.unsupported)).toEqual([[], ["4.2"]]);
+  });
 });

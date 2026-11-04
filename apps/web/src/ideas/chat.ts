@@ -71,6 +71,13 @@ export function mountChat(host: HTMLElement, actions: ChatActions) {
             c.cites.length === 0
               ? el("p", { class: "note-line warn" }, "No root cited: treat this as unsupported.")
               : null,
+            c.unsupported.length
+              ? el(
+                  "p",
+                  { class: "note-line warn" },
+                  `Not in the data Muse was given: ${c.unsupported.join(", ")}. Treat as unverified.`,
+                )
+              : null,
             el(
               "div",
               { class: "cites" },

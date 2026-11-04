@@ -1,10 +1,12 @@
-// Does Muse predict the Oregonator better with a lesson than without one?
-// A fixed grid of points whose outcomes the solver settles first; Muse
-// predicts each point blind, with and without the recorded lesson, and the
-// same prompt the app uses. Points the lesson was learned at are reported
-// apart from new ones, so memorising a seen point is not counted as learning.
+// Does a lesson help Muse predict the Oregonator, and do its numbers add
+// anything? A grid frozen in a file before the run, whose outcomes the solver
+// settles first; Muse predicts each point blind with no lesson, with the
+// recorded lesson as outcomes only, and with its measured contrast, using the
+// prompt the app uses. The lesson's own points are reported apart, so recall
+// is not counted as learning. Baselines: always "fails", and a constant
+// probability taken from an earlier, separate grid.
 //
-//   npx vite-node packages/ideas/eval/predictions.ts -- [reps] [out.json]
+//   npx vite-node packages/ideas/eval/predictions.ts -- grid.json [reps] [out.json]
 //
 // The key comes from MUSE_API_KEY, or a proxy that adds it.
 
@@ -16,8 +18,23 @@ import { PREDICT, PREDICT_SCHEMA } from "../src/protocol";
 import { IdeaTree } from "../src/tree";
 import type { IdeaEvent, Outcome } from "../src/types";
 
-const reps = Number(process.argv[2] ?? 2);
-const out = process.argv[3] ?? "eval-predictions.json";
+const root = new URL("../../../", import.meta.url);
+const gridFile = process.argv[2] ?? "packages/ideas/eval/grid-2.json";
+const reps = Number(process.argv[3] ?? 2);
+const out = process.argv[4] ?? "eval-predictions.json";
+const spec2 = JSON.parse(await readFile(new URL(gridFile, root), "utf8")) as {
+  q: number;
+  eps: number;
+  s: number[];
+  eps_prime: number[];
+  base_rate_from: string;
+};
+const earlier = JSON.parse(await readFile(new URL(spec2.base_rate_from, root), "utf8")) as {
+  rows: { seen: boolean; truth: Outcome }[];
+};
+const unseen = earlier.rows.filter((r) => !r.seen);
+// Probability of "holds" estimated on the earlier grid only.
+const baseRate = unseen.filter((r) => r.truth === "holds").length / unseen.length;
 const BUDGET = 1;
 
 const example = new URL("../../../apps/web/public/examples/period-reduction.json", import.meta.url);
@@ -33,11 +50,11 @@ const node = lesson && base.nodes.get(lesson.node);
 const spec = node?.check;
 if (!lesson || !node || spec?.kind !== "oregonator") throw new Error("the example has no lesson");
 
-const fixed = { q: lesson.basis.q ?? NaN, eps: lesson.basis.eps ?? NaN };
+const fixed = { q: spec2.q, eps: spec2.eps };
 const seen = [lesson.basis, { ...lesson.basis, [lesson.test.param]: lesson.test.value }];
 const grid: Record<string, number>[] = [];
-for (const s of [0.75, 1, 1.5, 2])
-  for (const eps_prime of [1e-5, 5e-5, 2e-4, 1e-3]) grid.push({ ...fixed, s, eps_prime });
+for (const s of spec2.s)
+  for (const eps_prime of spec2.eps_prime) grid.push({ ...fixed, s, eps_prime });
 const key = (v: Record<string, number>) => SIM_PARAMS.map((k) => String(v[k])).join(",");
 const seenKeys = new Set(seen.map(key));
 const points = [...seen, ...grid.filter((g) => !seenKeys.has(key(g)))];
@@ -56,8 +73,10 @@ const ledger = new Ledger(BUDGET);
 const muse = new Muse(process.env.MUSE_API_KEY ? { apiKey: process.env.MUSE_API_KEY } : {}, ledger);
 
 // The tree as the app would hold it at a point: values set, lesson kept or not.
-function lessonsAt(v: Record<string, number>, withLesson: boolean) {
-  if (!withLesson) return [];
+type Condition = "none" | "binary" | "quantitative";
+const CONDITIONS: Condition[] = ["none", "binary", "quantitative"];
+function lessonsAt(v: Record<string, number>, condition: Condition) {
+  if (condition === "none") return [];
   const t = IdeaTree.replay(base.events);
   for (const run of t.runsToConfirm()) {
     const r = base.runs.find((x) => x.seq === run.seq);
@@ -67,13 +86,13 @@ function lessonsAt(v: Record<string, number>, withLesson: boolean) {
     if (t.scope()[k] !== v[k])
       t.append("eval", { type: "set_param", name: k, value: v[k] ?? NaN, source: "eval" });
   }
-  return t.lessonsForModel(lesson?.node ?? "");
+  return t.lessonsForModel(lesson?.node ?? "", condition);
 }
 
 interface Row {
   point: Record<string, number>;
   seen: boolean;
-  withLesson: boolean;
+  condition: Condition;
   rep: number;
   truth: Outcome;
   difference: number;
@@ -89,12 +108,12 @@ for (let rep = 0; rep < reps; rep++) {
   for (const v of points) {
     const t = truth.get(key(v));
     if (!t || typeof t === "string") continue;
-    for (const withLesson of [false, true]) {
+    for (const condition of CONDITIONS) {
       const started = Date.now();
       const row: Row = {
         point: v,
         seen: seenKeys.has(key(v)),
-        withLesson,
+        condition,
         rep,
         truth: t.outcome,
         difference: t.difference,
@@ -110,7 +129,7 @@ for (let rep = 0; rep < reps; rep++) {
               question: spec.question,
               tolerance: spec.tolerance,
               values: v,
-              lessons: lessonsAt(v, withLesson),
+              lessons: lessonsAt(v, condition),
             }),
             mode: "standard",
             effort: "low",
@@ -158,19 +177,45 @@ function summary(rs: Row[]) {
 }
 
 const groups = Object.fromEntries(
-  [false, true].flatMap((withLesson) =>
-    [true, false].map((s) => [
-      `${withLesson ? "with" : "without"} lesson, ${s ? "seen" : "new"} points`,
-      summary(rows.filter((r) => r.withLesson === withLesson && r.seen === s)),
+  CONDITIONS.flatMap((condition) =>
+    [true, false].map((seen) => [
+      `${condition}, ${seen ? "seen" : "new"} points`,
+      summary(rows.filter((r) => r.condition === condition && r.seen === seen)),
     ]),
   ),
 );
+// Baselines on the new points, one forecast per point.
+const fresh = points.filter((v) => !seenKeys.has(key(v)));
+const outcomes = fresh.flatMap((v) => {
+  const t = truth.get(key(v));
+  return t && typeof t !== "string" ? [t.outcome] : [];
+});
+const holdsShare = outcomes.filter((o) => o === "holds").length / outcomes.length;
+const baselines = {
+  points: outcomes.length,
+  alwaysFails: { accuracy: 1 - holdsShare, brier: holdsShare },
+  baseRate: {
+    probabilityHolds: baseRate,
+    accuracy: baseRate < 0.5 ? 1 - holdsShare : holdsShare,
+    brier:
+      outcomes.reduce((a, o) => a + (baseRate - (o === "holds" ? 1 : 0)) ** 2, 0) / outcomes.length,
+  },
+};
 const excluded = [...truth].filter(([, t]) => typeof t === "string");
-console.log("\n" + JSON.stringify({ groups, excluded, total: ledger.total }, null, 1));
+console.log("\n" + JSON.stringify({ groups, baselines, excluded, total: ledger.total }, null, 1));
 await writeFile(
   out,
   JSON.stringify(
-    { reps, points: [...truth], groups, excluded, rows, total: ledger.total },
+    {
+      grid: spec2,
+      reps,
+      points: [...truth],
+      groups,
+      baselines,
+      excluded,
+      rows,
+      total: ledger.total,
+    },
     null,
     1,
   ),

@@ -1,0 +1,8 @@
+{
+  "note": "Frozen before the run. None of these points was in the first evaluation.",
+  "q": 7.62e-5,
+  "eps": 0.01,
+  "s": [0.8, 1.2, 1.8],
+  "eps_prime": [1.5e-5, 3e-5, 1e-4, 4e-4, 2e-3],
+  "base_rate_from": "docs/eval/predictions-2026-11-04.json"
+}

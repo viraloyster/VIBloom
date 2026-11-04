@@ -415,6 +415,13 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
                 ? " - its run did not reproduce"
                 : " - not run yet",
           p.uses.length ? el("small", {}, ` using ${p.uses.join(", ")}`) : null,
+          p.unsupported.length
+            ? el(
+                "small",
+                { class: "warn" },
+                ` (reason cites ${p.unsupported.join(", ")}, not in its data)`,
+              )
+            : null,
         ),
       );
     }
@@ -453,6 +460,13 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
             ),
           ),
           l.open ? el("p", { class: "fine" }, el("strong", {}, "Still open: "), l.open) : null,
+          l.unsupported.length
+            ? el(
+                "p",
+                { class: "fine warn" },
+                `Numbers Muse wrote that were not in its data: ${l.unsupported.join(", ")}.`,
+              )
+            : null,
           el(
             "p",
             { class: "fine" },

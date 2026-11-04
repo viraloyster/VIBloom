@@ -2,7 +2,8 @@
 // what the model returns is validated here before it becomes a node.
 
 import { canonical, sha256 } from "@vibloom/engine";
-import { runCheck, SIM_PARAMS } from "./check";
+import { runCheck, SIM_PARAMS, thresholds } from "./check";
+import { numbersOf, unsupportedNumbers } from "./numbers";
 import { bare, MAX_EXPR, names, OPS, rename, tokens, type Op } from "./expr";
 import { AXES, type GrownNode } from "./protocol";
 import type {
@@ -51,6 +52,7 @@ export class IdeaTree {
     answer: string;
     cites: string[];
     asked: Record<string, number>;
+    unsupported: string[];
   }[] = [];
   goal = "";
   mode: Mode = "standard";
@@ -216,6 +218,7 @@ export class IdeaTree {
           cites: b.cites.filter((c) => this.nodes.has(c)),
           // Spread, so logs recorded before this field existed still replay.
           asked: { ...b.asked },
+          unsupported: unsupportedNumbers(b.answer, this.shown(b.focus, b.question)),
         });
         break;
       case "predict": {
@@ -235,6 +238,10 @@ export class IdeaTree {
           confidence: Math.min(0.99, Math.max(0.5, b.confidence)),
           reason: b.reason,
           uses: b.uses.filter((u) => this.lessons.some((l) => l.id === u && l.run !== undefined)),
+          unsupported: unsupportedNumbers(
+            b.reason,
+            numbersOf([b.inputs, n.statement, n.check.tolerance, this.lessonsForModel(b.node)]),
+          ),
         });
         break;
       }
@@ -275,6 +282,18 @@ export class IdeaTree {
           candidates: b.candidates.map((x) => ({ ...x })),
           test: { ...b.test },
           open: b.open,
+          unsupported: unsupportedNumbers(
+            [...b.candidates.flatMap((x) => [x.explanation, x.scope]), b.open].join(" \n "),
+            numbersOf([
+              p.inputs,
+              this.nodes.get(p.node)?.statement,
+              this.nodes.get(p.node)?.check,
+              p.confidence,
+              first.result,
+              b.test.value,
+              this.lessonsForModel(p.node),
+            ]),
+          ),
         });
         break;
       }
@@ -690,20 +709,50 @@ export class IdeaTree {
     return Object.entries(l.basis).every(([k, v]) => now[k] === v) ? "current" : "invalidated";
   }
 
-  // What the model is shown of past lessons on a node: only decided ones,
-  // the verified contrast apart from the interpretation it was consistent with.
-  lessonsForModel(node: string) {
+  // What the model is shown of past lessons on a node: only decided ones.
+  // The verified contrast comes straight from the recorded runs (values,
+  // periods, measured difference, tolerance), apart from the interpretation
+  // it was consistent with; binary leaves the numbers out, for comparison.
+  // A lesson learned at other values is evidence, not a rule for this point.
+  lessonsForModel(node: string, detail: "quantitative" | "binary" = "quantitative") {
+    const now = this.scope();
+    const spec = this.nodes.get(node)?.check;
+    const tolerance = spec?.kind === "oregonator" ? spec.tolerance : undefined;
+    const runOf = (seq: number | undefined) => {
+      const r = this.runs.find((x) => x.seq === seq)?.result;
+      if (!r || "error" in r) return undefined;
+      return {
+        values: pick(r.inputs),
+        outcome: r.pass ? "holds" : "fails",
+        ...(detail === "quantitative"
+          ? {
+              periods: { ...r.sim?.periods },
+              relative_difference: r.value,
+              run: seq,
+            }
+          : {}),
+      };
+    };
     return this.lessons
       .filter((l) => l.node === node)
       .flatMap((l) => {
         const d = this.decided(l);
         if (!d) return [];
+        const here = SIM_PARAMS.every((k) => l.basis[k] === now[k]);
         return [
           {
             id: l.id,
-            state: this.lessonState(l),
-            finding: `at ${JSON.stringify(l.basis)} it ${l.observed}; with ${l.test.param} = ${String(l.test.value)} it ${d.outcome}`,
-            supported_interpretation: l.candidates[d.supported]?.explanation ?? "",
+            applies_here: here
+              ? "learned at exactly these values"
+              : "learned at other values: evidence about those values; whether it carries over here is not checked",
+            contrast: {
+              ...(detail === "quantitative" && tolerance !== undefined
+                ? { tolerance, difference: "|full - reduced| / reduced" }
+                : {}),
+              surprise: runOf(l.surprise),
+              test: { changed: l.test.param, ...runOf(l.run) },
+            },
+            consistent_interpretation: l.candidates[d.supported]?.explanation ?? "",
             scope: l.candidates[d.supported]?.scope ?? "",
             contradicted: l.candidates
               .filter((_, i) => i !== d.supported)
@@ -712,6 +761,27 @@ export class IdeaTree {
           },
         ];
       });
+  }
+
+  // Every number Muse was shown when answering about a node: the tree's
+  // values and results, where the focus check would flip, its lessons and the
+  // question itself.
+  private shown(focus: string, question: string): number[] {
+    const n = this.nodes.get(focus);
+    const r = this.results.get(focus);
+    const flips =
+      n?.check && n.check.kind !== "oregonator" && r && !("error" in r)
+        ? thresholds(n.check, this.scope(), Object.keys(r.inputs))
+        : [];
+    return numbersOf([
+      this.scope(),
+      [...this.results.values()],
+      flips,
+      this.lessonsForModel(focus),
+      [...this.nodes.values()].map((x) => [x.title, x.statement, x.rationale, x.check]),
+      this.chat.slice(-4).map((c) => c.answer),
+      question,
+    ]);
   }
 
   // Each prediction against the run it was settled by, for good. Accuracy is

@@ -204,6 +204,8 @@ export interface Lesson {
   open: string;
   // Sequence number of the discriminating run, once recorded.
   run?: number;
+  // Numbers in Muse's text that were not in the data it was given.
+  unsupported: string[];
 }
 
 export interface Prediction {
@@ -216,4 +218,5 @@ export interface Prediction {
   uses: string[];
   // The first run of exactly these values after the prediction; permanent.
   run?: number;
+  unsupported: string[];
 }
