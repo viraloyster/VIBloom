@@ -19,7 +19,12 @@ interface Row {
 }
 
 const dir = process.argv[2] ?? "study-out";
-const rows = (await readFile(`${dir}/calls.jsonl`, "utf8"))
+// The main log, and the later diagnosis of Muse's own wrong predictions.
+const rows = [
+  await readFile(`${dir}/calls.jsonl`, "utf8"),
+  await readFile(`${dir}/diagnose-own.jsonl`, "utf8").catch(() => ""),
+]
+  .join("\n")
   .split("\n")
   .filter(Boolean)
   .map((l) => JSON.parse(l) as Row);
@@ -214,34 +219,61 @@ const settingCost = Object.fromEntries(
   }),
 );
 
-// Diagnosis after a surprise.
-const dg = rows.filter((r) => r.part === "diagnose" && r.ok);
-const diagnose = {
-  runs: dg.length,
-  accepted_by_engine: dg.filter((r) => r.detail?.accepted).length,
-  rejected_reasons: [
-    ...new Set(dg.filter((r) => !r.detail?.accepted).map((r) => String(r.detail?.reason))),
-  ],
-  test_decided_one: dg.filter((r) => r.detail?.decided === "one consistent").length,
-  outcomes: Object.fromEntries(
-    [...new Set(dg.map((r) => String(r.detail?.decided)))].map((d) => [
-      d,
-      dg.filter((r) => String(r.detail?.decided) === d).length,
-    ]),
-  ),
-  test_parameters: Object.fromEntries(
-    [
-      ...new Set(dg.map((r) => String((r.detail?.test as { param?: string } | undefined)?.param))),
-    ].map((p) => [
-      p,
-      dg.filter((r) => String((r.detail?.test as { param?: string } | undefined)?.param) === p)
-        .length,
-    ]),
-  ),
-  with_unsupported_numbers: dg.filter(
-    (r) => ((r.detail?.unsupported as string[] | undefined) ?? []).length > 0,
-  ).length,
+// The three lesson conditions on exactly the same points and repetitions.
+const reduction = def.filter((p) => p.question === "reduction_keeps_period");
+const pairKey = (p: P & { rep: number }) => `${String(p.rep)}|${JSON.stringify(p.values)}`;
+const byLessons = [0, 1, 2].map(
+  (l) => new Map(reduction.filter((p) => p.lessons === l).map((p) => [pairKey(p), p])),
+);
+const shared = [...(byLessons[0]?.keys() ?? [])].filter((k) => byLessons.every((m) => m.has(k)));
+const right = (l: number, k: string) => {
+  const p = byLessons[l]?.get(k);
+  return p ? p.expect === p.truth : false;
 };
+const paired = {
+  n: shared.length,
+  points: new Set(shared.map((k) => k.split("|")[1])).size,
+  accuracy: [0, 1, 2].map((l) => r3(shared.filter((k) => right(l, k)).length / shared.length)),
+  wrong_to_right_with_one: shared.filter((k) => !right(0, k) && right(1, k)).length,
+  right_to_wrong_with_one: shared.filter((k) => right(0, k) && !right(1, k)).length,
+  wrong_to_right_two_vs_one: shared.filter((k) => !right(1, k) && right(2, k)).length,
+  right_to_wrong_two_vs_one: shared.filter((k) => right(1, k) && !right(2, k)).length,
+};
+
+// Diagnosis after a surprise: a supplied wrong prediction (diagnose) or
+// Muse's own (diagnose-own).
+const diagnosis = (part: string) => {
+  const dg = rows.filter((r) => r.part === part && r.ok);
+  return {
+    runs: dg.length,
+    accepted_by_engine: dg.filter((r) => r.detail?.accepted).length,
+    rejected_reasons: [
+      ...new Set(dg.filter((r) => !r.detail?.accepted).map((r) => String(r.detail?.reason))),
+    ],
+    test_decided_one: dg.filter((r) => r.detail?.decided === "one consistent").length,
+    outcomes: Object.fromEntries(
+      [...new Set(dg.map((r) => String(r.detail?.decided)))].map((d) => [
+        d,
+        dg.filter((r) => String(r.detail?.decided) === d).length,
+      ]),
+    ),
+    test_parameters: Object.fromEntries(
+      [
+        ...new Set(
+          dg.map((r) => String((r.detail?.test as { param?: string } | undefined)?.param)),
+        ),
+      ].map((p) => [
+        p,
+        dg.filter((r) => String((r.detail?.test as { param?: string } | undefined)?.param) === p)
+          .length,
+      ]),
+    ),
+    with_unsupported_numbers: dg.filter(
+      (r) => ((r.detail?.unsupported as string[] | undefined) ?? []).length > 0,
+    ).length,
+  };
+};
+const diagnose = { supplied: diagnosis("diagnose"), own: diagnosis("diagnose-own") };
 
 // Chat and vision, per case.
 const perCase = (part: string) =>
@@ -288,6 +320,7 @@ console.log(
       overview,
       decompose,
       predict,
+      paired,
       settings,
       settingCost,
       diagnose,

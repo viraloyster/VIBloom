@@ -7,9 +7,9 @@
     "recipe_check": 5
   },
   "total": {
-    "calls": 3217,
+    "calls": 3257,
     "failed": 10,
-    "cost": 14.43
+    "cost": 15.026
   },
   "overview": {
     "decompose": {
@@ -137,6 +137,22 @@
       "latency_s": {
         "p50": 29.306,
         "p90": 40.694
+      },
+      "mean_score": 1
+    },
+    "diagnose-own": {
+      "calls": 40,
+      "failed": 0,
+      "failures": [],
+      "cost": 0.596,
+      "cost_per_call": 0.014897,
+      "input_tokens": 24736,
+      "cached_share": 0.723,
+      "output_tokens": 137558,
+      "reasoning_share_of_output": 0.921,
+      "latency_s": {
+        "p50": 35.728,
+        "p90": 50.599
       },
       "mean_score": 1
     }
@@ -436,6 +452,15 @@
       "same_answer_all_reps": 0.936
     }
   },
+  "paired": {
+    "n": 567,
+    "points": 190,
+    "accuracy": [0.455, 0.841, 0.843],
+    "wrong_to_right_with_one": 285,
+    "right_to_wrong_with_one": 66,
+    "wrong_to_right_two_vs_one": 43,
+    "right_to_wrong_two_vs_one": 42
+  },
   "settings": {
     "standard, effort low": {
       "n": 54,
@@ -551,19 +576,35 @@
     }
   },
   "diagnose": {
-    "runs": 40,
-    "accepted_by_engine": 40,
-    "rejected_reasons": [],
-    "test_decided_one": 40,
-    "outcomes": {
-      "one consistent": 40
+    "supplied": {
+      "runs": 40,
+      "accepted_by_engine": 40,
+      "rejected_reasons": [],
+      "test_decided_one": 40,
+      "outcomes": {
+        "one consistent": 40
+      },
+      "test_parameters": {
+        "eps": 36,
+        "eps_prime": 3,
+        "q": 1
+      },
+      "with_unsupported_numbers": 0
     },
-    "test_parameters": {
-      "eps": 36,
-      "eps_prime": 3,
-      "q": 1
-    },
-    "with_unsupported_numbers": 0
+    "own": {
+      "runs": 40,
+      "accepted_by_engine": 40,
+      "rejected_reasons": [],
+      "test_decided_one": 40,
+      "outcomes": {
+        "one consistent": 40
+      },
+      "test_parameters": {
+        "eps_prime": 11,
+        "eps": 29
+      },
+      "with_unsupported_numbers": 0
+    }
   },
   "chat": {
     "chemical-clock|failing": {

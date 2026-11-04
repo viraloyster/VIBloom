@@ -15,8 +15,8 @@ npx vite-node packages/ideas/eval/study-report.ts -- docs/eval/study
 
 | What          | Value                                                       |
 | ------------- | ----------------------------------------------------------- |
-| Calls         | 3,217, of which 10 failed (truncated output or 502 gateway) |
-| Cost          | $14.43 (budget $30)                                         |
+| Calls         | 3,257, of which 10 failed (truncated output or 502 gateway) |
+| Cost          | $15.03 (budget $30)                                         |
 | Wall time     | 77 minutes, 8 calls in parallel                             |
 | Input tokens  | 1.42 million                                                |
 | Output tokens | 3.19 million, about 90% reasoning                           |
@@ -27,6 +27,7 @@ npx vite-node packages/ideas/eval/study-report.ts -- docs/eval/study
 | Predict         | 2,910 | $12.27 | $0.0042  | 41%          | 8 s / 13 s        |
 | Settings        | 114   | $0.47  | $0.0042  | 45%          | 11 s / 23 s       |
 | Diagnose        | 40    | $0.60  | $0.015   | 74%          | 29 s / 41 s       |
+| Diagnose, own   | 40    | $0.60  | $0.015   | 72%          | 36 s / 51 s       |
 | Chat            | 33    | $0.21  | $0.0064  | 56%          | 10 s / 14 s       |
 | Vision: formula | 48    | $0.26  | $0.0055  | 64%          | 9 s / 19 s        |
 | Vision: recipe  | 24    | $0.09  | $0.0037  | 66%          | 6 s / 7 s         |
@@ -62,6 +63,23 @@ where the engine reached no conclusion are left out, so n is below 600.
   larger, independent grid, with repetitions. It is still one model, one
   reaction and lessons from one session.
 
+### The same points, paired
+
+The denominators above differ slightly (570, 569, 568) because a few calls
+failed. On the 567 predictions (190 points, three repetitions) present in all
+three conditions:
+
+| Lessons | Right |
+| ------- | ----- |
+| None    | 45.5% |
+| One     | 84.1% |
+| Two     | 84.3% |
+
+- From none to one lesson, 285 predictions went from wrong to right and 66
+  from right to wrong.
+- From one to two lessons, 43 went from wrong to right and 42 the other way:
+  the second lesson changes answers without changing accuracy.
+
 ### Settings, on the first 60 points, no lesson
 
 | Setting                 | n   | Right | Brier | Per call | Latency p50 |
@@ -76,17 +94,29 @@ much per call at the same accuracy.
 
 ## Diagnosis after a surprise
 
-The first 40 grid points where the reduction fails: as a first prediction
-Muse says "holds" at nearly all of them, so each is a surprise to explain.
-Muse is told its prediction failed and proposes two explanations with
-different expected outcomes and one test; the engine runs the test.
+Two sets of 40. **Own:** the first 40 points where Muse's own first
+prediction (no lesson, first repetition) was wrong, each given back to Muse
+with its prediction and confidence (all 40 were "holds", mean confidence
+0.83; the first study did not keep the reason text). **Supplied:** the first
+40 points where the reduction fails, given a fixed prediction ("holds", 0.8)
+written by the harness, from the first run of the study. Muse proposes two
+explanations with different expected outcomes and one test; the engine runs
+the test.
 
-| What                                 | Result                    |
-| ------------------------------------ | ------------------------- |
-| Accepted by the engine's rules       | 40 of 40                  |
-| Test run told the explanations apart | 40 of 40 (one consistent) |
-| Parameter the test changed           | eps 36, eps_prime 3, q 1  |
-| Numbers in the text not in its data  | 0 of 40                   |
+| What                                       | Own                  | Supplied                 |
+| ------------------------------------------ | -------------------- | ------------------------ |
+| Admitted by the engine's rules             | 40 of 40             | 40 of 40                 |
+| Test concluded; one expectation compatible | 40 of 40             | 40 of 40                 |
+| Parameter the test changed                 | eps 29, eps_prime 11 | eps 36, eps_prime 3, q 1 |
+| Numbers in the text not in its data        | 0 of 40              | 0 of 40                  |
+
+What this does and does not show. The engine requires two opposite
+expectations, so any conclusive test is compatible with exactly one of them:
+"40 of 40" shows that Muse's proposals follow the protocol and that its tests
+conclude, not that its explanations were scientifically right. Which
+explanation the test is compatible with is recorded; the cause is not
+established. Judging the quality of the hypotheses would be another
+experiment.
 
 ## Decomposition
 

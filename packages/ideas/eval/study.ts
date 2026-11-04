@@ -6,13 +6,15 @@
 //   predict    a seeded random grid, three questions, no lesson, one or two
 //              lessons, three repetitions; truth from the solver first
 //   settings   effort medium and the contributor mode on a subset
-//   diagnose   explanations after real surprises: accepted, discriminating
+//   diagnose   explanations after a supplied wrong prediction ("holds", 0.8)
+//   diagnose-own  explanations after Muse's own wrong predictions, read from
+//              an earlier study's calls.jsonl (fifth argument)
 //   chat       questions about recorded trees whose answer the engine knows
 //   vision     handwritten formulas and recipes; monitor panels with and
 //              without a planted mismatch
 // Each call is one line of calls.jsonl.
 //
-//   npx vite-node packages/ideas/eval/study.ts -- out-dir [budget-usd]
+//   npx vite-node packages/ideas/eval/study.ts -- out-dir [budget-usd] [parts] [prior-log]
 
 import { mkdir, readFile, writeFile, appendFile } from "node:fs/promises";
 import { runCheck, SIM_PARAMS, recipeDerived, recipeEffects } from "../src/check";
@@ -371,22 +373,38 @@ async function predictGrid() {
 }
 
 // ----------------------------------------------------------------- diagnose
-async function diagnose(points: Record<string, number>[]) {
-  // Points where the reduction fails: as a first prediction Muse usually says
-  // "holds" there, so each is a real surprise to explain.
+// A prediction to explain: the one Muse made at that point (own), or, in
+// the first study, a fixed "holds" given to it (supplied).
+interface Surprise {
+  v: Record<string, number>;
+  expect: Outcome;
+  confidence: number;
+  reason: string;
+}
+
+async function diagnose(points: Record<string, number>[], own?: Surprise[]) {
   const base = await replay(new URL("lesson-session.json", here));
   const node = [...base.nodes.values()].find(
     (n) => n.check?.kind === "oregonator" && n.check.question === "reduction_keeps_period",
   );
   if (!node || node.check?.kind !== "oregonator") return;
-  const sp = node.check;
-  const cases = points
-    .map((v) => ({ v, r: runCheck(sp, v) }))
-    .filter((x) => !("error" in x.r) && !x.r.pass)
+  // Own surprises are scored with the predictions' own experiment (5%).
+  const sp = own ? spec("reduction_keeps_period") : node.check;
+  const cases = (
+    own ??
+    points.map((v) => ({
+      v,
+      expect: "holds",
+      confidence: 0.8,
+      reason: "time scales look well separated",
+    }))
+  )
+    .map((c) => ({ ...c, r: runCheck(sp, c.v) }))
+    .filter((x) => !("error" in x.r) && (x.r.pass ? "holds" : "fails") !== x.expect)
     .slice(0, 40);
-  await pool(cases, 6, ({ v, r }) =>
+  await pool(cases, 6, ({ v, r, expect, confidence, reason }) =>
     call(
-      "diagnose",
+      own ? "diagnose-own" : "diagnose",
       SIM_PARAMS.map((k) => String(v[k])).join(","),
       0,
       () =>
@@ -398,12 +416,8 @@ async function diagnose(points: Record<string, number>[]) {
               question: sp.question,
               tolerance: sp.tolerance,
               values: v,
-              predicted: {
-                expect: "holds",
-                confidence: 0.8,
-                reason: "time scales look well separated",
-              },
-              observed: "fails",
+              predicted: { expect, confidence, reason },
+              observed: expect === "holds" ? "fails" : "holds",
               measured: {
                 ...("error" in r ? {} : r.sim?.periods),
                 relative_difference: "error" in r ? null : r.value,
@@ -459,8 +473,8 @@ async function diagnose(points: Record<string, number>[]) {
           id: "p1",
           node: id,
           inputs: v,
-          expect: "holds",
-          confidence: 0.8,
+          expect,
+          confidence,
           reason: "",
           uses: [],
           usage: u,
@@ -871,6 +885,39 @@ if (parts.includes("diagnose")) {
     }));
   }
   await diagnose(points);
+}
+// Muse's own wrong first predictions (no lesson, first repetition) from an
+// earlier study's log, each explained once.
+if (parts.includes("diagnose-own")) {
+  const prior = (await readFile(process.argv[5] ?? "", "utf8"))
+    .split("\n")
+    .filter(Boolean)
+    .map(
+      (l) =>
+        JSON.parse(l) as {
+          part: string;
+          ok: boolean;
+          rep: number;
+          detail?: Record<string, unknown>;
+        },
+    )
+    .filter(
+      (r) =>
+        r.part === "predict" &&
+        r.ok &&
+        r.rep === 0 &&
+        r.detail?.question === "reduction_keeps_period" &&
+        r.detail.lessons === 0 &&
+        r.detail.expect !== r.detail.truth,
+    )
+    .map((r) => ({
+      v: r.detail?.values as Record<string, number>,
+      expect: r.detail?.expect as Outcome,
+      confidence: Number(r.detail?.confidence),
+      // The first study did not keep the reason text.
+      reason: "not recorded",
+    }));
+  await diagnose([], prior);
 }
 await writeFile(
   `${outDir}/run.json`,
