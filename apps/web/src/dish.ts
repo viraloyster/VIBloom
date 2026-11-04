@@ -70,7 +70,9 @@ void main() {
   float front = pow(fr(uv), 4.0);
   vec3 col = mix(vec3(0.30, 0.02, 0.06), vec3(0.78, 0.12, 0.16), smoothstep(0.0, 0.35, f));
   col = mix(col, vec3(0.10, 0.20, 0.75), smoothstep(0.35, 1.0, f));
-  col += vec3(0.70, 0.92, 1.0) * front * 0.85 + vec3(0.35, 0.55, 1.0) * g * 0.9;
+  // Glow marks the excited fronts without washing out a dish that fires whole.
+  col += vec3(0.55, 0.78, 1.0) * front * 0.45 + vec3(0.25, 0.4, 0.9) * g * 0.35;
+  col = min(col, vec3(0.92));
   col *= smoothstep(0.49, 0.475, r) * (1.0 - 0.45 * smoothstep(0.25, 0.49, r));
   col += vec3(0.75, 0.82, 0.95) * smoothstep(0.47, 0.485, r) * smoothstep(0.5, 0.487, r) * 0.55;
   col += vec3(1.0) * 0.10 * smoothstep(0.22, 0.0, length(d - vec2(-0.16, 0.2)));

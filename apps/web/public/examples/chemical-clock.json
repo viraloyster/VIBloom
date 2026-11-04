@@ -21,54 +21,54 @@
         "under": "goal",
         "nodes": [
           {
-            "id": "sustained-oscillation",
+            "id": "bz-oscillates",
             "parent": "goal",
-            "title": "Mixture actually oscillates",
-            "statement": "The chosen Belousov-Zhabotinsky mixture settles into sustained chemical oscillations rather than a steady state.",
+            "title": "Mixture truly oscillates",
+            "statement": "The Belousov-Zhabotinsky mixture sustains repeating oxidation-reduction oscillations at the chosen recipe.",
             "axis": "principles",
             "role": "assumption",
             "criticality": "critical",
             "risk": "medium",
-            "rationale": "Without a limit cycle there is no clock. The Oregonator only oscillates in a narrow kinetic window.",
+            "rationale": "If the Oregonator does not oscillate at these ratios there is no chemical clock at all; everything else depends on it.",
             "params": [
               {
                 "name": "s",
-                "kind": "design",
-                "value": 0.6,
+                "kind": "external",
+                "value": 1,
                 "unit": "dimensionless",
                 "origin": "reference",
-                "source": "Field and Noyes J. Chem. Phys. 1974 Oregonator scaling; typical 0.5 to 2"
+                "source": "Field Noyes 1974 Oregonator scaling, typical stoichiometric factor"
               },
               {
                 "name": "q",
-                "kind": "design",
+                "kind": "external",
                 "value": 7.62e-5,
                 "unit": "dimensionless",
                 "origin": "reference",
-                "source": "Field and Noyes J. Chem. Phys. 1974 Oregonator scaling"
+                "source": "Field Noyes 1974 Oregonator scaling, bromate-bromide kinetics"
               },
               {
                 "name": "eps",
-                "kind": "design",
+                "kind": "external",
                 "value": 0.0099,
                 "unit": "dimensionless",
                 "origin": "reference",
-                "source": "Field and Noyes J. Chem. Phys. 1974 Oregonator scaling"
+                "source": "Field Noyes 1974 Oregonator scaling, fast activator timescale"
               },
               {
                 "name": "eps_prime",
-                "kind": "design",
+                "kind": "external",
                 "value": 0.002,
                 "unit": "dimensionless",
                 "origin": "reference",
-                "source": "Field and Noyes J. Chem. Phys. 1974 Oregonator scaling; typical 1e-4 to 0.02"
+                "source": "Field Noyes 1974 Oregonator scaling, catalyst timescale range"
               }
             ],
             "uses": [],
             "suggestions": [],
             "check": {
               "kind": "oregonator",
-              "description": "Integrate the full three-variable Oregonator with the given s, q, eps and eps_prime; passes if a sustained limit cycle is detected.",
+              "description": "Run stiff Oregonator solver at the chosen kinetic ratios to test for a sustained limit cycle.",
               "question": "oscillates",
               "tolerance": 0.05,
               "op": "<=",
@@ -79,16 +79,24 @@
             "expanded": false
           },
           {
-            "id": "minute-period-requirements",
+            "id": "minute-period",
             "parent": "goal",
-            "title": "One minute colour change",
-            "statement": "The clock must show a clearly visible colour change about once every minute.",
+            "title": "Period is one minute",
+            "statement": "The scaled oscillation period equals one minute within a few seconds.",
             "axis": "requirements",
             "role": "assumption",
             "criticality": "critical",
-            "risk": "low",
-            "rationale": "Every minute fixes the target the chemistry must hit; looser timing would make the goal much easier.",
+            "risk": "high",
+            "rationale": "Dimensionless Oregonator time must be converted with an explicit chemical timescale; the clock only counts as a minute clock if the scaled period lands near 60 seconds.",
             "params": [
+              {
+                "name": "tau_seconds",
+                "kind": "external",
+                "value": 12,
+                "unit": "s",
+                "origin": "reference",
+                "source": "Field Noyes 1974 Oregonator time scaling, typical 5-20 s per dimensionless time unit"
+              },
               {
                 "name": "target_period_s",
                 "kind": "requirement",
@@ -96,29 +104,11 @@
                 "unit": "s",
                 "origin": "assumed",
                 "source": ""
-              }
-            ],
-            "uses": [],
-            "suggestions": [],
-            "basis": [],
-            "proposed": false,
-            "expanded": false
-          },
-          {
-            "id": "period-tunable-to-minute",
-            "parent": "goal",
-            "title": "Period can be tuned to a minute",
-            "statement": "The oscillation period can be tuned to about one minute by adjusting concentrations and temperature.",
-            "axis": "principles",
-            "role": "assumption",
-            "criticality": "critical",
-            "risk": "medium",
-            "rationale": "Belousov-Zhabotinsky periods range from tens of seconds to minutes depending on concentrations and temperature, so tuning to 60 seconds is plausible but must be shown.",
-            "params": [
+              },
               {
-                "name": "demonstrated_period_s",
-                "kind": "design",
-                "value": 60,
+                "name": "period_tolerance_s",
+                "kind": "requirement",
+                "value": 5,
                 "unit": "s",
                 "origin": "assumed",
                 "source": ""
@@ -127,90 +117,40 @@
             "uses": [],
             "suggestions": [],
             "check": {
-              "description": "Relative period error between demonstrated and target period must be within ten percent for it to read as a one-minute clock.",
-              "value": "abs(demonstrated_period_s - target_period_s) / target_period_s",
+              "description": "Compares solver-measured dimensionless period scaled to seconds against 60 s target; cannot be evaluated until the oscillator experiment runs.",
+              "value": "abs(bz_oscillates_period_full * tau_seconds - target_period_s)",
               "op": "<=",
-              "limit": "0.1",
-              "unit": "dimensionless"
+              "limit": "period_tolerance_s",
+              "unit": "s"
             },
-            "basis": [],
+            "basis": ["bz-oscillates"],
             "proposed": false,
             "expanded": false
           },
           {
-            "id": "simple-model-predicts-clock",
+            "id": "colour-readout",
             "parent": "goal",
-            "title": "Simple model keeps timing",
-            "statement": "The simplified two-variable model keeps the same period as the full reaction model.",
-            "axis": "methods",
-            "role": "assumption",
-            "criticality": "major",
-            "risk": "medium",
-            "rationale": "Design relies on the reduced model for tuning; if reduction distorts the period the minute prediction is unreliable.",
-            "params": [
-              {
-                "name": "simulation_temp_c",
-                "kind": "design",
-                "value": 25,
-                "unit": "degC",
-                "origin": "assumed",
-                "source": ""
-              }
-            ],
-            "uses": [],
-            "suggestions": [],
-            "check": {
-              "kind": "oregonator",
-              "description": "Compare period of two-variable reduction against full three-variable Oregonator at same s, q, eps and eps_prime; passes if periods agree within tolerance.",
-              "question": "reduction_keeps_period",
-              "tolerance": 0.1,
-              "op": "<=",
-              "unit": ""
-            },
-            "basis": [],
-            "proposed": false,
-            "expanded": false
-          },
-          {
-            "id": "reagents-and-visibility",
-            "parent": "goal",
-            "title": "Reagents give lasting colour signal",
-            "statement": "Standard reagents and ferroin indicator give many high-contrast colour cycles before running down.",
+            "title": "Colour change is visible",
+            "statement": "Oxidized and reduced catalyst states look clearly different to the naked eye.",
             "axis": "materials",
             "role": "assumption",
-            "criticality": "major",
-            "risk": "medium",
-            "rationale": "A clock needs many high-contrast red-blue cycles with ferroin; closed dishes damp out as reactants are consumed.",
+            "criticality": "critical",
+            "risk": "low",
+            "rationale": "A clock needs a readable face; ferroin red-blue or cerium colourless-yellow must be strong enough to see each minute without instruments.",
             "params": [
               {
-                "name": "bromate_conc_m",
-                "kind": "design",
-                "value": 0.06,
-                "unit": "mol/L",
-                "origin": "reference",
-                "source": "Typical Belousov-Zhabotinsky recipe, Field and Burger 1985"
-              },
-              {
-                "name": "malonic_conc_m",
-                "kind": "design",
-                "value": 0.05,
-                "unit": "mol/L",
-                "origin": "reference",
-                "source": "Typical Belousov-Zhabotinsky recipe, Field and Burger 1985"
-              },
-              {
-                "name": "ferroin_conc_mm",
+                "name": "catalyst_conc_mM",
                 "kind": "design",
                 "value": 1,
-                "unit": "mmol/L",
-                "origin": "reference",
-                "source": "Typical Belousov-Zhabotinsky indicator concentration"
+                "unit": "mM",
+                "origin": "assumed",
+                "source": ""
               },
               {
-                "name": "visible_cycles_needed",
-                "kind": "external",
-                "value": 30,
-                "unit": "count",
+                "name": "vessel_path_cm",
+                "kind": "design",
+                "value": 2,
+                "unit": "cm",
                 "origin": "assumed",
                 "source": ""
               }
@@ -222,62 +162,105 @@
             "expanded": false
           },
           {
-            "id": "controlled-operating-conditions",
+            "id": "batch-lifetime",
             "parent": "goal",
-            "title": "Conditions stay steady",
-            "statement": "Stirring, temperature and reactant supply can be held steady enough to keep the one-minute rhythm.",
-            "axis": "loads",
+            "title": "Reaction lasts long enough",
+            "statement": "A closed stirred beaker keeps ticking for a useful clock duration without refuelling.",
+            "axis": "constraints",
+            "role": "assumption",
+            "criticality": "major",
+            "risk": "high",
+            "rationale": "Batch Belousov-Zhabotinsky reactions consume bromate and malonic acid so amplitude and period drift; a one-hour clock may need a fed reactor.",
+            "params": [
+              {
+                "name": "desired_run_time_min",
+                "kind": "requirement",
+                "value": 60,
+                "unit": "min",
+                "origin": "assumed",
+                "source": ""
+              },
+              {
+                "name": "bromate_conc_M",
+                "kind": "design",
+                "value": 0.2,
+                "unit": "M",
+                "origin": "assumed",
+                "source": ""
+              },
+              {
+                "name": "malonic_acid_conc_M",
+                "kind": "design",
+                "value": 0.3,
+                "unit": "M",
+                "origin": "assumed",
+                "source": ""
+              }
+            ],
+            "uses": [],
+            "suggestions": [],
+            "basis": [],
+            "proposed": false,
+            "expanded": false
+          },
+          {
+            "id": "stable-tick",
+            "parent": "goal",
+            "title": "Tick stays stable",
+            "statement": "Stirring and room conditions keep the tick stable and spatially uniform.",
+            "axis": "risks",
             "role": "assumption",
             "criticality": "major",
             "risk": "medium",
-            "rationale": "Period, amplitude and lifetime are sensitive to temperature, stirring, oxygen and reactant depletion; an unstirred or cooling beaker drifts off one minute.",
+            "rationale": "Belousov-Zhabotinsky period is temperature and oxygen sensitive and unstirred dishes make waves instead of uniform flashes, which would destroy minute accuracy.",
             "params": [
               {
-                "name": "min_stirred_temp_c",
+                "name": "temperature_C",
                 "kind": "design",
-                "value": 20,
+                "value": 22,
                 "unit": "degC",
                 "origin": "assumed",
                 "source": ""
               },
               {
-                "name": "max_stirred_temp_c",
-                "kind": "design",
-                "value": 65,
-                "unit": "degC",
+                "name": "stir_rate_rpm",
+                "kind": "external",
+                "value": 400,
+                "unit": "rpm",
                 "origin": "assumed",
                 "source": ""
               }
             ],
             "uses": [],
             "suggestions": [],
-            "check": {
-              "description": "Stirred operation window must cover the one-minute target with margin for thermal drift.",
-              "value": "max_stirred_temp_c - min_stirred_temp_c",
-              "op": ">=",
-              "limit": "40",
-              "unit": "degC"
-            },
             "basis": [],
             "proposed": false,
             "expanded": false
           },
           {
-            "id": "safe-benchtop-clock",
+            "id": "safe-affordable",
             "parent": "goal",
-            "title": "Safe to build and display",
-            "statement": "The device can be built and shown safely on a bench with normal lab precautions.",
-            "axis": "constraints",
+            "title": "Safe and affordable build",
+            "statement": "Reagents are safe and cheap enough for a bench-top demo clock.",
+            "axis": "economics",
             "role": "assumption",
             "criticality": "minor",
             "risk": "low",
-            "rationale": "Bromate plus strong acid is corrosive and oxidising, so an open clock needs containment and supervision.",
+            "rationale": "Bromate, strong acid, and bromine intermediates need safe handling and disposal; a demo clock fails if it cannot be built and discarded cheaply and safely.",
             "params": [
               {
-                "name": "audience_exposure",
-                "kind": "requirement",
-                "value": 1,
-                "unit": "count",
+                "name": "batch_volume_mL",
+                "kind": "design",
+                "value": 100,
+                "unit": "mL",
+                "origin": "assumed",
+                "source": ""
+              },
+              {
+                "name": "bromate_price_per_kg",
+                "kind": "external",
+                "value": 50,
+                "unit": "USD_per_kg",
                 "origin": "assumed",
                 "source": ""
               }
@@ -289,25 +272,25 @@
             "expanded": false
           }
         ],
-        "summary": "Read as a continuously cycling stirred Belousov-Zhabotinsky colour oscillator with about a 60 second period, not a one-shot iodine clock. The main alternative, a single colour change after one minute, would be a different chemistry and much easier.",
+        "summary": "Read as a bench-top batch beaker that flashes visibly about every 60 seconds, not a precision instrument or a continuous-flow reactor. The main alternative, a fed reactor locked to exactly 60 s, would need pumps and control rather than a simple mixture.",
         "usage": {
           "model": "muse-spark-1.3",
-          "input": 1390,
-          "cached": 1265,
-          "output": 4089,
-          "reasoning": 2003,
-          "cost": 0.01772425
+          "input": 1560,
+          "cached": 0,
+          "output": 3485,
+          "reasoning": 1568,
+          "cost": 0.01676125
         }
       },
-      "hash": "ddfc5781f893279ab6c20c53ac7338c1f81f47081c5cbaeb53cc82ada510e4a8"
+      "hash": "c14e12780a93618de0a260b72334025519f5d8e7b367d061da7ad603aadb90e5"
     },
     {
       "seq": 2,
-      "prev": "ddfc5781f893279ab6c20c53ac7338c1f81f47081c5cbaeb53cc82ada510e4a8",
+      "prev": "c14e12780a93618de0a260b72334025519f5d8e7b367d061da7ad603aadb90e5",
       "actor": "engine",
       "body": {
         "type": "check",
-        "node": "sustained-oscillation",
+        "node": "bz-oscillates",
         "result": {
           "pass": true,
           "value": 0,
@@ -315,7 +298,7 @@
           "op": "<=",
           "unit": "",
           "inputs": {
-            "s": 0.6,
+            "s": 1,
             "q": 7.62e-5,
             "eps": 0.0099,
             "eps_prime": 0.002
@@ -323,7 +306,7 @@
           "sim": {
             "outcome": "holds",
             "periods": {
-              "full": 60.354668335687734
+              "full": 64.36625838395379
             },
             "observations": {
               "full": "oscillation"
@@ -331,125 +314,70 @@
           }
         }
       },
-      "hash": "3b78c3a9785e7c158922f1daab371ecdcb3c0d6aeb8bb2919e84d3abeb26bd69"
+      "hash": "57ee9098fe4dc5eb4339fd4611aa1b531bed70b1a3037312f70ba41e8e0d3750"
     },
     {
       "seq": 3,
-      "prev": "3b78c3a9785e7c158922f1daab371ecdcb3c0d6aeb8bb2919e84d3abeb26bd69",
+      "prev": "57ee9098fe4dc5eb4339fd4611aa1b531bed70b1a3037312f70ba41e8e0d3750",
       "actor": "engine",
       "body": {
         "type": "check",
-        "node": "period-tunable-to-minute",
+        "node": "minute-period",
         "result": {
-          "pass": true,
-          "value": 0,
-          "limit": 0.1,
+          "pass": false,
+          "value": 712.3951006074456,
+          "limit": 5,
           "op": "<=",
-          "unit": "dimensionless",
+          "unit": "s",
           "inputs": {
-            "demonstrated_period_s": 60,
-            "target_period_s": 60
+            "bz_oscillates_period_full": 64.36625838395379,
+            "tau_seconds": 12,
+            "target_period_s": 60,
+            "period_tolerance_s": 5
           }
         }
       },
-      "hash": "0739cfb4f28d641d41dffb3b1529b1184f6e1fc2e7c611098dedd60652e7ca97"
+      "hash": "ea3935798c3ec38ec99f56d1a76432c10f93969dadc240d228dce9c9c031a7e2"
     },
     {
       "seq": 4,
-      "prev": "0739cfb4f28d641d41dffb3b1529b1184f6e1fc2e7c611098dedd60652e7ca97",
-      "actor": "engine",
-      "body": {
-        "type": "check",
-        "node": "simple-model-predicts-clock",
-        "result": {
-          "pass": false,
-          "value": 6.768579752872577,
-          "limit": 0.1,
-          "op": "<=",
-          "unit": "",
-          "inputs": {
-            "s": 0.6,
-            "q": 7.62e-5,
-            "eps": 0.0099,
-            "eps_prime": 0.002
-          },
-          "sim": {
-            "outcome": "fails",
-            "periods": {
-              "full": 60.354668335687734,
-              "reduced": 7.769073660262093
-            },
-            "observations": {
-              "full": "oscillation",
-              "reduced": "oscillation"
-            }
-          }
-        }
-      },
-      "hash": "426df47862890c1b741e09081047931c510c28ef739a845c05e163ff739742ed"
-    },
-    {
-      "seq": 5,
-      "prev": "426df47862890c1b741e09081047931c510c28ef739a845c05e163ff739742ed",
-      "actor": "engine",
-      "body": {
-        "type": "check",
-        "node": "controlled-operating-conditions",
-        "result": {
-          "pass": true,
-          "value": 45,
-          "limit": 40,
-          "op": ">=",
-          "unit": "degC",
-          "inputs": {
-            "max_stirred_temp_c": 65,
-            "min_stirred_temp_c": 20
-          }
-        }
-      },
-      "hash": "ec531e242923443b45b2e239ead5828a13330167afeb444959c118a62026fcd9"
-    },
-    {
-      "seq": 6,
-      "prev": "ec531e242923443b45b2e239ead5828a13330167afeb444959c118a62026fcd9",
+      "prev": "ea3935798c3ec38ec99f56d1a76432c10f93969dadc240d228dce9c9c031a7e2",
       "actor": "muse:muse-spark-1.3",
       "body": {
         "type": "chat",
-        "focus": "sustained-oscillation",
+        "focus": "bz-oscillates",
         "question": "What does this experiment tell me, and what should I change to keep the period?",
-        "answer": "VIBloom computed holds on oscillation and tunability, but broken on simple-model timing \u2014 my reasoning is this means the clock is possible yet fragile outside ideal kinetics. To keep the period, open period-tunable-to-minute and controlled-operating-conditions next to test drivers and drift.",
-        "cites": [
-          "sustained-oscillation",
-          "period-tunable-to-minute",
-          "simple-model-predicts-clock",
-          "controlled-operating-conditions"
-        ],
+        "answer": "VIBloom computed holds for bz-oscillates, but my reasoning is that only establishes the precondition, not period control. Your keep-the-period question depends on minute-period, which VIBloom marks broken. Open minute-period next, this experiment cannot answer it.",
+        "cites": ["bz-oscillates", "minute-period"],
         "asked": {
-          "s": 0.6,
+          "s": 1,
           "q": 7.62e-5,
           "eps": 0.0099,
           "eps_prime": 0.002,
+          "tau_seconds": 12,
           "target_period_s": 60,
-          "demonstrated_period_s": 60,
-          "simulation_temp_c": 25,
-          "bromate_conc_m": 0.06,
-          "malonic_conc_m": 0.05,
-          "ferroin_conc_mm": 1,
-          "visible_cycles_needed": 30,
-          "min_stirred_temp_c": 20,
-          "max_stirred_temp_c": 65,
-          "audience_exposure": 1
+          "period_tolerance_s": 5,
+          "catalyst_conc_mM": 1,
+          "vessel_path_cm": 2,
+          "desired_run_time_min": 60,
+          "bromate_conc_M": 0.2,
+          "malonic_acid_conc_M": 0.3,
+          "temperature_C": 22,
+          "stir_rate_rpm": 400,
+          "batch_volume_mL": 100,
+          "bromate_price_per_kg": 50,
+          "bz_oscillates_period_full": 64.36625838395379
         },
         "usage": {
           "model": "muse-spark-1.3",
-          "input": 1138,
-          "cached": 113,
-          "output": 1183,
-          "reasoning": 1023,
-          "cost": 0.0063259499999999995
+          "input": 1064,
+          "cached": 0,
+          "output": 877,
+          "reasoning": 750,
+          "cost": 0.00505725
         }
       },
-      "hash": "c62414210e7053b7301f2ca5cacaced77194c9a54ddc7f5ec6289fbf78c06fc2"
+      "hash": "a84af6c119fd47ac05be49867a9ef0568995a807add805fb800eedce41c2ddf0"
     }
   ]
 }

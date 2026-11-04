@@ -219,6 +219,14 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
     ];
     if (r && "error" in r)
       out.push(el("div", { class: "result error" }, `Check could not run: ${r.error}`));
+    else if (r && tree.restates(n.id))
+      out.push(
+        el(
+          "div",
+          { class: "result error" },
+          "This check only compares a number that was assumed for the outcome with its target, so it computes nothing. It is argued, not computed.",
+        ),
+      );
     else if (r && n.check?.kind === "oregonator")
       out.push(experiment(n.check.question, n.check.tolerance, r, tree.unconfirmed.has(n.id)));
     else if (r) {
@@ -226,7 +234,20 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
         const p = tree.param(k);
         return p ? [p] : [];
       });
-      out.push(gauge(r, backing));
+      const st2 = tree.status(n.id);
+      out.push(
+        gauge(
+          r,
+          backing,
+          st2 === "partial"
+            ? "Some roots under it are only argued: the comparison passes, the backing is incomplete."
+            : st2 === "unverified"
+              ? "A root under it is stale or could not be evaluated."
+              : st2 === "affected"
+                ? "A root under it fails."
+                : "Every root under it is computed and holds, or there are none.",
+        ),
+      );
     } else if (n.role !== "goal")
       out.push(el("p", { class: "fine" }, "No calculation: argued, not computed."));
     // Grouped by what changing the value would mean: only a design change
@@ -454,7 +475,7 @@ const KIND_HELP: Record<Param["kind"], string> = {
 
 // The verdict says only what the arithmetic shows: this comparison, with these
 // values. Its backing and the conclusion it allows are spelled out apart.
-function gauge(r: CheckResult, backing: Param[]) {
+function gauge(r: CheckResult, backing: Param[], premiseNote: string) {
   const ratio = r.limit === 0 ? 1 : Math.abs(r.value / r.limit);
   const unverified = backing.filter((p) => p.origin !== "reference" || p.source === "");
   const assumed = backing.filter((p) => p.origin === "assumed").length;
@@ -484,6 +505,8 @@ function gauge(r: CheckResult, backing: Param[]) {
           ? "no values"
           : `${String(backing.length)} value${backing.length === 1 ? "" : "s"}: ${String(assumed)} assumed, ${String(backing.length - assumed)} with a source Muse named; none checked by a person`,
       ),
+      el("dt", {}, "Premises"),
+      el("dd", {}, premiseNote),
       el("dt", {}, "Allowed conclusion"),
       el(
         "dd",

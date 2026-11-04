@@ -607,10 +607,14 @@ async function confirmExperiments() {
     const spec = tree.nodes.get(id)?.check;
     if (!spec) continue;
     monitor.status("Re-running a recorded experiment in your browser...", true);
-    tree.confirm(id, await simulate(spec, tree.scope()));
+    // The past is checked with its own inputs; the present gets a new run
+    // through the usual staleness check.
+    const r = tree.results.get(id);
+    tree.confirm(id, await simulate(spec, { ...tree.scope(), ...(r?.inputs ?? {}) }));
     refresh();
   }
   monitor.status("");
+  recheck();
 }
 
 async function start(goal: string, mode: Mode) {
@@ -630,9 +634,15 @@ function select(id: string | undefined) {
 }
 
 // After a person edits a number, every check that read it runs again.
+// After a person edits a number, every check that read it runs again, and
+// then whatever read those results, until nothing is stale.
 function recheck() {
   void (async () => {
-    for (const n of [...tree.nodes.values()]) if (tree.status(n.id) === "stale") await check(n);
+    for (let pass = 0; pass < 4; pass++) {
+      const stale = [...tree.nodes.values()].filter((n) => tree.status(n.id) === "stale");
+      if (stale.length === 0) break;
+      for (const n of stale) await check(n);
+    }
     refresh();
   })();
 }

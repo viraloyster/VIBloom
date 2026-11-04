@@ -136,10 +136,11 @@ const STATUS_LABEL: Record<Status, string> = {
   affected: "a premise broke",
   stale: "stale - recheck",
   at_risk: "at risk - argued",
-  argued: "argued",
+  argued: "argued, not computed",
   bedrock: "bedrock",
   proposed: "proposed",
   unverified: "unverified - a premise is unconfirmed",
+  partial: "passes - backing incomplete",
 };
 export const statusLabel = (s: Status) => STATUS_LABEL[s];
 

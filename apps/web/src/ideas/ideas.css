@@ -820,6 +820,9 @@ h1 {
 .unverified {
   --c: var(--stale);
 }
+.partial {
+  --c: #7fd8b8;
+}
 .ghost {
   --c: var(--ghost);
 }

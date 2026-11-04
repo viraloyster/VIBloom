@@ -34,6 +34,16 @@ within a relative 1e-6: JavaScript engines differ in the last digits of `exp`
 and `log`, so bit-for-bit equality across engines is not expected (a run
 recorded in Node and recomputed in Chromium differed by about 1e-7).
 
+## Experiments in the idea tree
+
+An Oregonator experiment attached to a root is recorded with its inputs and
+counts only after the viewer's browser has re-run it with those same inputs
+and reproduced it: the same verdict exactly, and periods within a relative
+1e-4. Measured on the recorded chemical clock, Node 22 and Chromium gave
+periods differing by 1.8e-7 (full model) and 2.7e-6 (reduced model); the
+tolerance is set well above those and far below the 5% a claim typically
+allows. A result that does not reproduce is shown as such, never as holding.
+
 ## Twin beakers
 
 The monitor shows a selected run as two beakers, the full and the reduced
