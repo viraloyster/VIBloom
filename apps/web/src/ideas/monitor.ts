@@ -204,13 +204,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
             el("span", { class: `pill ${s}` }, `${String(c)} ${statusLabel(s)}`),
           ),
         ),
-        tree.calibration().made
-          ? el(
-              "p",
-              { class: "fine" },
-              `Muse's predictions: ${String(tree.calibration().right)} of ${String(tree.calibration().made)} right; ${String(tree.lessons.length)} lesson(s) learned.`,
-            )
-          : null,
+        predictionsLine(tree),
         el("p", { class: "fine" }, "Select a root in the tree to test it here."),
       ),
     );
@@ -227,16 +221,26 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
     ];
     if (r && "error" in r)
       out.push(el("div", { class: "result error" }, `Check could not run: ${r.error}`));
-    else if (r && tree.restates(n.id))
+    else if (r && tree.circular(n.id)) {
+      const claimed = tree.assumedOutcome(n.id);
       out.push(
         el(
           "div",
           { class: "result error" },
-          "This check only compares a number that was assumed for the outcome with its target, so it computes nothing. It is argued, not computed.",
+          claimed
+            ? `The result this check claims (${words(claimed)}) is an assumed number, not measured or computed, so the conclusion is only conditional. It is argued, not computed.`
+            : "This check only compares a number that was assumed for the outcome with its target, so it computes nothing. It is argued, not computed.",
         ),
       );
-    else if (r && n.check?.kind === "oregonator")
-      out.push(experiment(n.check.question, n.check.tolerance, r, tree.unconfirmed.has(n.id)));
+    } else if (r && n.check?.kind === "oregonator")
+      out.push(
+        experiment(
+          n.check.question,
+          n.check.tolerance,
+          r,
+          tree.latestRun(n.id)?.state ?? "confirmed",
+        ),
+      );
     else if (r) {
       const backing = Object.keys(r.inputs).flatMap((k) => {
         const p = tree.param(k);
@@ -393,43 +397,66 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
       ),
     );
     for (const p of tree.predictions.filter((x) => x.node === n.id)) {
-      const r = tree.results.get(n.id);
-      const settled = r && !("error" in r) && JSON.stringify(r.inputs) === JSON.stringify(p.inputs);
-      const right = settled && (r.pass ? "holds" : "fails") === p.expect;
+      const v = tree.verdict(p.run);
+      const settled = v === "holds" || v === "fails";
+      const right = settled && v === p.expect;
       out.push(
         el(
           "p",
           { class: `predict ${settled ? (right ? "right" : "wrong") : ""}` },
-          `Predicted ${p.expect} (${String(Math.round(p.confidence * 100))}%)`,
-          settled ? (right ? " - right" : " - surprised") : " - for other values",
+          `${p.id}: predicted ${p.expect} (${String(Math.round(p.confidence * 100))}%)`,
+          settled
+            ? right
+              ? " - right"
+              : ` - wrong, it ${v}`
+            : v === "pending"
+              ? " - run re-checking here"
+              : v === "failed"
+                ? " - its run did not reproduce"
+                : " - not run yet",
           p.uses.length ? el("small", {}, ` using ${p.uses.join(", ")}`) : null,
         ),
       );
     }
     for (const l of tree.lessons.filter((x) => x.node === n.id)) {
       const state = tree.lessonState(l);
+      const d = tree.decided(l);
+      const at = Object.entries(l.basis)
+        .map(([k, v]) => `${k} ${fmt(v)}`)
+        .join(", ");
       out.push(
         el(
           "div",
           { class: `lesson ${state}` },
           el("p", { class: "eyebrow" }, `${l.id} - ${state}`),
+          el("p", { class: "label" }, "Verified by the engine"),
+          el(
+            "p",
+            { class: "finding" },
+            `${l.prediction} expected ${tree.predictions.find((x) => x.id === l.prediction)?.expect ?? "?"}; at ${at} it ${l.observed}${measured(tree, l.surprise)}.`,
+            d
+              ? ` With ${words(l.test.param)} = ${fmt(l.test.value)} instead, it ${d.outcome}${measured(tree, l.run)}.`
+              : ` Test registered first: ${words(l.test.param)} = ${fmt(l.test.value)}${state === "failed" ? ", which did not conclude or reproduce" : ", not decided yet"}.`,
+          ),
+          el("p", { class: "label" }, "Muse's interpretations, before the test"),
           ...l.candidates.map((c, i) =>
             el(
               "p",
-              { class: i === l.supported ? "supported" : "refuted" },
-              i === l.supported ? "Supported: " : "Refuted: ",
+              { class: d ? (i === d.supported ? "supported" : "refuted") : "" },
+              d
+                ? i === d.supported
+                  ? "Consistent with the test: "
+                  : "Contradicted by the test: "
+                : "",
               c.explanation,
               c.scope ? el("small", {}, ` (scope: ${c.scope})`) : null,
             ),
           ),
+          l.open ? el("p", { class: "fine" }, el("strong", {}, "Still open: "), l.open) : null,
           el(
             "p",
             { class: "fine" },
-            `Decided by running ${words(l.test.param)} = ${fmt(l.test.value)}: it ${l.outcome}. Learned at ${Object.entries(
-              l.basis,
-            )
-              .map(([k, v]) => `${k} ${fmt(v)}`)
-              .join(", ")}.`,
+            "One test supports an interpretation or contradicts it; it does not prove a cause.",
           ),
           state === "invalidated"
             ? el(
@@ -505,7 +532,37 @@ const QUESTIONS: Record<string, string> = {
   reduction_keeps_period: "Does the reduction keep the full model's period?",
 };
 
-function experiment(question: string, tolerance: number, r: CheckResult, unconfirmed: boolean) {
+// The number behind a run's verdict, so a binary outcome never hides how far
+// it moved (a 401% gap that falls to 13% still "fails" a 5% tolerance).
+function measured(tree: IdeaTree, seq: number | undefined): string {
+  const run = tree.runs.find((r) => r.seq === seq);
+  const spec = run && tree.nodes.get(run.node)?.check;
+  if (!run || "error" in run.result || spec?.kind !== "oregonator") return "";
+  if (spec.question !== "reduction_keeps_period") return "";
+  return ` (period difference ${fmt(run.result.value * 100)}%, tolerance ${fmt(spec.tolerance * 100)}%)`;
+}
+
+// Accuracy over settled predictions, with the Brier score that also weighs
+// the stated confidence; calibration needs many more than a demo makes.
+function predictionsLine(tree: IdeaTree) {
+  const c = tree.calibration();
+  if (!c.made && !c.pending) return null;
+  const parts = [
+    `Muse's predictions: ${String(c.right)} of ${String(c.made)} right`,
+    c.brier !== undefined ? `Brier score ${c.brier.toFixed(2)} (0 best, 0.25 a coin flip)` : "",
+    c.pending ? `${String(c.pending)} re-checking here` : "",
+    `${String(tree.lessons.filter((l) => tree.decided(l)).length)} lesson(s) decided`,
+  ];
+  return el("p", { class: "fine" }, parts.filter(Boolean).join("; ") + ".");
+}
+
+function experiment(
+  question: string,
+  tolerance: number,
+  r: CheckResult,
+  state: "unconfirmed" | "confirmed" | "failed",
+) {
+  const unconfirmed = state !== "confirmed";
   const p = r.sim?.periods ?? {};
   const o = r.sim?.observations ?? {};
   const line = (m: "full" | "reduced") =>
@@ -524,11 +581,13 @@ function experiment(question: string, tolerance: number, r: CheckResult, unconfi
     el(
       "p",
       { class: "verdict" },
-      unconfirmed
-        ? "Recorded; re-running in your browser..."
-        : r.pass
-          ? "Holds in this experiment"
-          : "Fails in this experiment",
+      state === "failed"
+        ? "Recorded, but it did not reproduce in your browser: not counted"
+        : unconfirmed
+          ? "Recorded; re-running in your browser..."
+          : r.pass
+            ? "Holds in this experiment"
+            : "Fails in this experiment",
     ),
     line("full"),
     line("reduced"),

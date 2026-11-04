@@ -1494,3 +1494,21 @@ h1 {
   color: var(--muted);
   text-decoration: line-through;
 }
+
+.lesson.failed,
+.lesson.untested,
+.lesson.unverified {
+  border-style: dashed;
+}
+
+.lesson .label {
+  margin-top: 8px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.lesson .finding {
+  color: var(--text);
+}

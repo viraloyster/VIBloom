@@ -32,6 +32,9 @@ export interface ArithmeticSpec {
   op: "<" | "<=" | ">" | ">=";
   limit: string;
   unit: string;
+  // Parameters that state the result the node claims (an "achieved" or
+  // "demonstrated" number). If one is merely assumed, the check is conditional.
+  observes?: string[];
 }
 
 // A real experiment: the Oregonator model of the Belousov-Zhabotinsky
@@ -127,10 +130,11 @@ export type EventBody =
     }
   | {
       type: "predict";
+      id: string;
       node: string;
-      // The values the prediction was made for.
+      // The values the prediction was made for: the tree's current ones.
       inputs: Record<string, number>;
-      expect: "holds" | "fails";
+      expect: Outcome;
       confidence: number;
       reason: string;
       // Lessons the model says it used.
@@ -138,19 +142,19 @@ export type EventBody =
       usage: Usage;
     }
   | {
-      type: "lesson";
+      // Registered before the discriminating run, so the run cannot shape them.
+      type: "hypotheses";
       id: string;
-      node: string;
-      // The surprising run: values and what happened.
-      basis: Record<string, number>;
-      observed: "holds" | "fails";
-      candidates: { explanation: string; scope: string; expect: "holds" | "fails" }[];
+      // The prediction the first run contradicted.
+      prediction: string;
+      candidates: Candidate[];
       // One run that tells the candidates apart: the same values with one changed.
       test: { param: string; value: number };
-      // Computed by the engine, re-computed when the log is replayed.
-      outcome: "holds" | "fails";
+      // What this single contrast cannot establish.
+      open: string;
       usage: Usage;
     }
+  | { type: "test"; hypotheses: string; result: CheckResult | CheckError }
   | { type: "accept"; node: string }
   | { type: "reject"; node: string };
 
@@ -166,23 +170,50 @@ export interface IdeaEvent {
 // lets Meta train on it. A person chooses.
 export type Mode = "standard" | "contributor";
 
+export type Outcome = "holds" | "fails";
+
+export interface Candidate {
+  explanation: string;
+  scope: string;
+  expect: Outcome;
+}
+
+// One experiment run as recorded in the log. A run read from a log counts
+// once this browser has run it again with the same inputs (confirm).
+export interface Run {
+  seq: number;
+  node: string;
+  // A check run decides the node; a test run only decides a lesson.
+  purpose: "check" | "test";
+  result: CheckResult | CheckError;
+  state: "unconfirmed" | "confirmed" | "failed";
+}
+
+// A surprise, the explanations registered for it and, once run, the test
+// that decides between them. Every link is a log reference, checked on apply.
 export interface Lesson {
   id: string;
   node: string;
+  prediction: string;
+  // Sequence number of the run that contradicted the prediction.
+  surprise: number;
   basis: Record<string, number>;
-  observed: "holds" | "fails";
-  candidates: { explanation: string; scope: string; expect: "holds" | "fails" }[];
+  observed: Outcome;
+  candidates: Candidate[];
   test: { param: string; value: number };
-  outcome: "holds" | "fails";
-  // Index of the candidate the test supported, derived by code.
-  supported: number;
+  open: string;
+  // Sequence number of the discriminating run, once recorded.
+  run?: number;
 }
 
 export interface Prediction {
+  id: string;
   node: string;
   inputs: Record<string, number>;
-  expect: "holds" | "fails";
+  expect: Outcome;
   confidence: number;
   reason: string;
   uses: string[];
+  // The first run of exactly these values after the prediction; permanent.
+  run?: number;
 }

@@ -44,6 +44,11 @@ Protocol (follow it exactly; it keeps trees comparable between people):
   op "<=", limit "skin_strength". You do not decide pass or fail; the engine
   computes it. Otherwise op is "none", value and limit are "", and description
   says why it cannot be computed.
+- check.observes lists the parameter names, if any, that state the result the
+  assumption claims (an achieved, demonstrated or measured number). Leave it
+  empty when the formula computes the result. A claimed result that is only
+  assumed proves nothing: VIBloom shows the check as argued, not computed. A
+  measured number needs origin "reference" and its source.
 - Chemistry: VIBloom can run a real experiment on the Oregonator model of the
   Belousov-Zhabotinsky oscillating reaction (Field's scaling: s, q, eps,
   eps_prime). For an assumption about whether it oscillates, or whether the
@@ -211,7 +216,17 @@ const node = {
     check: {
       type: "object",
       additionalProperties: false,
-      required: ["kind", "description", "value", "op", "limit", "unit", "question", "tolerance"],
+      required: [
+        "kind",
+        "description",
+        "value",
+        "op",
+        "limit",
+        "unit",
+        "question",
+        "tolerance",
+        "observes",
+      ],
       properties: {
         kind: { type: "string", enum: ["arithmetic", "oregonator", "none"] },
         question: {
@@ -224,6 +239,7 @@ const node = {
         op: { type: "string", enum: ["<", "<=", ">", ">=", "none"] },
         limit: { type: "string" },
         unit: { type: "string" },
+        observes: { type: "array", items: { type: "string" } },
       },
     },
     basis: { type: "array", items: { type: "string" } },
@@ -266,6 +282,7 @@ export interface GrownNode {
     op: string;
     limit: string;
     unit: string;
+    observes?: string[];
   };
   basis: string[];
 }
@@ -293,14 +310,22 @@ wrong. Propose exactly two different explanations for why, each with the
 scope where it would apply and what it expects in ONE discriminating test:
 the same values with a single parameter changed (s, q, eps or eps_prime) to a
 new positive value. The two explanations must expect different outcomes in
-that test, so the run tells them apart. VIBloom runs the test and decides
-which explanation the evidence supports; you do not.`;
+that test, so the run tells them apart. The outcome is binary against the
+claim's tolerance: an explanation that expects holds must predict the
+difference falls within the tolerance, not merely that it shrinks, so pick a
+test value far enough to make that true if the explanation is right. VIBloom runs the test and decides
+which explanation the evidence supports; you do not. Each explanation is an
+interpretation that the test can support or contradict, not prove; VIBloom
+labels it so, so state the mechanism only, without hedging phrases. Quote no number that is not in the input; the engine's relative
+difference is the one given as measured. open: one sentence on what a single
+test cannot establish here (the mechanism, or the range it holds over).`;
 
 export const DIAGNOSE_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["candidates", "test"],
+  required: ["candidates", "test", "open"],
   properties: {
+    open: { type: "string" },
     candidates: {
       type: "array",
       items: {

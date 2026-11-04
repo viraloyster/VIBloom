@@ -13,8 +13,10 @@ import type {
   IdeaNode,
   Lesson,
   Mode,
+  Outcome,
   Prediction,
   Param,
+  Run,
   SimQuestion,
   Usage,
 } from "./types";
@@ -40,8 +42,7 @@ export class IdeaTree {
   readonly results = new Map<string, CheckResult | CheckError>();
   readonly lessons: Lesson[] = [];
   readonly predictions: Prediction[] = [];
-  // Experiment results read from a log and not yet re-run in this browser.
-  readonly unconfirmed = new Set<string>();
+  readonly runs: Run[] = [];
   // Visuals Muse designed for a node, latest last.
   readonly views = new Map<string, { title: string; html: string }>();
   readonly chat: {
@@ -78,8 +79,9 @@ export class IdeaTree {
       results: structuredClone(this.results),
       views: structuredClone(this.views),
       chat: this.chat.length,
-      lessons: this.lessons.length,
-      predictions: this.predictions.length,
+      lessons: structuredClone(this.lessons),
+      predictions: structuredClone(this.predictions),
+      runs: structuredClone(this.runs),
       goal: this.goal,
       mode: this.mode,
     };
@@ -93,8 +95,9 @@ export class IdeaTree {
       this.views.clear();
       for (const [k, v] of before.views) this.views.set(k, v);
       this.chat.length = before.chat;
-      this.lessons.length = before.lessons;
-      this.predictions.length = before.predictions;
+      this.lessons.splice(0, Infinity, ...before.lessons);
+      this.predictions.splice(0, Infinity, ...before.predictions);
+      this.runs.splice(0, Infinity, ...before.runs);
       this.goal = before.goal;
       this.mode = before.mode;
       throw e;
@@ -149,8 +152,25 @@ export class IdeaTree {
         // An experiment takes seconds, so it is not re-run inside the log;
         // its result counts only once the browser has run it again (confirm).
         if (spec.kind === "oregonator") {
+          if (!sameRun(b.result.inputs ?? {}, this.scope(), "error" in b.result)) {
+            throw new Error(`the run on ${b.node} is not for the current values`);
+          }
+          const seq = this.events.length;
+          this.runs.push({
+            seq,
+            node: b.node,
+            purpose: "check",
+            result: structuredClone(b.result),
+            state: "unconfirmed",
+          });
           this.results.set(b.node, b.result);
-          this.unconfirmed.add(b.node);
+          // A prediction is settled for good by the first run of its values.
+          if (!("error" in b.result)) {
+            for (const p of this.predictions) {
+              if (p.node === b.node && p.run === undefined && sameRun(p.inputs, b.result.inputs))
+                p.run = seq;
+            }
+          }
           break;
         }
         // A recorded result is accepted only if the engine reaches the same
@@ -201,22 +221,39 @@ export class IdeaTree {
       case "predict": {
         const n = this.nodes.get(b.node);
         if (n?.check?.kind !== "oregonator") throw new Error(`no experiment on ${b.node}`);
-        const confidence = Math.min(0.99, Math.max(0.5, b.confidence));
+        if (this.predictions.some((p) => p.id === b.id))
+          throw new Error(`prediction ${b.id} exists`);
+        // A prediction is about the values the tree has now, before their run.
+        if (!sameRun(b.inputs, this.scope())) {
+          throw new Error("a prediction is made for the current values");
+        }
         this.predictions.push({
+          id: b.id,
           node: b.node,
-          inputs: { ...b.inputs },
+          inputs: pick(b.inputs),
           expect: b.expect,
-          confidence,
+          confidence: Math.min(0.99, Math.max(0.5, b.confidence)),
           reason: b.reason,
-          uses: b.uses.filter((u) => this.lessons.some((l) => l.id === u)),
+          uses: b.uses.filter((u) => this.lessons.some((l) => l.id === u && l.run !== undefined)),
         });
         break;
       }
-      case "lesson": {
-        const spec = this.nodes.get(b.node)?.check;
-        if (spec?.kind !== "oregonator") throw new Error(`no experiment on ${b.node}`);
-        // The gate: two explanations that expect different outcomes, and a test
-        // that changes exactly one experiment parameter.
+      case "hypotheses": {
+        // The chain: a prediction, the run that contradicted it, then two
+        // explanations and their test, registered before the test runs.
+        const p = this.predictions.find((x) => x.id === b.prediction);
+        if (!p) throw new Error(`unknown prediction ${b.prediction}`);
+        const first = this.runs.find((r) => r.seq === p.run);
+        if (!first || "error" in first.result) {
+          throw new Error(`prediction ${p.id} has no completed run`);
+        }
+        const observed: Outcome = first.result.pass ? "holds" : "fails";
+        if (observed === p.expect) {
+          throw new Error(`prediction ${p.id} was right; there is no surprise to explain`);
+        }
+        if (this.lessons.some((l) => l.id === b.id || l.prediction === p.id)) {
+          throw new Error(`prediction ${p.id} already has explanations`);
+        }
         const [a, c] = b.candidates;
         if (b.candidates.length !== 2 || !a || !c || a.expect === c.expect) {
           throw new Error("a lesson needs two explanations that expect different outcomes");
@@ -224,25 +261,38 @@ export class IdeaTree {
         if (!(SIM_PARAMS as readonly string[]).includes(b.test.param)) {
           throw new Error(`the test may change only ${SIM_PARAMS.join(", ")}`);
         }
-        const before = b.basis[b.test.param];
+        const before = p.inputs[b.test.param];
         if (!(b.test.value > 0) || before === undefined || b.test.value === before) {
           throw new Error("the test must change its parameter to a new positive value");
         }
-        if (this.lessons.some((l) => l.id === b.id)) throw new Error(`lesson ${b.id} exists`);
-        // The engine reruns the test; a recorded outcome it does not reach is refused.
-        const again = runCheck(spec, { ...b.basis, [b.test.param]: b.test.value });
-        if ("error" in again) throw new Error(`the test could not run: ${again.error}`);
-        const outcome = again.pass ? "holds" : "fails";
-        if (outcome !== b.outcome) throw new Error(`lesson ${b.id} does not reproduce`);
         this.lessons.push({
           id: b.id,
-          node: b.node,
-          basis: { ...b.basis },
-          observed: b.observed,
+          node: p.node,
+          prediction: p.id,
+          surprise: first.seq,
+          basis: { ...p.inputs },
+          observed,
           candidates: b.candidates.map((x) => ({ ...x })),
           test: { ...b.test },
-          outcome,
-          supported: b.candidates.findIndex((x) => x.expect === outcome),
+          open: b.open,
+        });
+        break;
+      }
+      case "test": {
+        const l = this.lessons.find((x) => x.id === b.hypotheses);
+        if (!l) throw new Error(`unknown hypotheses ${b.hypotheses}`);
+        if (l.run !== undefined) throw new Error(`${l.id} was already tested`);
+        const want = { ...l.basis, [l.test.param]: l.test.value };
+        if (!sameRun(b.result.inputs ?? {}, want)) {
+          throw new Error(`the run is not the test registered for ${l.id}`);
+        }
+        l.run = this.events.length;
+        this.runs.push({
+          seq: l.run,
+          node: l.node,
+          purpose: "test",
+          result: structuredClone(b.result),
+          state: "unconfirmed",
         });
         break;
       }
@@ -254,6 +304,9 @@ export class IdeaTree {
         else this.remove(n.id);
         break;
       }
+      default:
+        // A log from another version must not replay as if it said less.
+        throw new Error(`unknown event ${String((b as { type: unknown }).type)}`);
     }
   }
 
@@ -311,6 +364,37 @@ export class IdeaTree {
     return out;
   }
 
+  // Experiments whose current result was read from a log and has not
+  // reproduced in this browser (not yet, or not at all).
+  get unconfirmed(): Set<string> {
+    const out = new Set<string>();
+    for (const id of this.results.keys()) {
+      const r = this.latestRun(id);
+      if (r && r.state !== "confirmed") out.add(id);
+    }
+    return out;
+  }
+
+  latestRun(node: string): Run | undefined {
+    return this.runs.findLast((r) => r.node === node && r.purpose === "check");
+  }
+
+  // Runs a reader must re-run to trust what the tree shows: each experiment's
+  // current result and every run a prediction or a lesson rests on.
+  runsToConfirm(): Run[] {
+    const needed = new Set<number>();
+    for (const id of this.results.keys()) {
+      const r = this.latestRun(id);
+      if (r) needed.add(r.seq);
+    }
+    for (const p of this.predictions) if (p.run !== undefined) needed.add(p.run);
+    for (const l of this.lessons) {
+      needed.add(l.surprise);
+      if (l.run !== undefined) needed.add(l.run);
+    }
+    return this.runs.filter((r) => r.state === "unconfirmed" && needed.has(r.seq));
+  }
+
   private pendingOutputs(): Set<string> {
     const out = new Set<string>();
     for (const id of this.unconfirmed) {
@@ -333,6 +417,23 @@ export class IdeaTree {
     if (a === undefined || b === undefined) return false;
     const own = (x: string) => n.params.find((p) => p.name === x);
     return own(a)?.origin === "assumed" && own(b) !== undefined;
+  }
+
+  // The parameter, if any, that states the result a check claims and is only
+  // assumed: declared by the model in observes, or named like an outcome
+  // ("demonstrated_period"). A conclusion resting on it is conditional.
+  assumedOutcome(id: string): string | undefined {
+    const c = this.nodes.get(id)?.check;
+    if (!c || c.kind === "oregonator") return undefined;
+    const read = new Set([...safeNames(c.value), ...safeNames(c.limit)]);
+    const claimed = [...(c.observes ?? []), ...[...read].filter((x) => OUTCOME.test(x))];
+    return claimed.find((x) => read.has(x) && this.param(x)?.origin === "assumed");
+  }
+
+  // A check that computes nothing new: it restates an assumed number, or its
+  // claimed result is itself assumed. It can argue, never hold or fail.
+  circular(id: string): boolean {
+    return this.restates(id) || this.assumedOutcome(id) !== undefined;
   }
 
   // Assumed numbers the node's check relies on.
@@ -359,7 +460,7 @@ export class IdeaTree {
     if (this.unconfirmed.has(id)) return "unverified";
     // A verdict computed from a run not yet reproduced here is not a verdict yet.
     if (r && Object.keys(r.inputs).some((k) => this.pendingOutputs().has(k))) return "unverified";
-    if (r && this.restates(id)) return ground === "broken" ? "affected" : "argued";
+    if (r && this.circular(id)) return ground === "broken" ? "affected" : "argued";
     if (r) {
       if (changed(r.inputs)) return "stale";
       if (!r.pass) return "broken";
@@ -456,9 +557,11 @@ export class IdeaTree {
         }
       }
       const c = { ...g.check };
+      let observes = Array.isArray(c.observes) ? c.observes.filter(str).slice(0, 4) : [];
       for (const [from, to] of renamed) {
         c.value = rename(c.value, from, to);
         c.limit = rename(c.limit, from, to);
+        observes = observes.map((x) => (x === from ? to : x));
       }
       const question = c.question ?? "";
       const tolerance = c.tolerance ?? NaN;
@@ -506,6 +609,7 @@ export class IdeaTree {
                   op: c.op as Op,
                   limit: c.limit,
                   unit: c.unit.slice(0, 24),
+                  ...(observes.length ? { observes } : {}),
                 },
               }
             : {}),
@@ -537,11 +641,13 @@ export class IdeaTree {
     return out;
   }
 
-  // The browser re-ran an experiment: it counts only if it reproduces.
-  confirm(id: string, again: CheckResult | { error: string }) {
-    const r = this.results.get(id);
-    if (!r || !this.unconfirmed.has(id)) return;
-    this.unconfirmed.delete(id);
+  // The browser re-ran a recorded experiment with the run's own inputs. The
+  // recorded result stays what the log says; only its standing changes, so
+  // every formula that read it still reproduces when the log is replayed.
+  confirm(seq: number, again: CheckResult | CheckError) {
+    const run = this.runs.find((r) => r.seq === seq);
+    if (run?.state !== "unconfirmed") return;
+    const r = run.result;
     const close = (a?: number, b?: number) =>
       a === b ||
       (a !== undefined && b !== undefined && Math.abs(a - b) <= EXPERIMENT_TOLERANCE * Math.abs(b));
@@ -552,30 +658,62 @@ export class IdeaTree {
           again.pass === r.pass &&
           close(again.sim?.periods.full, r.sim?.periods.full) &&
           close(again.sim?.periods.reduced, r.sim?.periods.reduced);
-    this.results.set(
-      id,
-      same ? again : { error: "the recorded experiment did not reproduce here" },
-    );
+    run.state = same ? "confirmed" : "failed";
   }
 
-  // A lesson holds while the premises it was learned under still have the
-  // values it was learned with; change one and it is invalidated, not erased.
-  lessonState(l: Lesson): "current" | "invalidated" {
+  // What a run concluded, if it concluded and reproduced here.
+  verdict(seq: number | undefined): Outcome | "pending" | "failed" | undefined {
+    const run = this.runs.find((r) => r.seq === seq);
+    if (!run) return undefined;
+    if (run.state === "failed" || "error" in run.result) return "failed";
+    if (run.state === "unconfirmed") return "pending";
+    return run.result.pass ? "holds" : "fails";
+  }
+
+  // The decided part of a lesson, derived from its runs, never from what the
+  // model wrote: the test outcome and which explanation expected it.
+  decided(l: Lesson): { outcome: Outcome; supported: number } | undefined {
+    const v = this.verdict(l.run);
+    if (v !== "holds" && v !== "fails") return undefined;
+    return { outcome: v, supported: l.candidates.findIndex((c) => c.expect === v) };
+  }
+
+  // untested: explanations registered, test not run; unverified: a run it
+  // rests on has not reproduced here yet; failed: one did not reproduce or
+  // did not conclude; invalidated: a premise it was learned under changed.
+  lessonState(l: Lesson): "untested" | "unverified" | "failed" | "invalidated" | "current" {
+    if (l.run === undefined) return "untested";
+    const runs = [this.verdict(l.surprise), this.verdict(l.run)];
+    if (runs.includes("failed")) return "failed";
+    if (runs.includes("pending")) return "unverified";
     const now = this.scope();
     return Object.entries(l.basis).every(([k, v]) => now[k] === v) ? "current" : "invalidated";
   }
 
-  // How often the model's predictions matched the engine's runs.
-  calibration(): { made: number; right: number; surprises: number } {
+  // Each prediction against the run it was settled by, for good. Accuracy is
+  // the share right; the Brier score (0 best, 0.25 a coin) also weighs the
+  // stated confidence. Unreproduced runs are pending and not counted.
+  calibration(): {
+    made: number;
+    right: number;
+    surprises: number;
+    pending: number;
+    brier: number | undefined;
+  } {
     let made = 0;
     let right = 0;
+    let pending = 0;
+    let sq = 0;
     for (const p of this.predictions) {
-      const r = this.results.get(p.node);
-      if (!r || "error" in r || JSON.stringify(r.inputs) !== JSON.stringify(p.inputs)) continue;
+      const v = this.verdict(p.run);
+      if (v === "pending") pending++;
+      if (v !== "holds" && v !== "fails") continue;
       made++;
-      if ((r.pass ? "holds" : "fails") === p.expect) right++;
+      if (v === p.expect) right++;
+      const pHolds = p.expect === "holds" ? p.confidence : 1 - p.confidence;
+      sq += (pHolds - (v === "holds" ? 1 : 0)) ** 2;
     }
-    return { made, right, surprises: made - right };
+    return { made, right, surprises: made - right, pending, brier: made ? sq / made : undefined };
   }
 
   // Whether values an answer relied on have changed since it was given.
@@ -672,6 +810,18 @@ export class IdeaTree {
 // up to 2.7e-6 relative (docs/validation.md); 1e-4 leaves a wide margin while
 // staying far below any tolerance a claim uses. The verdict must match exactly.
 export const EXPERIMENT_TOLERANCE = 1e-4;
+
+const OUTCOME =
+  /(^|_)(achieved|demonstrated|measured|observed|actual|attained|obtained|realized|result|outcome)(_|$)/i;
+
+const pick = (x: Record<string, number>) =>
+  Object.fromEntries(SIM_PARAMS.map((k) => [k, x[k] ?? NaN]));
+
+// Whether a run's inputs are the given values for every experiment parameter.
+// A failed run may lack the inputs it never reached.
+function sameRun(inputs: Record<string, number>, values: Record<string, number>, partial = false) {
+  return SIM_PARAMS.every((k) => (inputs[k] === undefined ? partial : inputs[k] === values[k]));
+}
 
 export const outputKey = (id: string) => (id.split(".").at(-1) ?? id).replace(/-/g, "_");
 

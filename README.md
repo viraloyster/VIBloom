@@ -97,19 +97,29 @@ dishes computed from its exact values. A recorded experiment counts only once
 it has been re-run in the viewer's browser and reproduced.
 
 **Anticipation and lessons.** On an experiment root, "Investigate with Muse"
-runs the loop that makes Muse more than a generator: Muse commits to a
-prediction (with its confidence) before the engine runs; if the run
-contradicts it, Muse proposes exactly two explanations that expect different
-outcomes in one discriminating run (the same values with one parameter
-changed); the engine runs it and code decides which explanation the evidence
-supports. The lesson keeps the values it was learned under and its scope; if
-any of those premises changes, it is shown as invalidated, not erased. Later
-predictions see the current lessons and say which ones they used, and the
-tree reports how often Muse's predictions were right. In the recorded
-session, Muse expected the two-variable reduction to keep the period at
-eps_prime 2e-4 (85%); the full model's period was 11.55 against 7.4, and the
-discriminating run at eps_prime 2e-5 supported the explanation that the
-error comes from the time-scale ratio, refuting a structural one.
+runs the loop that makes Muse more than a generator. The log holds it as one
+chain that the engine checks link by link: Muse commits to a prediction (with
+its confidence) for the tree's current values; the engine runs them, and that
+run settles the prediction for good. Only a run that contradicts the
+prediction admits explanations: exactly two, expecting different outcomes in
+one discriminating run (the same values with one parameter changed), written
+to the log before that run happens. The engine then runs the test, and code
+decides which explanation the evidence is consistent with. A lesson shows the
+verified finding (what changed and what the engine measured) apart from
+Muse's interpretation and from what one test cannot establish; it keeps the
+values it was learned under and is shown as invalidated, not erased, if one
+changes. Recorded runs count only once they reproduce in the viewer's
+browser. The tree reports how many predictions were right and their Brier
+score; a handful of predictions is not a calibration. In the recorded
+session, Muse expected the reduction to keep the period at eps_prime 2e-4
+(85%); the engine measured a 55% difference, and the test at eps_prime 2e-5
+(3.9%) was consistent with the time-scale explanation and contradicted the
+structural one.
+
+A check whose claimed result is an assumed number (an "achieved 60 s" set by
+hand, declared by Muse or named like one) is shown as argued, never as
+holding: the result has to come from an experiment, a measurement with a
+source or a computation.
 
 **Chemistry, in depth.** The first specialised domain, chosen for its
 mathematical depth and because it can be seen: oscillating reactions

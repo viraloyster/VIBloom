@@ -569,17 +569,26 @@ function explain(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+// What Muse is shown of past lessons: only decided ones, with the verified
+// contrast apart from the interpretation it supported.
 const lessonsFor = (id: string) =>
   tree.lessons
     .filter((l) => l.node === id)
-    .map((l) => ({
-      id: l.id,
-      state: tree.lessonState(l),
-      learned: l.candidates[l.supported]?.explanation ?? "inconclusive",
-      scope: l.candidates[l.supported]?.scope ?? "",
-      refuted: l.candidates.filter((_, i) => i !== l.supported).map((c) => c.explanation),
-      under: l.basis,
-    }));
+    .flatMap((l) => {
+      const d = tree.decided(l);
+      if (!d) return [];
+      return [
+        {
+          id: l.id,
+          state: tree.lessonState(l),
+          finding: `at ${JSON.stringify(l.basis)} it ${l.observed}; with ${l.test.param} = ${String(l.test.value)} it ${d.outcome}`,
+          supported_interpretation: l.candidates[d.supported]?.explanation ?? "",
+          scope: l.candidates[d.supported]?.scope ?? "",
+          contradicted: l.candidates.filter((_, i) => i !== d.supported).map((c) => c.explanation),
+          still_open: l.open,
+        },
+      ];
+    });
 
 // The anticipation loop on one experiment: Muse commits to a prediction, the
 // engine runs, and a surprise makes Muse propose two explanations that one
@@ -606,7 +615,7 @@ async function investigate(id: string) {
         }),
         mode: tree.mode,
         effort: "low",
-        maxOutput: 1500,
+        maxOutput: 4000,
       },
       "prediction",
       PREDICT_SCHEMA,
@@ -617,8 +626,10 @@ async function investigate(id: string) {
       reason: string;
       uses: string[];
     };
+    const pid = `p${String(tree.predictions.length + 1)}`;
     tree.append(`muse:${pr.usage.model}`, {
       type: "predict",
+      id: pid,
       node: id,
       inputs,
       expect: pv.expect,
@@ -633,8 +644,8 @@ async function investigate(id: string) {
       true,
     );
     const result = await simulate(spec, scope);
-    tree.append("engine", { type: "check", node: id, result });
-    tree.confirm(id, result);
+    const run = tree.append("engine", { type: "check", node: id, result });
+    tree.confirm(run.seq, result);
     refresh();
     if ("error" in result) {
       monitor.status(`The experiment could not conclude: ${result.error}`);
@@ -659,12 +670,16 @@ async function investigate(id: string) {
           values: inputs,
           predicted: pv,
           observed,
-          run: result.sim,
+          measured: {
+            ...result.sim?.periods,
+            relative_difference: result.value,
+            definition: "|full - reduced| / reduced",
+          },
           lessons: lessonsFor(id),
         }),
         mode: tree.mode,
         effort: "medium",
-        maxOutput: 3000,
+        maxOutput: 8000,
       },
       "diagnosis",
       DIAGNOSE_SCHEMA,
@@ -672,28 +687,32 @@ async function investigate(id: string) {
     const dv = dg.value as {
       candidates: { explanation: string; scope: string; expect: "holds" | "fails" }[];
       test: { param: string; value: number };
+      open: string;
     };
+    // The explanations go into the log before their test runs.
+    const hid = `lesson-${String(tree.lessons.length + 1)}`;
+    tree.append(`muse:${dg.usage.model}`, {
+      type: "hypotheses",
+      id: hid,
+      prediction: pid,
+      candidates: dv.candidates.slice(0, 2),
+      test: dv.test,
+      open: dv.open,
+      usage: dg.usage,
+    });
+    refresh();
     monitor.status(
       `Testing ${dv.test.param} = ${String(dv.test.value)} to tell the explanations apart...`,
       true,
     );
     const t = await simulate(spec, { ...scope, [dv.test.param]: dv.test.value });
-    if ("error" in t) {
-      monitor.status(`The discriminating run could not conclude (${t.error}); no lesson recorded.`);
-      return;
-    }
-    tree.append(`muse:${dg.usage.model}`, {
-      type: "lesson",
-      id: `lesson-${String(tree.lessons.length + 1)}`,
-      node: id,
-      basis: inputs,
-      observed,
-      candidates: dv.candidates.slice(0, 2),
-      test: dv.test,
-      outcome: t.pass ? "holds" : "fails",
-      usage: dg.usage,
-    });
-    monitor.status("Lesson recorded: the run decided which explanation the evidence supports.");
+    const tested = tree.append("engine", { type: "test", hypotheses: hid, result: t });
+    tree.confirm(tested.seq, t);
+    monitor.status(
+      "error" in t
+        ? `The discriminating run could not conclude (${t.error}); nothing was decided.`
+        : "The run decided which explanation the evidence supports.",
+    );
   } catch (e) {
     monitor.status(`Stopped: ${explain(e)}`);
   } finally {
@@ -737,8 +756,8 @@ async function check(n: IdeaNode) {
   if (n.check.kind === "oregonator") {
     monitor.status(`Running the Oregonator experiment for ${n.title}...`, true);
     const result = await simulate(n.check, tree.scope());
-    tree.append("engine", { type: "check", node: n.id, result });
-    tree.confirm(n.id, result);
+    const run = tree.append("engine", { type: "check", node: n.id, result });
+    tree.confirm(run.seq, result);
     monitor.status(`Experiment done for ${n.title}.`);
     refresh();
     return;
@@ -748,14 +767,13 @@ async function check(n: IdeaNode) {
 
 // Experiments read from a log count only once they reproduce in this browser.
 async function confirmExperiments() {
-  for (const id of [...tree.unconfirmed]) {
-    const spec = tree.nodes.get(id)?.check;
+  for (const run of tree.runsToConfirm()) {
+    const spec = tree.nodes.get(run.node)?.check;
     if (!spec) continue;
     monitor.status("Re-running a recorded experiment in your browser...", true);
     // The past is checked with its own inputs; the present gets a new run
     // through the usual staleness check.
-    const r = tree.results.get(id);
-    tree.confirm(id, await simulate(spec, { ...tree.scope(), ...(r?.inputs ?? {}) }));
+    tree.confirm(run.seq, await simulate(spec, { ...tree.scope(), ...(run.result.inputs ?? {}) }));
     refresh();
   }
   monitor.status("");
@@ -817,7 +835,27 @@ async function playRecorded(name: string) {
   workspace(full.goal);
   for (const e of data.events.slice(1)) {
     const b = e.body;
-    if (b.type === "check") continue;
+    if (b.type === "check") {
+      // The run that settles a prediction is redone here, in order.
+      const n = tree.nodes.get(b.node);
+      if (n && tree.predictions.some((p) => p.node === n.id && p.run === undefined)) await check(n);
+      continue;
+    }
+    if (b.type === "test") {
+      const l = tree.lessons.find((x) => x.id === b.hypotheses);
+      const spec = l && tree.nodes.get(l.node)?.check;
+      if (!l || !spec) continue;
+      monitor.status(
+        `Running the test Muse proposed: ${l.test.param} = ${String(l.test.value)}...`,
+        true,
+      );
+      const t = await simulate(spec, { ...l.basis, [l.test.param]: l.test.value });
+      const run = tree.append("engine", { type: "test", hypotheses: l.id, result: t });
+      tree.confirm(run.seq, t);
+      monitor.status("");
+      refresh();
+      continue;
+    }
     if (b.type === "grow") {
       monitor.status(`Recorded Muse session: ${b.summary}`);
       for (const n of b.nodes) {
@@ -844,10 +882,16 @@ async function playRecorded(name: string) {
       ledger.entries.push(b.usage);
       select(b.node);
       await sleep(1500);
-    } else if (b.type === "predict" || b.type === "lesson") {
-      tree.append(e.actor, b);
+    } else if (b.type === "predict" || b.type === "hypotheses") {
+      try {
+        tree.append(e.actor, b);
+      } catch (err) {
+        // The runs redone here no longer tell the recorded story; say so.
+        monitor.status(`The recording stops here: ${explain(err)}`);
+        break;
+      }
       ledger.entries.push(b.usage);
-      select(b.node);
+      select(b.type === "predict" ? b.node : (tree.lessons.at(-1)?.node ?? ""));
       await sleep(1200);
     } else if (b.type === "chat") {
       tree.append(e.actor, b);

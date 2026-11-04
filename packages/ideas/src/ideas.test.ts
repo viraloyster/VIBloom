@@ -6,7 +6,7 @@ import { Muse } from "./muse";
 import type { GrownNode } from "./protocol";
 import { ArrayItems } from "./stream";
 import { IdeaTree } from "./tree";
-import type { Usage } from "./types";
+import type { IdeaEvent, Usage } from "./types";
 
 const noCheck = { description: "", value: "", op: "none", limit: "", unit: "" };
 const grown = (key: string, extra: Partial<GrownNode> = {}): GrownNode => ({
@@ -31,6 +31,7 @@ const usage: Usage = {
   reasoning: 0,
   cost: 0,
 };
+const seqOf = (t: IdeaTree, id: string) => t.latestRun(id)?.seq ?? -1;
 const p = (name: string, value: number, origin = "assumed", unit = "MPa") => ({
   name,
   value,
@@ -332,6 +333,53 @@ describe("round three", () => {
     expect(t.status("minute")).toBe("argued");
   });
 
+  it("keeps a check conditional when the result it claims is only assumed", () => {
+    const make = (origin: string, check: { value: string; observes?: string[] }, name: string) => {
+      const t = new IdeaTree();
+      t.append("person", { type: "goal", text: "A one minute clock", mode: "standard" });
+      const nodes = t.admit("goal", [
+        grown("minute", {
+          params: [
+            { ...p(name, 60, origin, "s"), kind: "external" },
+            { ...p("target", 60, "assumed", "s"), kind: "requirement" },
+          ],
+          check: {
+            kind: "arithmetic",
+            description: "",
+            value: check.value,
+            op: "<=",
+            limit: "0.1",
+            unit: "",
+            ...(check.observes ? { observes: check.observes } : {}),
+          },
+        }),
+      ]);
+      t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+      run(t, "minute");
+      return t.status("minute");
+    };
+    // Named like an outcome, undeclared: still caught.
+    expect(make("assumed", { value: "abs(demonstrated - target) / target" }, "demonstrated")).toBe(
+      "argued",
+    );
+    // Declared by the model under a neutral name.
+    expect(
+      make(
+        "assumed",
+        { value: "abs(period_s - target) / target", observes: ["period_s"] },
+        "period_s",
+      ),
+    ).toBe("argued");
+    // A measured number with a source is evidence, not an assumption.
+    expect(
+      make(
+        "reference",
+        { value: "abs(period_s - target) / target", observes: ["period_s"] },
+        "period_s",
+      ),
+    ).toBe("holds");
+  });
+
   it("refuses a repair that swaps the sides of a comparison", () => {
     const t = new IdeaTree();
     t.append("person", { type: "goal", text: "g", mode: "standard" });
@@ -400,7 +448,7 @@ describe("round three", () => {
     const spec = t.nodes.get("osc")?.check;
     if (!spec) throw new Error("missing");
     t.append("engine", { type: "check", node: "osc", result: runCheck(spec, t.scope()) });
-    t.confirm("osc", runCheck(spec, t.scope()));
+    t.confirm(seqOf(t, "osc"), runCheck(spec, t.scope()));
     expect(t.status("osc")).toBe("unverified");
     t.append("person", { type: "set_param", name: "s", value: 1, source: "fix" });
     expect(t.status("osc")).toBe("stale");
@@ -449,7 +497,7 @@ describe("round three", () => {
     if (!spec) throw new Error("missing");
     const r = runCheck(spec, t.scope());
     t.append("engine", { type: "check", node: "osc", result: r });
-    t.confirm("osc", runCheck(spec, t.scope()));
+    t.confirm(seqOf(t, "osc"), runCheck(spec, t.scope()));
     expect(t.scope().osc_period_full).toBeGreaterThan(5);
     run(t, "minute");
     const m = t.results.get("minute");
@@ -457,8 +505,60 @@ describe("round three", () => {
     // The whole log reopens; what reads the run waits for its confirmation.
     const copy = IdeaTree.replay(structuredClone(t.events));
     expect(copy.status("minute")).toBe("unverified");
-    copy.confirm("osc", runCheck(spec, copy.scope()));
+    copy.confirm(seqOf(copy, "osc"), runCheck(spec, copy.scope()));
     expect(["holds", "broken", "partial"]).toContain(copy.status("minute"));
+  });
+
+  it("keeps the recorded run when a confirmation differs within tolerance, so the log reopens", () => {
+    const t = new IdeaTree();
+    t.append("person", { type: "goal", text: "clock", mode: "standard" });
+    const nodes = t.admit("goal", [
+      grown("osc", {
+        params: [
+          { ...p("s", 1, "reference", ""), kind: "design" },
+          { ...p("q", 7.62e-5, "reference", ""), kind: "external" },
+          { ...p("eps", 0.0099, "reference", ""), kind: "external" },
+          { ...p("eps_prime", 1e-4, "reference", ""), kind: "external" },
+        ],
+        check: {
+          kind: "oregonator",
+          question: "oscillates",
+          tolerance: 0.05,
+          description: "",
+          value: "",
+          op: "none",
+          limit: "",
+          unit: "",
+        },
+      }),
+      grown("minute", {
+        params: [{ ...p("tau_seconds", 3, "assumed", "s"), kind: "external" }],
+        check: {
+          kind: "arithmetic",
+          description: "",
+          value: "osc_period_full * tau_seconds",
+          op: "<=",
+          limit: "60",
+          unit: "s",
+        },
+      }),
+    ]);
+    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    const spec = t.nodes.get("osc")?.check;
+    if (!spec) throw new Error("missing");
+    const r = runCheck(spec, t.scope());
+    if ("error" in r || !r.sim) throw new Error("no run");
+    t.append("engine", { type: "check", node: "osc", result: r });
+    const full = r.sim.periods.full ?? NaN;
+    const nudged = {
+      ...r,
+      sim: { ...r.sim, periods: { ...r.sim.periods, full: full * (1 + 1e-5) } },
+    };
+    t.confirm(seqOf(t, "osc"), nudged);
+    expect(t.unconfirmed.has("osc")).toBe(false);
+    expect(t.scope().osc_period_full).toBe(full);
+    run(t, "minute");
+    expect(() => IdeaTree.replay(structuredClone(t.events))).not.toThrow();
   });
 });
 
@@ -511,11 +611,11 @@ describe("chemistry experiments", () => {
     t.append("engine", { type: "check", node: "kinetics", result: r });
     const copy = IdeaTree.replay(structuredClone(t.events));
     expect(copy.status("kinetics")).toBe("unverified");
-    copy.confirm("kinetics", runCheck(spec, copy.scope()));
+    copy.confirm(seqOf(copy, "kinetics"), runCheck(spec, copy.scope()));
     expect(copy.status("kinetics")).toBe("broken");
     const forged = IdeaTree.replay(structuredClone(t.events));
     if ("error" in r) throw new Error(r.error);
-    forged.confirm("kinetics", { ...r, pass: true });
+    forged.confirm(seqOf(forged, "kinetics"), { ...r, pass: true });
     expect(forged.status("kinetics")).toBe("unverified");
   });
 });
@@ -548,79 +648,129 @@ describe("predictions and lessons", () => {
     return t;
   };
 
-  it("records a surprise, settles explanations by a run, and invalidates the lesson when a premise changes", () => {
-    const t = clock();
+  const inputs = { s: 1, q: 7.62e-5, eps: 0.0099, eps_prime: 1e-4 };
+  const predict = (expect: "holds" | "fails", id = "p1") => ({
+    type: "predict" as const,
+    id,
+    node: "kinetics",
+    inputs,
+    expect,
+    confidence: 0.8,
+    reason: "",
+    uses: [],
+    usage,
+  });
+  const hypotheses = (extra: { prediction?: string; id?: string } = {}) => ({
+    type: "hypotheses" as const,
+    id: "h1",
+    prediction: "p1",
+    candidates: [
+      { explanation: "the reduction drifts at low s", scope: "s near 1", expect: "holds" as const },
+      { explanation: "the reduction drifts everywhere", scope: "all s", expect: "fails" as const },
+    ],
+    test: { param: "s", value: 2 },
+    open: "the mechanism",
+    usage,
+    ...extra,
+  });
+  const runNow = (t: IdeaTree) => {
     const spec = t.nodes.get("kinetics")?.check;
     if (!spec) throw new Error("missing");
-    const inputs = { s: 1, q: 7.62e-5, eps: 0.0099, eps_prime: 1e-4 };
-    t.append("muse", {
-      type: "predict",
-      node: "kinetics",
-      inputs,
-      expect: "holds",
-      confidence: 0.8,
-      reason: "",
-      uses: [],
-      usage,
-    });
     t.append("engine", { type: "check", node: "kinetics", result: runCheck(spec, t.scope()) });
-    expect(t.calibration()).toEqual({ made: 1, right: 0, surprises: 1 });
-    const test = { param: "s", value: 2 };
+    return spec;
+  };
+
+  it("chains prediction, contradicting run, explanations and their test, and invalidates on change", () => {
+    const t = clock();
+    t.append("muse", predict("holds"));
+    const spec = runNow(t);
+    // At s = 1 the reduction is about 19% off: the prediction was wrong.
+    t.confirm(seqOf(t, "kinetics"), runCheck(spec, t.scope()));
+    expect(t.calibration()).toMatchObject({ made: 1, right: 0, surprises: 1 });
+    expect(t.calibration().brier).toBeCloseTo(0.64);
+    t.append("muse", hypotheses());
+    const l = t.lessons[0];
+    if (!l) throw new Error("no lesson");
+    expect(t.lessonState(l)).toBe("untested");
+    const r = runCheck(spec, { ...inputs, s: 2 });
+    t.append("engine", { type: "test", hypotheses: "h1", result: r });
+    expect(t.lessonState(l)).toBe("unverified");
+    t.confirm(l.run ?? -1, runCheck(spec, { ...inputs, s: 2 }));
+    expect(t.lessonState(l)).toBe("current");
+    const d = t.decided(l);
+    if ("error" in r) throw new Error(r.error);
+    expect(d?.supported).toBe(r.pass ? 0 : 1);
+    // Reopened, nothing counts until the runs reproduce here.
+    const copy = IdeaTree.replay(structuredClone(t.events));
+    const cl = copy.lessons[0];
+    if (!cl) throw new Error("no lesson");
+    expect(copy.lessonState(cl)).toBe("unverified");
+    expect(copy.calibration()).toMatchObject({ made: 0, pending: 1 });
+    for (const run of copy.runsToConfirm()) {
+      if (!("error" in run.result)) copy.confirm(run.seq, runCheck(spec, run.result.inputs));
+    }
+    expect(copy.lessonState(cl)).toBe("current");
+    expect(copy.calibration()).toMatchObject({ made: 1, right: 0 });
+    t.append("person", { type: "set_param", name: "eps_prime", value: 2e-4, source: "edit" });
+    expect(t.lessonState(l)).toBe("invalidated");
+  });
+
+  it("refuses a lesson without the history that justifies it", () => {
+    const t = clock();
+    // No prediction at all.
+    expect(() => t.append("muse", hypotheses())).toThrow(/unknown prediction/);
+    // A prediction whose run has not happened.
+    t.append("muse", predict("holds"));
+    expect(() => t.append("muse", hypotheses())).toThrow(/no completed run/);
+    // A prediction for values other than the tree's.
+    expect(() =>
+      t.append("muse", { ...predict("holds", "p2"), inputs: { ...inputs, s: 3 } }),
+    ).toThrow(/current values/);
+    // A prediction that was right leaves nothing to explain.
+    t.append("muse", predict("fails", "p3"));
+    const spec = runNow(t);
+    expect(() => t.append("muse", hypotheses({ prediction: "p3", id: "h3" }))).toThrow(
+      /no surprise/,
+    );
+    t.append("muse", hypotheses());
+    // The test must be the registered one, and only once.
+    expect(() =>
+      t.append("engine", {
+        type: "test",
+        hypotheses: "h1",
+        result: runCheck(spec, { ...inputs, s: 3 }),
+      }),
+    ).toThrow(/registered/);
     const r = runCheck(spec, { ...inputs, s: 2 });
     if ("error" in r) throw new Error(r.error);
-    const outcome: "holds" | "fails" = r.pass ? "holds" : "fails";
-    const lesson = {
-      type: "lesson" as const,
-      id: "l1",
-      node: "kinetics",
-      basis: inputs,
-      observed: "fails" as const,
-      candidates: [
-        {
-          explanation: "the reduction drifts at low s",
-          scope: "s near 1",
-          expect: "holds" as const,
-        },
-        {
-          explanation: "the reduction drifts everywhere",
-          scope: "all s",
-          expect: "fails" as const,
-        },
-      ],
-      test,
-      outcome,
-      usage,
-    };
-    t.append("muse", lesson);
+    // A forged outcome enters the log but never reproduces, so it never counts.
+    t.append("engine", { type: "test", hypotheses: "h1", result: { ...r, pass: !r.pass } });
     const l = t.lessons[0];
-    expect(l?.supported).toBe(outcome === "holds" ? 0 : 1);
-    expect(t.lessonState(l ?? (undefined as never))).toBe("current");
-    t.append("person", { type: "set_param", name: "eps_prime", value: 2e-4, source: "edit" });
-    expect(t.lessonState(l ?? (undefined as never))).toBe("invalidated");
-    // A recorded outcome the engine does not reach is refused.
-    const forged = clock();
-    expect(() =>
-      forged.append("muse", { ...lesson, outcome: outcome === "holds" ? "fails" : "holds" }),
-    ).toThrow(/reproduce/);
-    expect(forged.lessons).toHaveLength(0);
+    if (!l) throw new Error("no lesson");
+    t.confirm(l.run ?? -1, runCheck(spec, { ...inputs, s: 2 }));
+    expect(t.lessonState(l)).toBe("failed");
+    expect(t.decided(l)).toBeUndefined();
+  });
+
+  it("keeps each prediction's outcome when the experiment later runs other values", () => {
+    const t = clock();
+    t.append("muse", predict("holds"));
+    const spec = runNow(t);
+    t.confirm(seqOf(t, "kinetics"), runCheck(spec, t.scope()));
+    t.append("person", { type: "set_param", name: "s", value: 2, source: "edit" });
+    runNow(t);
+    expect(t.calibration()).toMatchObject({ made: 1, right: 0, surprises: 1 });
   });
 
   it("refuses explanations that the test cannot tell apart", () => {
     const t = clock();
+    t.append("muse", predict("holds"));
+    runNow(t);
+    const same = hypotheses();
     expect(() =>
       t.append("muse", {
-        type: "lesson",
-        id: "l2",
-        node: "kinetics",
-        basis: { s: 1, q: 7.62e-5, eps: 0.0099, eps_prime: 1e-4 },
-        observed: "fails",
-        candidates: [
-          { explanation: "a", scope: "", expect: "holds" },
-          { explanation: "b", scope: "", expect: "holds" },
-        ],
-        test: { param: "s", value: 2 },
-        outcome: "holds",
-        usage,
+        ...same,
+        candidates: same.candidates.map((c) => ({ ...c, expect: "holds" as const })),
       }),
     ).toThrow(/different outcomes/);
   });
@@ -687,4 +837,24 @@ describe("streamed array items", () => {
       expect(out).toEqual([{ key: "x", t: "[}" }, { key: "y" }]);
     }
   });
+});
+
+describe("recorded sessions", () => {
+  const dir = new URL("../../../apps/web/public/examples/", import.meta.url);
+  for (const name of ["cardboard-airliner", "chemical-clock", "period-reduction"]) {
+    it(`${name} reopens and its experiments reproduce`, async () => {
+      const { readFile } = await import("node:fs/promises");
+      const data = JSON.parse(await readFile(new URL(`${name}.json`, dir), "utf8")) as {
+        events: IdeaEvent[];
+      };
+      const t = IdeaTree.replay(data.events);
+      for (const run of t.runsToConfirm()) {
+        const spec = t.nodes.get(run.node)?.check;
+        if (!spec) throw new Error(`no check on ${run.node}`);
+        t.confirm(run.seq, runCheck(spec, { ...t.scope(), ...(run.result.inputs ?? {}) }));
+        expect(run.state).toBe("confirmed");
+      }
+      for (const l of t.lessons) expect(t.lessonState(l)).toBe("current");
+    }, 60000);
+  }
 });
