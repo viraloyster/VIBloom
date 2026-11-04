@@ -682,8 +682,14 @@ h1 {
   --rc: #ffd84a;
 }
 
-.root.path {
+/* The selected root's foundations glow cyan; its place in the tree, the
+   roots above it, is a quieter light. */
+.root.support {
   --rc: #4fe3ff;
+}
+
+.root.path:not(.support) {
+  --rc: #c9bcff;
 }
 
 .root .body {
@@ -707,7 +713,7 @@ h1 {
   filter: drop-shadow(0 0 4px var(--rc));
 }
 
-.root.path .core {
+.root.support .core {
   stroke-width: 2.6;
   filter: drop-shadow(0 0 7px var(--rc));
 }
@@ -2060,4 +2066,33 @@ h1 {
 
 .glance .bad {
   color: #ff8fa3;
+}
+
+.link.support {
+  stroke: #4fe3ff;
+  stroke-width: 1.8;
+  opacity: 0.9;
+  filter: drop-shadow(0 0 4px #4fe3ff);
+}
+
+.node.support .orb {
+  filter: drop-shadow(0 0 7px #4fe3ff);
+}
+
+/* The domain the engine can run experiments in today. */
+.specialisation {
+  margin: -4px auto 14px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 5px 14px;
+  border-radius: 999px;
+  border: 1px solid rgb(79 227 255 / 35%);
+  background: rgb(79 227 255 / 7%);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.specialisation span {
+  color: #4fe3ff;
+  font-weight: 600;
 }

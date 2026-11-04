@@ -45,10 +45,14 @@ import { openPad } from "./pad";
 import { steps } from "./process";
 import { mountTreeView, type Ghost } from "./view";
 
+// The domain whose experiments the engine can run today.
+const SPECIALISATION =
+  "chemistry - oscillating reactions (Belousov-Zhabotinsky, Oregonator model, stiff solver)";
+
 const EXAMPLES = [
+  "A BZ oscillator with a 60 s period, predicted by the two-variable model",
   "A commercial airliner made of cardboard to cut costs",
   "A tree that grows gold",
-  "A chemical clock that changes colour every minute",
   "There are infinitely many twin primes",
 ];
 const EFFORT = "low" as const;
@@ -269,6 +273,12 @@ function landing() {
         el("img", { src: "crown.webp", alt: "", class: "hero-crown" }),
         el("p", { class: "brand" }, "VIBloom"),
         el("h1", {}, "What do you want to build?"),
+        el(
+          "p",
+          { class: "specialisation" },
+          el("span", {}, "Specialisation:"),
+          ` ${SPECIALISATION}`,
+        ),
         el(
           "p",
           { class: "lede" },

@@ -272,6 +272,7 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
   const groups = new Map<string, SVGGElement>();
   const paths = new Map<string, { el: SVGGElement; parent: string }>();
   let links: { el: SVGPathElement; a: string; b: string }[] = [];
+  let basisOf = new Map<string, string[]>();
   let parentOf = new Map<string, string | null>();
 
   // Names stay readable: the goal, the selected root and its neighbours carry
@@ -292,11 +293,30 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
   };
 
   // The selected root's line of support, from it up to the goal, is lit.
+  // Two lines for a selected root, drawn apart. Its foundations: everything
+  // its status rests on, its sub-roots and the roots it cites as basis, all
+  // the way down. Its place: the roots above it, up to the goal.
   const chain = () => {
-    const on = new Set<string>();
-    for (let id = selected; id; id = parentOf.get(id) ?? undefined) on.add(id);
-    for (const [id, { el: g }] of paths) g.classList.toggle("path", on.has(id));
-    for (const [id, g] of groups) g.classList.toggle("path", on.has(id));
+    const support = new Set<string>();
+    const walk = (id: string) => {
+      if (support.has(id)) return;
+      support.add(id);
+      for (const [c, par] of parentOf) if (par === id) walk(c);
+      for (const b of basisOf.get(id) ?? []) walk(b);
+    };
+    if (selected) walk(selected);
+    const place = new Set<string>();
+    for (let id = parentOf.get(selected ?? "") ?? undefined; id; id = parentOf.get(id) ?? undefined)
+      place.add(id);
+    for (const [id, { el: g }] of paths) {
+      g.classList.toggle("support", support.has(id));
+      g.classList.toggle("path", place.has(id) || id === selected);
+    }
+    for (const [id, g] of groups) {
+      g.classList.toggle("support", support.has(id) && id !== selected);
+      g.classList.toggle("path", place.has(id));
+    }
+    for (const l of links) l.el.classList.toggle("support", support.has(l.a) && support.has(l.b));
   };
 
   // Names keep their size at any zoom, so when the tree is far away some
@@ -662,6 +682,7 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
       }
       for (const { id } of all) if (!id.startsWith("ghost:")) seen.add(id);
       parentOf = new Map(all.map((a) => [a.id, a.parent]));
+      basisOf = new Map([...tree.nodes.values()].map((n) => [n.id, n.basis]));
       chain();
       labels();
       if (autoFit) fit();
