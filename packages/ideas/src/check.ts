@@ -185,3 +185,28 @@ export function recipeDerived(values: Record<string, number>): Record<string, nu
     return {};
   }
 }
+
+// Which way each model parameter moves when one recipe concentration rises,
+// computed from the conversion itself, so a direction claimed in prose can
+// be read against it: "up", "down" or "same".
+export function recipeEffects(
+  values: Record<string, number>,
+): Record<string, Record<string, "up" | "down" | "same">> {
+  const base = recipeDerived(values);
+  const out: Record<string, Record<string, "up" | "down" | "same">> = {};
+  for (const k of RECIPE_PARAMS) {
+    const v = values[k];
+    if (v === undefined) return {};
+    const moved = recipeDerived({ ...values, [k]: v * 2 });
+    out[`raising ${k}`] = Object.fromEntries(
+      ["q", "eps", "eps_prime", "time_scale_s"].flatMap((p) => {
+        const a = base[p];
+        const b = moved[p];
+        if (a === undefined || b === undefined) return [];
+        const r = b / a;
+        return [[p, r > 1 + 1e-9 ? "up" : r < 1 - 1e-9 ? "down" : "same"]];
+      }),
+    );
+  }
+  return out;
+}

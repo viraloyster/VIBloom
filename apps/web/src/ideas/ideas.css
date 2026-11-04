@@ -2243,3 +2243,20 @@ h1 {
     rgb(255 255 255 / 6%) 5px 6px
   );
 }
+
+.map-limit-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.map-limit {
+  width: 80px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--edge);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}

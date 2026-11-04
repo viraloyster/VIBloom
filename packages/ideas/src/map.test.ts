@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { runCheck } from "./check";
+import { recipeEffects, runCheck } from "./check";
 import { axis, cellScope, mapSetup, recenter, runCell, verdict } from "./map";
 import { IdeaTree } from "./tree";
 import type { IdeaEvent } from "./types";
@@ -117,4 +117,12 @@ describe("the recipe map", () => {
     expect(t.predictions.find((p) => p.id === "p-map")?.blind).toBe(false);
     expect(runCheck(full, t.scope())).toBeDefined();
   }, 60000);
+
+  it("states which way each recipe change moves the model, from the conversion", () => {
+    const e = recipeEffects({ bromate: 0.06, malonic_acid: 0.02, acid: 0.8, s: 1 });
+    // q is proportional to [H+]; eps falls with it.
+    expect(e["raising acid"]).toMatchObject({ q: "up", eps: "down", time_scale_s: "same" });
+    expect(e["raising bromate"]).toMatchObject({ q: "same", eps: "down", eps_prime: "down" });
+    expect(e["raising malonic_acid"]).toMatchObject({ eps: "up", time_scale_s: "down" });
+  });
 });

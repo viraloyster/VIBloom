@@ -31,6 +31,7 @@ import {
   RECIPE_PARAMS,
   estimate,
   mapSetup,
+  recipeEffects,
   runCheck,
   type IdeaEvent,
   type Refusal,
@@ -864,6 +865,8 @@ function recipeContext() {
         recipe_model: {
           recipe_now: recipe,
           derived,
+          // Computed by the engine: state directions from this, not memory.
+          effects: recipeEffects(scope),
           relations: RECIPE_RELATIONS,
           source: RECIPE_SOURCE,
         },

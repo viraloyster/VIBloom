@@ -36,7 +36,14 @@ const short = (sec: number) => (sec < 100 ? `${sec.toFixed(0)} s` : `${(sec / 60
 // A cell where another comparison of the tree fails at that recipe.
 const broken = (c: Cell) => (c.v?.others ?? []).some((o) => "error" in o.result || !o.result.pass);
 
+// An upper concentration the person sets; VIBloom has no solubility data, so
+// it never assumes one. Cells above it are not run.
+let limit: number | undefined;
+const over = (c: Cell) =>
+  limit !== undefined && Math.max(c.recipe.bromate, c.recipe.malonic_acid, c.recipe.acid) > limit;
+
 function state(c: Cell): { cls: string; label: string } {
+  if (over(c)) return { cls: "none", label: "above your concentration limit; not run" };
   if (!c.run) return { cls: "pending", label: "computing" };
   if ("error" in c.run) return { cls: "none", label: "no conclusion" };
   const t = c.v?.meetsTarget;
@@ -168,7 +175,7 @@ function mapBody(
     } else if (c.run) rows.push(["Engine", c.run.error]);
     const pickBtn = el(
       "button",
-      { class: "primary", disabled: here || !c.run || busy() },
+      { class: "primary", disabled: here || !c.run || over(c) || busy() },
       here ? "This is the tree's recipe" : "Use this recipe",
     );
     pickBtn.addEventListener("click", () => {
@@ -233,13 +240,34 @@ function mapBody(
           grid.append(btn);
         });
       });
-    const done = all.filter((c) => c.run).length;
+    const done = all.filter((c) => c.run || over(c)).length;
     progress.textContent =
       done < all.length
         ? `The engine is running ${String(all.length)} recipes in this browser: ${String(done)} done.`
         : `${String(all.length)} recipes run by the engine in this browser. Each cell: full-model period, and how far the two-variable model is off.`;
   };
 
+  const limitInput = el("input", {
+    type: "number",
+    min: "0",
+    step: "0.1",
+    class: "map-limit",
+    placeholder: "none",
+    "aria-label": "Highest concentration to try, in M",
+    value: limit === undefined ? "" : String(limit),
+  });
+  limitInput.addEventListener("change", () => {
+    const v = Number(limitInput.value);
+    limit = limitInput.value.trim() && v > 0 ? v : undefined;
+    go(setup);
+  });
+  const limitRow = el(
+    "label",
+    { class: "fine map-limit-row" },
+    "Highest concentration to try (M), set by you: ",
+    limitInput,
+    " VIBloom does not know solubilities; without a limit it maps any value.",
+  );
   const back = el("button", { class: "ghost-btn" }, "Back to the tree's recipe");
   back.addEventListener("click", () => {
     go(home);
@@ -254,6 +282,7 @@ function mapBody(
       setup === home ? null : back,
     ),
     fixed,
+    limitRow,
     el(
       "p",
       { class: "map-legend" },
@@ -282,7 +311,7 @@ function mapBody(
   let seen = false;
   void (async () => {
     for (const c of all) {
-      if (c.run) continue;
+      if (c.run || over(c)) continue;
       if (panel.isConnected) seen = true;
       else if (seen) return;
       if (spec?.kind !== "oregonator") return;

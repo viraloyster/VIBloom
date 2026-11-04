@@ -48,6 +48,7 @@ export {
 } from "./map";
 export {
   recipeDerived,
+  recipeEffects,
   RECIPE_PARAMS,
   runCheck,
   SIM_PARAMS,

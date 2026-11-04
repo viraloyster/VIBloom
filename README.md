@@ -190,12 +190,15 @@ recorded chemistry sessions cost $0.04 and $0.07.
 - **The number detector is heuristic.** It flags numbers absent from Muse's
   data; it cannot prove a number is right, and it does not check qualitative
   claims. In the recorded search Muse said lowering the acid would raise q;
-  with these rate constants q is proportional to [H+], so it would fall.
+  with these rate constants q is proportional to [H+], so it would fall. Muse
+  is now given the direction of every recipe effect, computed by the engine
+  from the conversion, but a wrong direction in prose is still not flagged.
 - **The recipe map is a grid, not an optimiser.** Seven by seven recipes,
   log-spaced; a narrow target band can fall between cells until the map is
   re-centred closer in. It explores bromate and malonic acid only, and does
-  not judge whether a recipe is practical: around 0.879 M bromate it offers
-  cells above any concentration that would dissolve.
+  not judge whether a recipe is practical: VIBloom has no solubility data, so
+  the person sets the highest concentration to try; without it, the map
+  around 0.879 M bromate offers cells no solution could hold.
 
 ## Vision
 
