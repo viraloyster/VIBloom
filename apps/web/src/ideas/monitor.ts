@@ -7,6 +7,7 @@ import {
   type CheckResult,
   type IdeaNode,
   type IdeaTree,
+  type Lesson,
   type Param,
   type Status,
 } from "@vibloom/ideas";
@@ -369,6 +370,14 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
         el("p", { class: "eyebrow" }, "Values"),
         el("table", { class: "params" }, el("tbody", {}, ...rows)),
       );
+    if (n.overridden?.length)
+      out.push(
+        el(
+          "p",
+          { class: "fine warn" },
+          `Muse also gave ${n.overridden.map(words).join(", ")}; the recipe sets ${n.overridden.length > 1 ? "them" : "it"}, so ${n.overridden.length > 1 ? "those values were" : "that value was"} not used.`,
+        ),
+      );
     const derived = tree.derived();
     if (n.check?.kind === "oregonator" && Object.keys(derived).length) {
       const label: Record<string, string> = {
@@ -564,7 +573,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
             { class: "finding" },
             `${l.prediction} expected ${tree.predictions.find((x) => x.id === l.prediction)?.expect ?? "?"}; at ${at} it ${l.observed}${measured(tree, l.surprise)}.`,
             d
-              ? ` With ${words(l.test.param)} = ${fmt(l.test.value)} instead, it ${d.outcome}${measured(tree, l.run)}.`
+              ? ` ${intervention(l)}, it ${d.outcome}${measured(tree, l.run)}.`
               : ` Test registered first: ${words(l.test.param)} = ${fmt(l.test.value)}${state === "failed" ? ", which did not conclude or reproduce" : ", not decided yet"}.`,
           ),
           el("p", { class: "label" }, "Muse's interpretations, before the test"),
@@ -574,7 +583,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
               { class: d ? (i === d.supported ? "supported" : "refuted") : "" },
               d
                 ? i === d.supported
-                  ? "Consistent with the test: "
+                  ? "Consistent with the test, of the two considered: "
                   : "Contradicted by the test: "
                 : "",
               c.explanation,
@@ -592,7 +601,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
           el(
             "p",
             { class: "fine" },
-            "One test supports an interpretation or contradicts it; it does not prove a cause.",
+            "One test tells the two explanations considered apart; it does not prove a cause, and others were not considered.",
           ),
           state === "invalidated"
             ? el(
@@ -667,6 +676,16 @@ const QUESTIONS: Record<string, string> = {
   reduced_oscillates: "Does the two-variable reduction oscillate here?",
   reduction_keeps_period: "Does the reduction keep the full model's period?",
 };
+
+// What the test changed, and whether a person could mix it.
+function intervention(l: Lesson): string {
+  const at = `${words(l.test.param)} = ${fmt(l.test.value)}`;
+  return l.intervention === "recipe"
+    ? `Recipe change, ${at} M (every model parameter re-derived)`
+    : l.recipe
+      ? `Model change, ${at} (no recipe is shown to realize it)`
+      : `With ${at} instead`;
+}
 
 // The number behind a run's verdict, so a binary outcome never hides how far
 // it moved (a 401% gap that falls to 13% still "fails" a 5% tolerance).

@@ -3,7 +3,7 @@
 
 import { RECIPE_RELATIONS } from "@vibloom/chem";
 import { canonical, sha256 } from "@vibloom/engine";
-import { recipeDerived, runCheck, SIM_PARAMS, thresholds } from "./check";
+import { RECIPE_PARAMS, recipeDerived, runCheck, SIM_PARAMS, thresholds } from "./check";
 import { numbersOf, unsupportedNumbers } from "./numbers";
 import { bare, MAX_EXPR, names, OPS, rename, tokens, type Op } from "./expr";
 import { AXES, type GrownNode } from "./protocol";
@@ -325,10 +325,18 @@ export class IdeaTree {
         if (b.candidates.length !== 2 || !a || !c || a.expect === c.expect) {
           throw new Error("a lesson needs two explanations that expect different outcomes");
         }
-        if (!(SIM_PARAMS as readonly string[]).includes(b.test.param)) {
-          throw new Error(`the test may change only ${SIM_PARAMS.join(", ")}`);
+        const now = this.scope();
+        const recipe = RECIPE_PARAMS.every((k) => now[k] !== undefined)
+          ? Object.fromEntries(RECIPE_PARAMS.map((k) => [k, now[k] ?? NaN]))
+          : undefined;
+        const onRecipe = (RECIPE_PARAMS as readonly string[]).includes(b.test.param);
+        if (onRecipe && !recipe) throw new Error("there is no recipe to change");
+        if (!onRecipe && !(SIM_PARAMS as readonly string[]).includes(b.test.param)) {
+          throw new Error(
+            `the test may change only ${[...SIM_PARAMS, ...(recipe ? RECIPE_PARAMS : [])].join(", ")}`,
+          );
         }
-        const before = p.inputs[b.test.param];
+        const before = onRecipe ? recipe?.[b.test.param] : p.inputs[b.test.param];
         if (!(b.test.value > 0) || before === undefined || b.test.value === before) {
           throw new Error("the test must change its parameter to a new positive value");
         }
@@ -341,11 +349,14 @@ export class IdeaTree {
           observed,
           candidates: b.candidates.map((x) => ({ ...x })),
           test: { ...b.test },
+          intervention: onRecipe ? "recipe" : "model",
+          ...(recipe ? { recipe } : {}),
           open: b.open,
           unsupported: unsupportedNumbers(
             [...b.candidates.flatMap((x) => [x.explanation, x.scope]), b.open].join(" \n "),
             numbersOf([
               p.inputs,
+              recipe,
               this.nodes.get(p.node)?.statement,
               this.nodes.get(p.node)?.check,
               p.confidence,
@@ -361,8 +372,7 @@ export class IdeaTree {
         const l = this.lessons.find((x) => x.id === b.hypotheses);
         if (!l) throw new Error(`unknown hypotheses ${b.hypotheses}`);
         if (l.run !== undefined) throw new Error(`${l.id} was already tested`);
-        const want = { ...l.basis, [l.test.param]: l.test.value };
-        if (!sameRun(b.result.inputs ?? {}, want)) {
+        if (!sameRun(b.result.inputs ?? {}, this.testScope(l))) {
           throw new Error(`the run is not the test registered for ${l.id}`);
         }
         l.run = this.events.length;
@@ -606,6 +616,7 @@ export class IdeaTree {
     const keys = new Map<string, string>();
     const taken = new Set(Object.keys(this.scope()));
     const out: IdeaNode[] = [];
+    const given = new Map<string, string[]>();
     for (const g of grown.slice(0, 8)) {
       if (!isGrown(g)) continue;
       const slug =
@@ -620,6 +631,10 @@ export class IdeaTree {
       const renamed = new Map<string, string>();
       const uses: string[] = [];
       const suggestions: Param[] = [];
+      given.set(
+        id,
+        g.params.map((x) => String(x.name)),
+      );
       for (const raw of g.params.slice(0, 12)) {
         if (!raw.name || !Number.isFinite(raw.value)) continue;
         const p: Param = {
@@ -718,6 +733,22 @@ export class IdeaTree {
         expanded: false,
       });
     }
+    // With a recipe in the tree, q, eps and eps_prime follow from it: a value
+    // Muse also gave for them would silently replace the derivation, so it is
+    // set aside and said so.
+    const named = new Set([
+      ...Object.keys(this.scope()),
+      ...out.flatMap((n) => n.params.map((x) => x.name)),
+    ]);
+    if (RECIPE_PARAMS.every((k) => named.has(k))) {
+      for (const n of out) {
+        const drop = (given.get(n.id) ?? []).filter((x) => DERIVED.includes(x));
+        if (!drop.length) continue;
+        n.params = n.params.filter((x) => !DERIVED.includes(x.name));
+        n.suggestions = n.suggestions.filter((x) => !DERIVED.includes(x.name));
+        n.overridden = [...new Set(drop)];
+      }
+    }
     // A formula that reads an experiment's output rests on that experiment.
     const byKey = new Map<string, string>();
     for (const n of [...this.nodes.values(), ...out]) byKey.set(outputKey(n.id), n.id);
@@ -767,6 +798,17 @@ export class IdeaTree {
     if (run.state === "failed" || "error" in run.result) return "failed";
     if (run.state === "unconfirmed") return "pending";
     return run.result.pass ? "holds" : "fails";
+  }
+
+  // The values a lesson's test runs with, decided here and nowhere else. A
+  // recipe change re-derives every model parameter from the changed recipe;
+  // a model change moves one parameter and leaves the rest as they were.
+  testScope(l: Lesson): Record<string, number> {
+    if (l.intervention === "recipe" && l.recipe) {
+      const recipe = { ...l.recipe, [l.test.param]: l.test.value };
+      return { ...l.basis, ...recipe, ...recipeDerived(recipe) };
+    }
+    return { ...l.basis, [l.test.param]: l.test.value };
   }
 
   // The decided part of a lesson, derived from its runs, never from what the
@@ -830,7 +872,14 @@ export class IdeaTree {
                 ? { tolerance, difference: "|full - reduced| / reduced" }
                 : {}),
               surprise: runOf(l.surprise),
-              test: { changed: l.test.param, ...runOf(l.run) },
+              test: {
+                changed: l.test.param,
+                intervention:
+                  l.intervention === "recipe"
+                    ? "a recipe change: every model parameter followed it"
+                    : "a model change: no recipe is shown to realize it",
+                ...runOf(l.run),
+              },
             },
             consistent_interpretation: l.candidates[d.supported]?.explanation ?? "",
             scope: l.candidates[d.supported]?.scope ?? "",
@@ -985,6 +1034,8 @@ export class IdeaTree {
 // up to 2.7e-6 relative (docs/validation.md); 1e-4 leaves a wide margin while
 // staying far below any tolerance a claim uses. The verdict must match exactly.
 export const EXPERIMENT_TOLERANCE = 1e-4;
+
+const DERIVED = ["q", "eps", "eps_prime", "time_scale_s", "recipe_version"];
 
 const OUTCOME =
   /(^|_)(achieved|demonstrated|measured|observed|actual|attained|obtained|realized|result|outcome)(_|$)/i;

@@ -39,7 +39,9 @@ describe("a trace for drawing", () => {
     const p = { ...FIELD_2007, s: 1, eps_prime: 2e-4 };
     const tr = trace("full", p, 11.545);
     expect(tr).toBeDefined();
-    expect(tr?.t[0]).toBeCloseTo(0, 1);
+    expect(tr?.t[0]).toBe(0);
+    // It starts at a maximum of HBrO2.
+    expect(tr?.x[0]).toBeCloseTo(Math.max(...(tr?.x ?? [])), 2);
     expect(tr?.t.at(-1)).toBeGreaterThan(30);
     // It oscillates: x swings over decades.
     const x = tr?.x ?? [];

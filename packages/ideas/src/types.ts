@@ -99,6 +99,8 @@ export interface IdeaNode {
   // Large changes the model may only suggest.
   proposed: boolean;
   expanded: boolean;
+  // Values Muse gave that the tree's recipe already sets; not used.
+  overridden?: string[];
 }
 
 export interface Usage {
@@ -222,6 +224,12 @@ export interface Lesson {
   observed: Outcome;
   candidates: Candidate[];
   test: { param: string; value: number };
+  // recipe: a concentration changed and every model parameter followed it;
+  // model: one model parameter changed directly, which no recipe is shown to
+  // realize.
+  intervention: "recipe" | "model";
+  // The recipe the surprise was run with, when the tree has one.
+  recipe?: Record<string, number>;
   open: string;
   // Sequence number of the discriminating run, once recorded.
   run?: number;

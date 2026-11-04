@@ -86,7 +86,7 @@ export function clockPanel(r: CheckResult): HTMLElement {
       el(
         "div",
         {},
-        el("p", { class: "eyebrow" }, scale === undefined ? "Period" : "This recipe ticks every"),
+        el("p", { class: "eyebrow" }, scale === undefined ? "Period" : "Period of this recipe"),
         el("p", { class: "clock-period" }, show(full)),
         el(
           "p",
@@ -114,7 +114,7 @@ export function clockPanel(r: CheckResult): HTMLElement {
       status.textContent = "The concentrations could not be computed for this run.";
       return;
     }
-    status.textContent = `HBrO2 (log scale) over three periods, in ${unit}: full model solid, two-variable model dashed. The beaker shows the oxidised catalyst of the full model.`;
+    status.textContent = `HBrO2 (log scale) over three periods, in ${unit}, both starting at a peak: full model solid, two-variable model dashed. The period is the time between consecutive HBrO2 peaks. The beaker shows the model's activity (its oxidised catalyst, normalised), not the physical colour of a solution.`;
     draw(chart, tf, tr, seconds);
     chart.append(cursor);
     animate(

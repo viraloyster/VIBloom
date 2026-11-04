@@ -889,7 +889,9 @@ async function investigate(id: string) {
       `Testing ${dv.test.param} = ${String(dv.test.value)} to tell the explanations apart...`,
       true,
     );
-    const t = await simulate(spec, { ...scope, [dv.test.param]: dv.test.value });
+    const lesson = tree.lessons.find((l) => l.id === hid);
+    if (!lesson) return;
+    const t = await simulate(spec, tree.testScope(lesson));
     const tested = tree.append("engine", { type: "test", hypotheses: hid, result: t });
     tree.confirm(tested.seq, t);
     monitor.status(
@@ -1033,7 +1035,7 @@ async function playRecorded(name: string) {
         `Running the test Muse proposed: ${l.test.param} = ${String(l.test.value)}...`,
         true,
       );
-      const t = await simulate(spec, { ...l.basis, [l.test.param]: l.test.value });
+      const t = await simulate(spec, tree.testScope(l));
       const run = tree.append("engine", { type: "test", hypotheses: l.id, result: t });
       tree.confirm(run.seq, t);
       monitor.status("");

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runCheck, thresholds } from "./check";
+import { runCheck, SIM_PARAMS, thresholds } from "./check";
 import { BudgetExceeded, cost, Ledger } from "./cost";
 import { evaluate } from "./expr";
 import { Muse } from "./muse";
@@ -939,7 +939,134 @@ describe("what Muse sees", () => {
   });
 });
 
+const clockWithoutRecipe = () => {
+  const t = new IdeaTree();
+  t.append("person", { type: "goal", text: "clock", mode: "standard" });
+  const nodes = t.admit("goal", [
+    grown("clock", {
+      params: [
+        { ...p("s", 1, "reference", ""), kind: "design" },
+        { ...p("q", 7.62e-5, "reference", ""), kind: "external" },
+        { ...p("eps", 0.0099, "reference", ""), kind: "external" },
+        { ...p("eps_prime", 2e-4, "reference", ""), kind: "external" },
+      ],
+      check: {
+        kind: "oregonator",
+        question: "reduction_keeps_period",
+        tolerance: 0.05,
+        description: "",
+        value: "",
+        op: "none",
+        limit: "",
+        unit: "",
+      },
+    }),
+  ]);
+  t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+  const spec = t.nodes.get("clock")?.check;
+  if (!spec) throw new Error("missing");
+  t.append("muse", {
+    type: "predict",
+    id: "p1",
+    node: "clock",
+    inputs: { s: 1, q: 7.62e-5, eps: 0.0099, eps_prime: 2e-4 },
+    expect: "holds",
+    confidence: 0.8,
+    reason: "",
+    uses: [],
+    usage,
+  });
+  t.append("engine", { type: "check", node: "clock", result: runCheck(spec, t.scope()) });
+  return t;
+};
+
 describe("a real recipe in the tree", () => {
+  const recipeTree = () => {
+    const t = new IdeaTree();
+    t.append("person", { type: "goal", text: "A BZ clock", mode: "standard" });
+    const nodes = t.admit("goal", [
+      grown("clock", {
+        params: [
+          { ...p("bromate", 0.06, "reference", "M"), kind: "design" },
+          { ...p("malonic_acid", 0.2, "reference", "M"), kind: "design" },
+          { ...p("acid", 0.8, "reference", "M"), kind: "design" },
+          { ...p("s", 1, "assumed", ""), kind: "external" },
+        ],
+        check: {
+          kind: "oregonator",
+          question: "reduction_keeps_period",
+          tolerance: 0.15,
+          description: "",
+          value: "",
+          op: "none",
+          limit: "",
+          unit: "",
+        },
+      }),
+    ]);
+    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    return t;
+  };
+
+  it("tests a recipe change by re-deriving the whole model, and labels a model change", () => {
+    const t = recipeTree();
+    const spec = t.nodes.get("clock")?.check;
+    if (!spec) throw new Error("missing");
+    const inputs = Object.fromEntries(SIM_PARAMS.map((k) => [k, t.scope()[k] ?? NaN]));
+    t.append("muse", {
+      type: "predict",
+      id: "p1",
+      node: "clock",
+      inputs,
+      expect: "holds",
+      confidence: 0.8,
+      reason: "",
+      uses: [],
+      usage,
+    });
+    t.append("engine", { type: "check", node: "clock", result: runCheck(spec, t.scope()) });
+    const hyp = (param: string, value: number, id: string) => ({
+      type: "hypotheses" as const,
+      id,
+      prediction: "p1",
+      candidates: [
+        { explanation: "a", scope: "", expect: "holds" as const },
+        { explanation: "b", scope: "", expect: "fails" as const },
+      ],
+      test: { param, value },
+      open: "",
+      usage,
+    });
+    t.append("muse", hyp("malonic_acid", 0.02, "h1"));
+    const l = t.lessons[0];
+    if (!l) throw new Error("no lesson");
+    expect(l.intervention).toBe("recipe");
+    const want = t.testScope(l);
+    // Less malonic acid moves eps, eps_prime and the time scale together.
+    expect(want.eps_prime).toBeCloseTo(1.98e-5, 7);
+    expect(want.eps).toBeCloseTo(9.92e-3, 5);
+    expect(want.time_scale_s).toBeCloseTo(50);
+    // Changing only eps_prime is not that recipe change.
+    expect(() =>
+      t.append("engine", {
+        type: "test",
+        hypotheses: "h1",
+        result: runCheck(spec, { ...l.basis, eps_prime: want.eps_prime ?? NaN }),
+      }),
+    ).toThrow(/registered/);
+    t.append("engine", { type: "test", hypotheses: "h1", result: runCheck(spec, want) });
+    // A value Muse gives for something the recipe sets is set aside, not used.
+    const more = t.admit("goal", [
+      grown("tuning", { params: [{ ...p("eps", 0.5, "assumed", ""), kind: "external" }] }),
+    ]);
+    expect(more[0]?.overridden).toEqual(["eps"]);
+    expect(more[0]?.params).toEqual([]);
+    expect(more[0]?.suggestions).toEqual([]);
+    // Without a recipe, a recipe change is refused; with one, a model change is labelled.
+    const plain = clockWithoutRecipe();
+    expect(() => plain.append("muse", hyp("malonic_acid", 0.1, "h2"))).toThrow(/no recipe/);
+  }, 60000);
+
   it("derives the model from the recipe and gives the period in seconds", () => {
     const t = new IdeaTree();
     t.append("person", { type: "goal", text: "A BZ clock from a recipe", mode: "standard" });

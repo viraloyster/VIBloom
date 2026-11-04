@@ -67,9 +67,11 @@ Protocol (follow it exactly; it keeps trees comparable between people):
   kind "external", assumed unless sourced). Do NOT give q, eps or eps_prime
   then: VIBloom derives them, and time_scale_s (seconds per model time unit),
   from the recipe with cited rate constants. With a recipe, formulas can also
-  read the period in seconds as K_period_full_s and K_period_reduced_s (for
+  read the period in seconds as K_period_full_s and K_period_reduced_s: the
+  time between consecutive maxima of HBrO2, one full cycle (for
   example value "abs(K_period_full_s - target_period_s)", op "<=", limit
-  "period_tolerance_s"). Without a recipe, a claim about seconds needs an
+  "period_tolerance_s"). If the goal speaks of colour changes, say in the
+  statement that the target is compared with that full cycle. Without a recipe, a claim about seconds needs an
   external time-scale parameter with a source. Never put a "measured" or
   "achieved" number in params: what an experiment or a formula should
   establish is never assumed.
@@ -385,8 +387,12 @@ export const PREDICT_SCHEMA = {
 export const DIAGNOSE = `You are Muse inside VIBloom. Your prediction for an Oregonator experiment was
 wrong. Propose exactly two different explanations for why, each with the
 scope where it would apply and what it expects in ONE discriminating test:
-the same values with a single parameter changed (s, q, eps or eps_prime) to a
-new positive value. The two explanations must expect different outcomes in
+the same values with a single parameter changed to a new positive value.
+When the input has a recipe_model, prefer changing the recipe (bromate,
+malonic_acid or acid): VIBloom re-derives every model parameter from it, so
+the test is something a person could mix. Changing s, q, eps or eps_prime
+directly is a model intervention that no recipe is shown to realize; use it
+only to isolate a mechanism, and VIBloom labels it so. The two explanations must expect different outcomes in
 that test, so the run tells them apart. The outcome is binary against the
 claim's tolerance: an explanation that expects holds must predict the
 difference falls within the tolerance, not merely that it shrinks, so pick a
@@ -421,7 +427,10 @@ export const DIAGNOSE_SCHEMA = {
       additionalProperties: false,
       required: ["param", "value"],
       properties: {
-        param: { type: "string", enum: ["s", "q", "eps", "eps_prime"] },
+        param: {
+          type: "string",
+          enum: ["s", "q", "eps", "eps_prime", "bromate", "malonic_acid", "acid"],
+        },
         value: { type: "number" },
       },
     },
