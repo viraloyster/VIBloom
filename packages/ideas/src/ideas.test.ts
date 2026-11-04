@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runCheck } from "./check";
+import { runCheck, thresholds } from "./check";
 import { BudgetExceeded, cost, Ledger } from "./cost";
 import { evaluate } from "./expr";
 import { Muse } from "./muse";
@@ -88,6 +88,31 @@ describe("arithmetic checks", () => {
     expect(runCheck({ ...spec, op: ">" }, { a: 1, b: 2 })).toMatchObject({ pass: false });
     expect(runCheck({ ...spec, value: "a / 0" }, { a: 1, b: 2 })).toHaveProperty("error");
     expect(runCheck({ ...spec, value: "missing" }, { a: 1, b: 2 })).toHaveProperty("error");
+  });
+});
+
+describe("thresholds", () => {
+  it("finds where each value would flip the verdict, computed by the engine", () => {
+    const spec = {
+      description: "",
+      value: "load / area",
+      op: "<=" as const,
+      limit: "strength",
+      unit: "",
+    };
+    const scope = { load: 120, area: 1, strength: 2 };
+    const [load, area, strength] = thresholds(spec, scope, ["load", "area", "strength"]);
+    expect(load?.at).toBeCloseTo(2, 6);
+    expect(load?.holdsWhen).toBe("below");
+    expect(area?.at).toBeCloseTo(60, 4);
+    expect(area?.holdsWhen).toBe("above");
+    expect(strength?.at).toBeCloseTo(120, 4);
+    expect(strength?.holdsWhen).toBe("above");
+  });
+
+  it("reports no flip when none exists within four orders of magnitude", () => {
+    const spec = { description: "", value: "a", op: "<=" as const, limit: "1e9", unit: "" };
+    expect(thresholds(spec, { a: 1 }, ["a"])[0]?.at).toBeUndefined();
   });
 });
 

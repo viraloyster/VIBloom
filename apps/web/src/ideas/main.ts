@@ -13,16 +13,21 @@ import {
   modelFor,
   REPAIR,
   REPAIR_SCHEMA,
+  VIEW,
+  VIEW_SCHEMA,
+  CHAT,
+  CHAT_SCHEMA,
   estimate,
   runCheck,
-  type CheckResult,
   type IdeaEvent,
   type IdeaNode,
-  type Param,
   type Mode,
+  type Usage,
 } from "@vibloom/ideas";
 import { el } from "../dom";
-import { mountTreeView, statusLabel, type Ghost } from "./view";
+import { mountChat } from "./chat";
+import { mountMonitor, viewData } from "./monitor";
+import { mountTreeView, type Ghost } from "./view";
 
 const EXAMPLES = [
   "A commercial airliner made of cardboard to cut costs",
@@ -31,7 +36,7 @@ const EXAMPLES = [
   "There are infinitely many twin primes",
 ];
 const EFFORT = "low" as const;
-const MAX_OUT = { decompose: 8000, expand: 5000 };
+const MAX_OUT = { decompose: 8000, expand: 5000, view: 9000, chat: 1500 };
 const KEY_STORE = "vibloom.key";
 
 const app = document.getElementById("app") ?? document.body;
@@ -156,7 +161,7 @@ function landing() {
           el(
             "p",
             { class: "fine" },
-            "Your key stays in this tab and is sent only to api.meta.ai. Every request reserves its worst-case cost first; the session stops at the budget.",
+            "Your key stays in this tab and is sent only to api.meta.ai. Before each request the API counts its tokens and the session reserves the most it could cost; it stops at the budget.",
           ),
         ),
         note,
@@ -167,19 +172,21 @@ function landing() {
   goal.focus();
 }
 
-// The workspace: tree, side panel, cost and what Muse is thinking.
+// The workspace: monitor and chat on the left, the tree on the right.
 let view: ReturnType<typeof mountTreeView>;
-let panel: HTMLElement;
+let monitor: ReturnType<typeof mountMonitor>;
+let chat: ReturnType<typeof mountChat>;
 let hud: HTMLElement;
-let thinking: HTMLElement;
 let ghosts: Ghost[] = [];
+let selectedId: string | undefined;
+let asking: string | undefined;
 
 function workspace(goal: string) {
-  const host = el("div", { class: "tree-host" });
-  panel = el("aside", { class: "panel", hidden: true });
+  const treeHost = el("section", { class: "tree-col", "aria-label": "Tree" });
+  const monitorHost = el("section", { class: "monitor", "aria-label": "Monitor" });
+  const chatHost = el("section", { class: "chat", "aria-label": "Chat" });
   hud = el("div", { class: "hud" });
-  thinking = el("div", { class: "thinking", hidden: true });
-  const back = el("button", { class: "ghost-btn back" }, "New idea");
+  const back = el("button", { class: "ghost-btn" }, "New idea");
   back.addEventListener("click", () => {
     if (!busy) landing();
   });
@@ -189,62 +196,128 @@ function workspace(goal: string) {
     el(
       "main",
       { class: "workspace" },
-      el("div", { class: "aurora dim" }),
       el(
-        "header",
-        { class: "top" },
-        el("span", { class: "brand small" }, "VIBloom"),
-        el("span", { class: "goal-title" }, goal),
-        hud,
-        save,
-        back,
+        "div",
+        { class: "left" },
+        el(
+          "header",
+          { class: "top" },
+          el("span", { class: "brand small" }, "VIBloom"),
+          el("span", { class: "goal-title" }, goal),
+          hud,
+          save,
+          back,
+        ),
+        monitorHost,
+        chatHost,
       ),
-      host,
-      thinking,
-      legend(),
-      panel,
+      treeHost,
+      gear(),
     ),
   );
-  view = mountTreeView(host, (id) => {
-    select(id);
+  view = mountTreeView(treeHost, select);
+  monitor = mountMonitor(monitorHost, {
+    visualize: (id) => void visualize(id),
+    expand: (id) => void grow(id, "expand"),
+    setParam: (name, value, source) => {
+      tree.append("person", { type: "set_param", name, value, source });
+      recheck();
+    },
+    accept: (id) => {
+      tree.append("person", { type: "accept", node: id });
+      refresh();
+    },
+    reject: (id) => {
+      tree.append("person", { type: "reject", node: id });
+      selectedId = undefined;
+      refresh();
+    },
+    estimate: (kind, id) =>
+      kind === "view"
+        ? estimate(modelFor(tree.mode), VIEW + JSON.stringify(nodeData(id)), MAX_OUT.view)
+        : estimate(modelFor(tree.mode), EXPAND + tree.context(id), MAX_OUT.expand),
+    busy: () => busy,
+  });
+  chat = mountChat(chatHost, {
+    ask: (q) => void ask(q),
+    select,
+    busy: () => busy,
   });
   refresh();
 }
 
-function legend() {
-  const items: [string, string][] = [
-    ["broken", "fails a calculation"],
-    ["affected", "a premise broke"],
-    ["at_risk", "at risk, argued"],
-    ["holds", "passes a calculation"],
-    ["argued", "argued"],
-    ["bedrock", "bedrock"],
-  ];
-  return el(
-    "div",
-    { class: "legend" },
-    ...items.map(([c, t]) => el("span", { class: `key-item ${c}` }, el("i", {}), t)),
-  );
+// Settings stay reachable from the workspace: key, mode and budget.
+function gear() {
+  const b = el("button", { class: "gear", "aria-label": "Settings", title: "Settings" }, "\u2699");
+  const panel = el("div", { class: "gear-panel", hidden: true });
+  b.addEventListener("click", () => {
+    const keyInput = el("input", {
+      type: "password",
+      class: "key",
+      placeholder: "Meta Model API key",
+      autocomplete: "off",
+    });
+    keyInput.value = key;
+    keyInput.addEventListener("change", () => {
+      key = keyInput.value.trim();
+    });
+    const cap = el("input", {
+      type: "number",
+      class: "cap",
+      min: "0.05",
+      step: "0.05",
+      value: ledger.cap.toFixed(2),
+    });
+    cap.addEventListener("change", () => {
+      ledger.cap = Math.max(0.05, Number(cap.value) || ledger.cap);
+      refresh();
+    });
+    panel.replaceChildren(
+      el("p", { class: "eyebrow" }, "Settings"),
+      keyInput,
+      el("label", { class: "cap-label" }, "Session budget $", cap),
+      el(
+        "p",
+        { class: "fine" },
+        `Mode: ${tree.mode}. The key stays in this tab and goes only to api.meta.ai.`,
+      ),
+    );
+    panel.hidden = !panel.hidden;
+  });
+  return el("div", { class: "gear-wrap" }, panel, b);
+}
+
+function nodeData(id: string) {
+  const n = tree.nodes.get(id);
+  return n ? viewData(tree, n) : {};
 }
 
 function refresh() {
   view.render(tree, ghosts);
-  const calls = ledger.entries.length;
+  if (selectedId && !tree.nodes.has(selectedId)) selectedId = undefined;
+  view.select(selectedId);
+  monitor.render(tree, selectedId);
+  chat.render(tree, asking, (i) => {
+    const u = chatUsage[i];
+    return u ? usd(u.cost) : "";
+  });
+  const spent = ledger.entries.reduce((s, u) => s + u.cost, 0);
   const cached = ledger.entries.reduce((s, u) => s + u.cached, 0);
   const input = ledger.entries.reduce((s, u) => s + u.input, 0);
-  const spent = ledger.entries.reduce((s, u) => s + u.cost, 0);
   hud.replaceChildren(
     el(
       "span",
       { class: "spend" },
       recorded
         ? `${usd(spent)} when recorded`
-        : `${usd(Math.max(spent, ledger.total))} of ${usd(ledger.cap)}`,
+        : `${usd(Math.max(spent, ledger.total))} / ${usd(ledger.cap)}`,
     ),
-    el("span", {}, `${String(calls)} call${calls === 1 ? "" : "s"}`),
+    el("span", {}, `${String(ledger.entries.length)} calls`),
     el("span", {}, input ? `${String(Math.round((100 * cached) / input))}% cached` : "0% cached"),
   );
 }
+
+const chatUsage: Usage[] = [];
 
 function muse() {
   return new Muse(key ? { apiKey: key } : {}, ledger);
@@ -255,9 +328,8 @@ async function grow(under: string, kind: "decompose" | "expand") {
   busy = true;
   view.busy(under);
   ghosts = [];
-  thinking.hidden = false;
-  thinking.replaceChildren(el("b", {}, "Muse is thinking"), el("span", { class: "thought" }));
-  const thought = thinking.querySelector(".thought");
+  monitor.status("Muse is thinking...", true);
+  let thought = "";
   try {
     const r = await muse().grow({
       instructions: kind === "decompose" ? DECOMPOSE : EXPAND,
@@ -266,13 +338,14 @@ async function grow(under: string, kind: "decompose" | "expand") {
       effort: EFFORT,
       maxOutput: MAX_OUT[kind],
       onThought: (t) => {
-        if (thought) thought.textContent = (thought.textContent + t).slice(-220);
+        thought = (thought + t).slice(-240);
+        monitor.status(`Muse is thinking: ${thought}`, true);
       },
       onNode: (raw) => {
         const n = raw as { key?: unknown; title?: unknown };
         if (typeof n.key === "string" && typeof n.title === "string") {
           ghosts.push({ key: n.key, under, title: n.title });
-          refresh();
+          view.render(tree, ghosts);
         }
       },
     });
@@ -285,27 +358,111 @@ async function grow(under: string, kind: "decompose" | "expand") {
       summary: r.summary,
       usage: r.usage,
     });
-    refresh();
-    if (thought) thought.textContent = r.summary;
     for (const n of nodes) check(n);
     refresh();
+    monitor.status(r.summary);
     await repair();
   } catch (e) {
     ghosts = [];
-    refresh();
-    thinking.replaceChildren(el("b", {}, "Stopped"), el("span", { class: "thought" }, explain(e)));
+    monitor.status(`Stopped: ${explain(e)}`);
   } finally {
     busy = false;
     view.busy(undefined);
-    if (selectedId) select(selectedId);
+    refresh();
+  }
+}
+
+// Muse designs a visual of what a root tests; it runs in an isolated frame
+// and draws only the numbers VIBloom hands it.
+async function visualize(id: string) {
+  if (busy) return;
+  busy = true;
+  refresh();
+  monitor.status("Muse is designing a view...", true);
+  try {
+    const { value, usage } = await muse().ask(
+      {
+        instructions: VIEW,
+        input: JSON.stringify({ data: nodeData(id) }),
+        mode: tree.mode,
+        effort: "low",
+        maxOutput: MAX_OUT.view,
+      },
+      "view",
+      VIEW_SCHEMA,
+    );
+    const v = value as { title?: unknown; html?: unknown };
+    if (typeof v.html !== "string" || v.html.length > 40_000)
+      throw new MuseError("bad_view", "no usable view");
+    tree.append(`muse:${usage.model}`, {
+      type: "view",
+      node: id,
+      title: typeof v.title === "string" ? v.title.slice(0, 80) : "View",
+      html: v.html,
+      usage,
+    });
+    monitor.status(`View ready (${usd(usage.cost)}).`);
+  } catch (e) {
+    monitor.status(`Stopped: ${explain(e)}`);
+  } finally {
+    busy = false;
+    refresh();
+  }
+}
+
+async function ask(question: string) {
+  if (busy) return;
+  busy = true;
+  asking = question;
+  refresh();
+  const focus = selectedId ?? "goal";
+  try {
+    const { value, usage } = await muse().ask(
+      {
+        instructions: CHAT,
+        input: JSON.stringify({
+          question,
+          focus: tree.context(focus),
+          statuses: [...tree.nodes.values()].map((n) => {
+            const r = tree.results.get(n.id);
+            return `${n.id} | ${n.title} | ${tree.status(n.id)}${r && !("error" in r) ? ` | computed ${String(r.value)} ${r.op} ${String(r.limit)} ${r.unit}` : ""}`;
+          }),
+        }),
+        mode: tree.mode,
+        effort: "low",
+        maxOutput: MAX_OUT.chat,
+      },
+      "chat",
+      CHAT_SCHEMA,
+    );
+    const v = value as { answer?: unknown; cites?: unknown };
+    // Only roots that exist may be cited.
+    const cites = (Array.isArray(v.cites) ? v.cites : []).filter(
+      (c): c is string => typeof c === "string" && tree.nodes.has(c),
+    );
+    tree.append(`muse:${usage.model}`, {
+      type: "chat",
+      focus,
+      question,
+      answer: typeof v.answer === "string" ? v.answer.slice(0, 1200) : "",
+      cites: [...new Set(cites)].slice(0, 6),
+      usage,
+    });
+    chatUsage[tree.chat.length - 1] = usage;
+  } catch (e) {
+    monitor.status(`Stopped: ${explain(e)}`);
+  } finally {
+    busy = false;
+    asking = undefined;
+    refresh();
   }
 }
 
 function explain(e: unknown): string {
   if (e instanceof BudgetExceeded)
-    return `Session budget reached: ${e.message}. Raise it from a new idea.`;
+    return `session budget reached (${e.message}). Raise it in Settings.`;
   if (e instanceof MuseError) {
-    if (e.code === "http_401" || e.code === "invalid_api_key") return "The key was rejected.";
+    if (e.code === "http_401" || e.code === "invalid_api_key") return "the key was rejected.";
     if (e.code === "max_output_tokens")
       return "Muse ran out of room for this answer; nothing was added.";
     return `Muse could not answer (${e.code}).`;
@@ -313,15 +470,12 @@ function explain(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-// Muse fixes its own calculations that failed to run: one request for all of
+// Muse fixes its own formulas that failed to evaluate: one request for all of
 // them, once per growth, never in a loop.
 async function repair() {
   const failing = tree.broken();
   if (failing.length === 0) return;
-  thinking.replaceChildren(
-    el("b", {}, "Muse is fixing its calculations"),
-    el("span", { class: "thought" }, `${String(failing.length)} did not run`),
-  );
+  monitor.status(`Muse is fixing ${String(failing.length)} formula(s)...`, true);
   const { value, usage } = await muse().ask(
     {
       instructions: REPAIR,
@@ -341,15 +495,7 @@ async function repair() {
     const n = tree.nodes.get(f.node);
     if (n) check(n);
   }
-  refresh();
-  thinking.replaceChildren(
-    el("b", {}, "Muse fixed its calculations"),
-    el(
-      "span",
-      { class: "thought" },
-      `${String(fixes.length)} of ${String(failing.length)} repaired and re-run`,
-    ),
-  );
+  monitor.status(`Muse repaired ${String(fixes.length)} of ${String(failing.length)} formula(s).`);
 }
 
 function check(n: IdeaNode) {
@@ -360,237 +506,29 @@ function check(n: IdeaNode) {
 async function start(goal: string, mode: Mode) {
   recorded = false;
   tree = new IdeaTree();
+  chatUsage.length = 0;
   tree.append("person", { type: "goal", text: goal, mode });
   selectedId = undefined;
   workspace(goal);
   await grow("goal", "decompose");
 }
 
-let selectedId: string | undefined;
-
-function select(id: string) {
-  const n = tree.nodes.get(id);
-  if (!n) return;
-  selectedId = id;
-  view.select(id);
-  view.focus(id);
-  const status = tree.status(id);
-  const result = tree.results.get(id);
-  const assumed = tree.assumedInputs(id);
-  const est = estimate(modelFor(tree.mode), EXPAND + tree.context(id), MAX_OUT.expand);
-
-  // One row per parameter: the ones this node introduced, then the shared
-  // ones it uses, which edit the same single value wherever they appear.
-  const row = (p: Param, shared: boolean) => {
-    const input = el("input", {
-      type: "number",
-      value: String(p.value),
-      step: "any",
-      "aria-label": p.name,
-    });
-    input.addEventListener("change", () => {
-      const v = Number(input.value);
-      if (!Number.isFinite(v) || v === p.value) return;
-      tree.append("person", {
-        type: "set_param",
-        name: p.name,
-        value: v,
-        source: "set by a person",
-      });
-      recheck();
-    });
-    const owner = tree.owner(p.name);
-    return el(
-      "tr",
-      {},
-      el(
-        "td",
-        { class: "pname" },
-        p.name.replace(/_/g, " "),
-        shared && owner ? el("small", {}, `shared, from ${owner.title}`) : null,
-      ),
-      el("td", {}, input),
-      el("td", { class: "unit" }, p.unit),
-      el(
-        "td",
-        {},
-        el(
-          "span",
-          { class: `origin ${p.origin}`, title: p.source || "chosen without a named source" },
-          p.origin,
-        ),
-      ),
-    );
-  };
-  const params = [
-    ...n.params.map((p) => row(p, false)),
-    ...n.uses.flatMap((name) => {
-      const p = tree.param(name);
-      return p ? [row(p, true)] : [];
-    }),
-  ];
-  const suggestions = n.suggestions.map((sg) => {
-    const current = tree.param(sg.name);
-    return el(
-      "div",
-      { class: "suggestion" },
-      el(
-        "span",
-        {},
-        `Muse suggests ${sg.name.replace(/_/g, " ")} = ${fmt(sg.value)} ${sg.unit}`,
-        current ? ` (now ${fmt(current.value)})` : "",
-        sg.source ? el("small", {}, sg.source) : null,
-      ),
-      button("Adopt", () => {
-        tree.append("person", {
-          type: "set_param",
-          name: sg.name,
-          value: sg.value,
-          source: `adopted from ${n.title}`,
-        });
-        recheck();
-      }),
-    );
-  });
-
-  const expand = el(
-    "button",
-    { class: "primary", disabled: busy || n.expanded },
-    n.expanded ? "Expanded" : "Open with Muse",
-  );
-  expand.title = "The exact ceiling is counted by the API and reserved before the request.";
-  expand.addEventListener("click", () => void grow(id, "expand"));
-
-  const proposal = n.proposed
-    ? el(
-        "div",
-        { class: "row" },
-        button("Accept proposal", () => {
-          tree.append("person", { type: "accept", node: id });
-          refresh();
-          select(id);
-        }),
-        button("Reject", () => {
-          tree.append("person", { type: "reject", node: id });
-          panel.hidden = true;
-          refresh();
-        }),
-      )
-    : null;
-
-  panel.hidden = false;
-  const parts: (Node | null)[] = [
-    el("button", { class: "close", "aria-label": "Close" }, "x"),
-    el("p", { class: `status ${status}` }, statusLabel(status)),
-    el("h2", {}, n.title),
-    el("p", { class: "statement" }, n.statement),
-    el(
-      "div",
-      { class: "tags" },
-      el("span", {}, n.axis),
-      el("span", {}, n.criticality),
-      el("span", {}, `risk ${n.risk}`),
-      el("span", {}, `${String(tree.weight(id))} above it`),
-    ),
-    n.rationale ? el("p", { class: "rationale" }, n.rationale) : null,
-    result
-      ? "error" in result
-        ? el("div", { class: "result error" }, `Check could not run: ${result.error}`)
-        : gauge(result, n.check?.description ?? "", assumed.length)
-      : n.check
-        ? null
-        : el(
-            "p",
-            { class: "fine" },
-            n.role === "goal" ? "" : "No calculation: this one is argued, not computed.",
-          ),
-    params.length ? el("table", { class: "params" }, el("tbody", {}, ...params)) : null,
-    ...suggestions,
-    n.check
-      ? el(
-          "details",
-          { class: "code" },
-          el("summary", {}, "Formula written by Muse, evaluated by VIBloom"),
-          el("pre", {}, `${n.check.value}\n  ${n.check.op}\n${n.check.limit}`),
-        )
-      : null,
-    proposal,
-    n.role === "goal"
-      ? null
-      : el(
-          "div",
-          { class: "row" },
-          expand,
-          el("span", { class: "fine" }, `about ${usd(est)} at most`),
-        ),
-  ];
-  panel.replaceChildren(...parts.filter((x): x is Node => x !== null));
-  panel.querySelector(".close")?.addEventListener("click", () => {
-    panel.hidden = true;
-    view.select(undefined);
-    selectedId = undefined;
-  });
+function select(id: string | undefined) {
+  selectedId = id && tree.nodes.has(id) ? id : undefined;
+  if (selectedId) view.focus(selectedId);
+  refresh();
 }
-
-function button(label: string, f: () => void) {
-  const b = el("button", {}, label);
-  b.addEventListener("click", f);
-  return b;
-}
-
-function gauge(r: CheckResult, description: string, assumed: number) {
-  const ratio = r.limit === 0 ? 1 : Math.abs(r.value / r.limit);
-  const fill = Math.min(1, ratio / 2);
-  const bar = el(
-    "div",
-    { class: "bar" },
-    el("i", { style: `width:${String(fill * 100)}%` }),
-    el("b", { style: "left:50%" }),
-  );
-  return el(
-    "div",
-    { class: `result ${r.pass ? "pass" : "fail"}` },
-    el("p", { class: "verdict" }, r.pass ? "Passes the calculation" : "Fails the calculation"),
-    el(
-      "p",
-      { class: "nums" },
-      `${fmt(r.value)} ${r.op} ${fmt(r.limit)} ${r.unit} is ${r.pass ? "true" : "false"}`,
-    ),
-    bar,
-    el("p", { class: "fine" }, description),
-    el(
-      "p",
-      { class: "fine" },
-      "The formula and its numbers come from Muse; a correct evaluation does not prove they model the problem well.",
-    ),
-    assumed
-      ? el(
-          "p",
-          { class: "fine warn" },
-          `Rests on ${String(assumed)} assumed value${assumed === 1 ? "" : "s"}; edit them below to test another case.`,
-        )
-      : null,
-  );
-}
-
-const fmt = (x: number) =>
-  Math.abs(x) >= 1e5 || (Math.abs(x) < 1e-2 && x !== 0)
-    ? x.toExponential(2)
-    : String(Math.round(x * 1000) / 1000);
 
 // After a person edits a number, every check that read it runs again.
 function recheck() {
   for (const n of tree.nodes.values()) if (tree.status(n.id) === "stale") check(n);
   refresh();
-  if (selectedId) select(selectedId);
 }
 
 function exportTree() {
   const blob = new Blob(
     [JSON.stringify({ format: "vibloom-ideas-1", events: tree.events }, null, 1)],
-    {
-      type: "application/json",
-    },
+    { type: "application/json" },
   );
   const a = el("a", { href: URL.createObjectURL(blob), download: "vibloom-tree.json" });
   a.click();
@@ -604,41 +542,52 @@ async function playRecorded() {
   const full = IdeaTree.replay(data.events);
   recorded = true;
   tree = new IdeaTree();
+  chatUsage.length = 0;
+  selectedId = undefined;
   const first = data.events[0];
   if (first?.body.type !== "goal") return;
   tree.append(first.actor, first.body);
   workspace(full.goal);
   for (const e of data.events.slice(1)) {
-    if (e.body.type === "check") continue;
-    if (e.body.type === "grow") {
-      const g = e.body;
-      thinking.hidden = false;
-      thinking.replaceChildren(
-        el("b", {}, "Recorded Muse session"),
-        el("span", { class: "thought" }, g.summary),
-      );
-      for (const n of g.nodes) {
-        ghosts.push({ key: n.id, under: g.under, title: n.title });
-        refresh();
-        await sleep(420);
+    const b = e.body;
+    if (b.type === "check") continue;
+    if (b.type === "grow") {
+      monitor.status(`Recorded Muse session: ${b.summary}`);
+      for (const n of b.nodes) {
+        ghosts.push({ key: n.id, under: b.under, title: n.title });
+        view.render(tree, ghosts);
+        await sleep(380);
       }
       ghosts = [];
-      tree.append(e.actor, g);
-      ledger.entries.push(g.usage);
-      refresh();
-      for (const n of g.nodes) check(n);
+      tree.append(e.actor, b);
+      ledger.entries.push(b.usage);
+      for (const n of b.nodes) check(n);
       refresh();
       await sleep(900);
-    } else if (e.body.type === "repair") {
-      tree.append(e.actor, e.body);
-      ledger.entries.push(e.body.usage);
-      for (const f of e.body.fixes) {
+    } else if (b.type === "repair") {
+      tree.append(e.actor, b);
+      ledger.entries.push(b.usage);
+      for (const f of b.fixes) {
         const n = tree.nodes.get(f.node);
         if (n) check(n);
       }
       refresh();
-    } else tree.append(e.actor, e.body);
+    } else if (b.type === "view") {
+      tree.append(e.actor, b);
+      ledger.entries.push(b.usage);
+      select(b.node);
+      await sleep(1500);
+    } else if (b.type === "chat") {
+      tree.append(e.actor, b);
+      ledger.entries.push(b.usage);
+      chatUsage[tree.chat.length - 1] = b.usage;
+      refresh();
+    } else {
+      tree.append(e.actor, b);
+      if (b.type === "set_param") recheck();
+    }
   }
+  refresh();
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

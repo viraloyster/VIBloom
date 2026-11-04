@@ -59,6 +59,15 @@ marked. If a formula fails to evaluate, Muse repairs it once, in a single
 request. Everything is recorded in a hash-chained log that can be exported
 and replayed.
 
+The workspace has three parts. The tree, on the right, grows as roots that
+thicken toward the trunk. The monitor shows the selected root: the
+comparison VIBloom computed, and for each value it read, where the verdict
+would flip (found by the engine, not the model). Muse can design a live
+visual of what the root is testing; it runs in a sandboxed frame with no
+network, storage or access to the key, and draws only the numbers VIBloom
+hands it. The chat answers in a few sentences, citing the roots it relied
+on, and says which statements are computed and which are its own reasoning.
+
 **Chemistry, in depth.** The first specialised domain, chosen for its
 mathematical depth and because it can be seen: oscillating reactions
 (Belousov-Zhabotinsky, Oregonator models) with a stiff solver checked against
@@ -98,7 +107,6 @@ A recorded session cost about $0.03 for a decomposition and one expansion.
 
 These are directions, not features:
 
-- Views of each experiment designed by Muse and run isolated from the app.
 - Specialists that review a discrepancy from different angles, and a final
   review of broad conclusions.
 - Branches of a tree to experiment without touching the main one.

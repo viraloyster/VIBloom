@@ -23,6 +23,9 @@ export class IdeaTree {
   readonly events: IdeaEvent[] = [];
   readonly nodes = new Map<string, IdeaNode>();
   readonly results = new Map<string, CheckResult | { error: string }>();
+  // Visuals Muse designed for a node, latest last.
+  readonly views = new Map<string, { title: string; html: string }>();
+  readonly chat: { focus: string; question: string; answer: string; cites: string[] }[] = [];
   goal = "";
   mode: Mode = "standard";
 
@@ -109,6 +112,13 @@ export class IdeaTree {
         p.source = b.source;
         break;
       }
+      case "view":
+        if (!this.nodes.has(b.node)) throw new Error(`unknown node ${b.node}`);
+        this.views.set(b.node, { title: b.title, html: b.html });
+        break;
+      case "chat":
+        this.chat.push({ focus: b.focus, question: b.question, answer: b.answer, cites: b.cites });
+        break;
       case "accept":
       case "reject": {
         const n = this.nodes.get(b.node);

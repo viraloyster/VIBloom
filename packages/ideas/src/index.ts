@@ -5,6 +5,10 @@ export {
   EXPAND,
   GROWTH_SCHEMA,
   REPAIR,
+  VIEW,
+  VIEW_SCHEMA,
+  CHAT,
+  CHAT_SCHEMA,
   REPAIR_SCHEMA,
   type GrownNode,
 } from "./protocol";
@@ -20,5 +24,5 @@ export {
   type MuseConfig,
 } from "./muse";
 export { IdeaTree, type Status } from "./tree";
-export { runCheck } from "./check";
+export { runCheck, thresholds, type Threshold } from "./check";
 export { compare, evaluate, MAX_EXPR, OPS, type Op } from "./expr";

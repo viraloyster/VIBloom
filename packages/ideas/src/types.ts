@@ -76,6 +76,8 @@ export type EventBody =
   | { type: "check"; node: string; result: CheckResult | { error: string } }
   | { type: "repair"; fixes: { node: string; value: string; limit: string }[]; usage: Usage }
   | { type: "set_param"; name: string; value: number; source: string }
+  | { type: "view"; node: string; title: string; html: string; usage: Usage }
+  | { type: "chat"; focus: string; question: string; answer: string; cites: string[]; usage: Usage }
   | { type: "accept"; node: string }
   | { type: "reject"; node: string };
 

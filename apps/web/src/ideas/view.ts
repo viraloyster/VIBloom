@@ -3,10 +3,11 @@
 
 import type { IdeaNode, IdeaTree, Status } from "@vibloom/ideas";
 import { el, svg } from "../dom";
-import { rootPath } from "../layout";
+import { rng } from "../canopy";
+import { hash, rootSystem, TRUNK } from "../layout";
 
-const DX = 230;
-const DY = 190;
+const DX = 112;
+const DY = 165;
 const CROWN_W = 760;
 const CROWN_H = 400;
 
@@ -37,21 +38,79 @@ function place(tree: IdeaTree, ghosts: Ghost[]): Map<string, Pos> {
   for (const g of ghosts) kids.set(g.under, [...(kids.get(g.under) ?? []), `ghost:${g.key}`]);
   const pos = new Map<string, Pos>();
   let column = 0;
-  const walk = (id: string, depth: number): number => {
+  const walk = (id: string, depth: number, nth = 0): number => {
     const c = kids.get(id) ?? [];
     let x: number;
     if (c.length === 0) x = column++ * DX;
     else {
-      const xs = c.map((k) => walk(k, depth + 1));
+      const xs = c.map((k, i) => walk(k, depth + 1, i));
       x = ((xs[0] ?? 0) + (xs.at(-1) ?? 0)) / 2;
     }
-    pos.set(id, { x, y: depth * DY });
+    // Siblings alternate in depth, as real roots do, so a wide level stays narrow.
+    pos.set(id, { x, y: depth * DY + (depth > 0 && nth % 2 === 1 ? 52 : 0) });
     return x;
   };
   walk("goal", 0);
   const root = pos.get("goal")?.x ?? 0;
   for (const p of pos.values()) p.x -= root;
   return pos;
+}
+
+type Pt = [number, number];
+
+// A root as a filled shape that tapers from parent to child, with a slight
+// wander seeded by its id so it keeps the same form on every redraw.
+function rootShape(
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  seed: string,
+  w0: number,
+  w1: number,
+) {
+  const r = rng(hash(seed));
+  const sway = (r() - 0.5) * 50;
+  const c: Pt[] = [
+    [ax, ay],
+    [ax + (bx - ax) * 0.1 + sway, ay + (by - ay) * 0.5],
+    [bx - (bx - ax) * 0.3 - sway * 0.4, by - (by - ay) * 0.4],
+    [bx, by],
+  ];
+  const at = (t: number): Pt => {
+    const u = 1 - t;
+    const k = [u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t];
+    return [0, 1].map((i) => c.reduce((s, p, j) => s + (k[j] ?? 0) * (p[i] ?? 0), 0)) as Pt;
+  };
+  const pts = Array.from({ length: 19 }, (_, i) => at(i / 18));
+  const left: Pt[] = [];
+  const right: Pt[] = [];
+  pts.forEach((p, i) => {
+    const q = pts[Math.min(i + 1, 18)] ?? p;
+    const o = pts[Math.max(i - 1, 0)] ?? p;
+    const dx = q[0] - o[0];
+    const dy = q[1] - o[1];
+    const len = Math.hypot(dx, dy) || 1;
+    // Slightly knotted, like bark.
+    const w = (w0 + (w1 - w0) * (i / 18)) * (1 + 0.12 * Math.sin(i * 1.7 + (r() - 0.5)));
+    left.push([p[0] - (dy / len) * w, p[1] + (dx / len) * w]);
+    right.push([p[0] + (dy / len) * w, p[1] - (dx / len) * w]);
+  });
+  const f = ([x, y]: Pt) => `${x.toFixed(1)},${y.toFixed(1)}`;
+  const body = `M${left.map(f).join(" L")} L${right.reverse().map(f).join(" L")} Z`;
+  const core = `M${pts.map(f).join(" L")}`;
+  // Fine rootlets along the way, the way real roots feather out.
+  const hairs: string[] = [];
+  for (const t of [0.35, 0.6, 0.85]) {
+    if (r() < 0.35) continue;
+    const [x, y] = at(t);
+    const ang = Math.PI / 2 + (r() - 0.5) * 2.4;
+    const len = 14 + r() * 22;
+    hairs.push(
+      `M${f([x, y])} Q${f([x + Math.cos(ang) * len * 0.6 + (r() - 0.5) * 8, y + Math.sin(ang) * len * 0.5])} ${f([x + Math.cos(ang) * len, y + Math.sin(ang) * len])}`,
+    );
+  }
+  return { body, core, hairs };
 }
 
 const STATUS_LABEL: Record<Status, string> = {
@@ -84,7 +143,17 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     d: "M-34,-110 C-26,-60 -40,-30 -60,-14 L60,-14 C40,-30 26,-60 34,-110 Z",
     class: "trunk",
   });
-  stage.append(ground, crown, trunk, roots, marks);
+  // Ornamental roots under the trunk: decoration, never data.
+  const decor = svg("g", {
+    class: "decor",
+    transform: `translate(${String(-TRUNK.x)} ${String(-TRUNK.y - 14)})`,
+  });
+  for (const st of rootSystem(520, 7)) {
+    decor.append(
+      svg("path", { d: st.d, "stroke-width": st.width * 0.8, class: `strand g${String(st.gen)}` }),
+    );
+  }
+  stage.append(decor, ground, crown, trunk, roots, marks);
   const canvas = svg("svg", { class: "canvas", "aria-label": "Idea tree" }, stage);
   host.append(canvas);
 
@@ -99,8 +168,23 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
   // Drawn positions glide toward the layout, so a reflow never jumps.
   const drawn = new Map<string, Pos>();
   const groups = new Map<string, SVGGElement>();
-  const paths = new Map<string, { el: SVGPathElement; parent: string }>();
+  const paths = new Map<string, { el: SVGGElement; parent: string }>();
   let links: { el: SVGPathElement; a: string; b: string }[] = [];
+  let parentOf = new Map<string, string | null>();
+
+  // Names stay readable: the goal, the selected root and its neighbours carry
+  // labels; the rest show theirs on hover.
+  const labels = () => {
+    const near = new Set<string>(["goal"]);
+    if (selected) {
+      near.add(selected);
+      const up = parentOf.get(selected);
+      if (up) near.add(up);
+      for (const [id, par] of parentOf) if (par === selected) near.add(id);
+    } else for (const [id, par] of parentOf) if (par === "goal") near.add(id);
+    for (const [id, g] of groups)
+      g.classList.toggle("labeled", near.has(id) || id.startsWith("ghost:"));
+  };
 
   const ease = (a: number, b: number, f: number) => (Math.abs(b - a) < 0.05 ? b : a + (b - a) * f);
 
@@ -109,11 +193,12 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     if (r.width === 0 || goals.size === 0) return;
     const xs = [...goals.values()].map((p) => p.x);
     const ys = [...goals.values()].map((p) => p.y);
-    const minX = Math.min(...xs, -CROWN_W / 2) - 130;
-    const maxX = Math.max(...xs, CROWN_W / 2) + 130;
-    const minY = -CROWN_H - 30;
-    const maxY = Math.max(...ys) + 90;
-    const k = Math.min(1.1, (r.width - 40) / (maxX - minX), (r.height - 110) / (maxY - minY));
+    // Frame the roots; the crown may run past the column's sides.
+    const minX = Math.min(...xs, -180) - 80;
+    const maxX = Math.max(...xs, 180) + 80;
+    const minY = -CROWN_H * 0.9;
+    const maxY = Math.max(...ys) + 80;
+    const k = Math.min(1.2, (r.width - 20) / (maxX - minX), (r.height - 40) / (maxY - minY));
     // The stage origin sits at 42% of the height; aim the box centre at the screen centre.
     target = {
       x: -((minX + maxX) / 2) * k,
@@ -122,7 +207,39 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     };
   };
 
+  // The tree can never be dragged or zoomed out of sight: when it fits, it
+  // stays whole on screen; when it is larger, it always covers the view.
+  const fitAxis = (lo: number, hi: number, size: number) => {
+    if (hi - lo > size * 0.9) {
+      if (lo > size * 0.05) return size * 0.05 - lo;
+      if (hi < size * 0.95) return size * 0.95 - hi;
+      return 0;
+    }
+    if (lo < 0) return -lo;
+    if (hi > size) return size - hi;
+    return 0;
+  };
+  const clamp = () => {
+    const r = canvas.getBoundingClientRect();
+    if (r.width === 0 || goals.size === 0) return;
+    const xs = [...goals.values()].map((p) => p.x);
+    const ys = [...goals.values()].map((p) => p.y);
+    const k = target.k;
+    const dx = fitAxis(
+      r.width / 2 + target.x + (Math.min(...xs) - 90) * k,
+      r.width / 2 + target.x + (Math.max(...xs) + 90) * k,
+      r.width,
+    );
+    const dy = fitAxis(
+      r.height * 0.42 + target.y + -CROWN_H * 0.9 * k,
+      r.height * 0.42 + target.y + (Math.max(...ys) + 70) * k,
+      r.height,
+    );
+    if (dx || dy) target = { ...target, x: target.x + dx, y: target.y + dy };
+  };
+
   const tick = () => {
+    clamp();
     view = {
       x: ease(view.x, target.x, 0.12),
       y: ease(view.y, target.y, 0.12),
@@ -146,20 +263,26 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
       groups.get(id)?.setAttribute("transform", `translate(${String(nx)} ${String(ny)})`);
     }
     if (moved) {
-      for (const [id, { el: path, parent }] of paths) {
-        const p = drawn.get(id);
-        const q = drawn.get(parent);
-        if (p && q)
-          path.setAttribute(
-            "d",
-            rootPath(q.x, q.y + (parent === "goal" ? 0 : 10), p.x, p.y - 8, id),
-          );
-      }
+      for (const [id, { el: g, parent }] of paths) shapeRoot(g, id, parent);
       for (const l of links) l.el.setAttribute("d", linkPath(l.a, l.b));
     }
     requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
+
+  // Thick near the trunk, thin toward the tips.
+  const shapeRoot = (g: SVGGElement, id: string, parent: string) => {
+    const p = drawn.get(id);
+    const q = drawn.get(parent);
+    if (!p || !q) return;
+    const depth = Math.max(0, Math.round(q.y / DY));
+    const w0 = Math.max(1.1, 6 - depth * 1.6);
+    const s = rootShape(q.x, q.y + (parent === "goal" ? 0 : 8), p.x, p.y - 8, id, w0, w0 * 0.42);
+    const [body, core, hairs] = [...g.children];
+    body?.setAttribute("d", s.body);
+    core?.setAttribute("d", s.core);
+    hairs?.setAttribute("d", s.hairs.join(" "));
+  };
 
   const linkPath = (a: string, b: string) => {
     const p = drawn.get(a) ?? { x: 0, y: 0 };
@@ -172,7 +295,7 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     (e) => {
       e.preventDefault();
       autoFit = false;
-      const k = Math.min(2.2, Math.max(0.2, target.k * Math.exp(-e.deltaY * 0.0012)));
+      const k = Math.min(2.2, Math.max(0.3, target.k * Math.exp(-e.deltaY * 0.0012)));
       const r = canvas.getBoundingClientRect();
       const mx = e.clientX - r.left - r.width / 2;
       const my = e.clientY - r.top - r.height * 0.42;
@@ -242,7 +365,7 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
       marks.replaceChildren();
       groups.clear();
       paths.clear();
-      const fresh: SVGPathElement[] = [];
+      const fresh: SVGGElement[] = [];
       const all = [
         ...[...tree.nodes.values()].map((n) => ({
           id: n.id,
@@ -270,11 +393,14 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
         const p = drawn.get(id);
         if (!p) continue;
         if (parent) {
-          const q = drawn.get(parent) ?? { x: 0, y: 0 };
-          const path = svg("path", {
-            d: rootPath(q.x, q.y + (parent === "goal" ? 0 : 10), p.x, p.y - 8, id),
-            class: `root ${status}`,
-          });
+          const path = svg(
+            "g",
+            { class: `root ${status}` },
+            svg("path", { class: "body" }),
+            svg("path", { class: "core" }),
+            svg("path", { class: "hairs" }),
+          );
+          shapeRoot(path, id, parent);
           roots.append(path);
           paths.set(id, { el: path, parent });
           if (!seen.has(id)) fresh.push(path);
@@ -303,20 +429,27 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
         });
       }
       for (const { id } of all) if (!id.startsWith("ghost:")) seen.add(id);
+      parentOf = new Map(all.map((a) => [a.id, a.parent]));
+      labels();
       if (autoFit) fit();
     },
     select(id) {
       selected = id;
       for (const g of marks.querySelectorAll(".node"))
         g.classList.toggle("selected", g.getAttribute("data-id") === id);
+      labels();
     },
     focus(id) {
       const p = goals.get(id);
       if (!p) return;
       autoFit = false;
-      // Keep the zoom; only bring the node into view, beside the side panel.
-      const shift = window.innerWidth > 900 ? 200 : 0;
-      target = { ...target, x: -p.x * target.k - shift, y: -p.y * target.k + 40 };
+      // Only move when the node is out of view, and keep the zoom.
+      const r = canvas.getBoundingClientRect();
+      const sx = r.width / 2 + target.x + p.x * target.k;
+      const sy = r.height * 0.42 + target.y + p.y * target.k;
+      if (sx > r.width * 0.1 && sx < r.width * 0.9 && sy > r.height * 0.1 && sy < r.height * 0.9)
+        return;
+      target = { ...target, x: -p.x * target.k, y: -p.y * target.k + 40 };
     },
     busy(id) {
       working = id;
