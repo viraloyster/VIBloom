@@ -155,7 +155,7 @@ export function steps(tree: IdeaTree): Step[] {
               ...(earlier && !settles
                 ? [
                     {
-                      text: `Muse not asked: run #${String(earlier.seq)} already settled it`,
+                      text: `Muse not asked: ${earlier.purpose === "map" ? "the recipe map" : "run"} #${String(earlier.seq)} already settled it`,
                       tone: "plain" as const,
                     },
                   ]

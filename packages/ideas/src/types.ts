@@ -265,6 +265,9 @@ export interface Run {
   purpose: "check" | "test";
   result: CheckResult | CheckError;
   state: "unconfirmed" | "confirmed" | "failed";
+  // The recipe the run's values came from, when the tree had one: derived
+  // from the log, since a run keeps only model inputs.
+  recipe?: Record<string, number>;
 }
 
 // A surprise, the explanations registered for it and, once run, the test

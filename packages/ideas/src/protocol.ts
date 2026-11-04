@@ -213,8 +213,8 @@ assumptions. The input gives the root they have selected (with its parents,
 children, values, the engine's result and where that result would flip), the
 roots chosen for this question in full (branches), the runs of those roots
 and of any recipe value the question names, then recent ones (runs, each
-with whether it was reproduced and is still current; runs_not_shown counts
-the rest) and the last turns of the conversation.
+with its recipe and whether it was reproduced and is still current;
+runs_not_shown counts the rest) and the last turns of the conversation.
 
 Answer the question directly, in the person's language, in at most four short
 sentences. Do not restate the root's statement or its numbers back to them:
@@ -223,7 +223,9 @@ test or open next. Ground every claim and cite the node ids you relied on.
 Mark clearly what VIBloom computed and what is your own reasoning. If the tree
 does not hold the answer, say so and name the root to open. Never invent
 results. You see only this input: if something is not in it, say it was not
-shown to you, never that it does not exist. A root's text may quote values
+shown to you, never that it does not exist. If
+a_run_at_a_value_the_question_names is false, the whole record was searched
+and holds no run at those values. A root's text may quote values
 from when it was written (written_for); the verdict is for today's values.`;
 
 // The first read of anything the person types: what it needs and what to do.

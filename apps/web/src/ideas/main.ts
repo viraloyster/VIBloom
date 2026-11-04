@@ -871,7 +871,7 @@ async function routeOf(question: string, focus: string) {
           ),
           runs: tree.runs.map(
             (r) =>
-              `#${String(r.seq)} ${r.node} ${r.purpose} ${RECIPE_PARAMS.map((k) => `${k}=${String(r.result.inputs?.[k] ?? "-")}`).join(" ")} ${"error" in r.result ? r.result.error : r.result.pass ? "holds" : "fails"}`,
+              `#${String(r.seq)} ${r.node} ${r.purpose} ${RECIPE_PARAMS.map((k) => `${k}=${String(r.recipe?.[k] ?? "-")}`).join(" ")} ${"error" in r.result ? r.result.error : r.result.pass ? "holds" : "fails"}`,
           ),
           params,
         }),
@@ -921,7 +921,7 @@ async function answer(question: string, focus: string, routed: string[]) {
   // whatever the read chose: evidence is never left out by a routing miss.
   const said = numbersIn(question).map((x) => x.value);
   const named = tree.runs
-    .filter((r) => RECIPE_PARAMS.some((k) => said.includes(r.result.inputs?.[k] ?? NaN)))
+    .filter((r) => RECIPE_PARAMS.some((k) => said.includes(r.recipe?.[k] ?? NaN)))
     .map((r) => r.node);
   const consulted = [...new Set([...routed, ...named])]
     .filter((id) => id !== focus && tree.nodes.has(id))
@@ -953,8 +953,14 @@ async function answer(question: string, focus: string, routed: string[]) {
         // question names first, then recent ones; omitted says how many
         // were left out, so absence is never read as evidence.
         ...(() => {
-          const { runs, omitted } = tree.runIndex([focus, ...consulted], question);
-          return { runs, runs_not_shown: omitted };
+          const x = tree.runIndex([focus, ...consulted], question);
+          return {
+            runs: x.runs,
+            runs_not_shown: x.omitted,
+            ...(x.named_values_found === undefined
+              ? {}
+              : { a_run_at_a_value_the_question_names: x.named_values_found }),
+          };
         })(),
         ...recipeContext(),
         ...(image ? { image: "what the monitor shows the person right now" } : {}),
@@ -1045,7 +1051,7 @@ async function experiment(n: IdeaNode) {
     made
       ? `Muse predicts ${n.title} ${made.expect}. Running the experiment...`
       : settled
-        ? `Running ${n.title}; its outcome is already settled by run #${String(settled.seq)}, so Muse is not asked to predict it.`
+        ? `Running ${n.title}; its outcome is already settled by ${settled.purpose === "map" ? "the recipe map" : "run"} #${String(settled.seq)}, so Muse is not asked to predict it.`
         : `Running the Oregonator experiment for ${n.title}...`,
     true,
   );

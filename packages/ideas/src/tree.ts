@@ -48,6 +48,8 @@ export class IdeaTree {
   readonly lessons: Lesson[] = [];
   readonly predictions: Prediction[] = [];
   readonly runs: Run[] = [];
+  // Concluded recipe-map cells, by the model values they ran with.
+  readonly mapCells: { seq: number; node: string; inputs: Record<string, number> }[] = [];
   // What the engine refused, in order; outside the hash chain on purpose.
   readonly refused: Refusal[] = [];
   // Visuals Muse designed for a node, latest last.
@@ -199,6 +201,7 @@ export class IdeaTree {
             purpose: "check",
             result: structuredClone(b.result),
             state: "unconfirmed",
+            ...this.recipeOf(this.scope()),
           });
           this.results.set(b.node, b.result);
           // A prediction is settled for good by the first run of its values.
@@ -315,6 +318,15 @@ export class IdeaTree {
           )
         )
           throw new Error("a map cell is off its axes");
+        // Each concluded cell settles the reduction question at its model
+        // values, as a run would: a later prediction there is not blind.
+        const own = this.ownValues();
+        for (const c of b.cells) {
+          if (c.excluded || c.error !== undefined) continue;
+          const recipe = { ...own, ...b.center, bromate: c.bromate, malonic_acid: c.malonic_acid };
+          const inputs = { ...recipe, ...recipeDerived(recipe) };
+          this.mapCells.push({ seq: this.events.length, node: b.node, inputs });
+        }
         break;
       }
       case "predict": {
@@ -435,6 +447,7 @@ export class IdeaTree {
           purpose: "test",
           result: structuredClone(b.result),
           state: "unconfirmed",
+          ...this.recipeOf(this.testScope(l)),
         });
         break;
       }
@@ -533,14 +546,28 @@ export class IdeaTree {
   // A run already in the log that settles this node's question at these
   // values: one of the same question, or of the reduction question, which
   // integrates both models and so settles all three. Any node, check or test.
-  settledBy(node: string, inputs: Record<string, number>): Run | undefined {
+  settledBy(
+    node: string,
+    inputs: Record<string, number>,
+  ): { seq: number; purpose: Run["purpose"] | "map" } | undefined {
     const spec = this.nodes.get(node)?.check;
     if (spec?.kind !== "oregonator") return undefined;
-    return this.runs.find((r) => {
+    const run = this.runs.find((r) => {
       const c = this.nodes.get(r.node)?.check;
       if (c?.kind !== "oregonator" || !sameRun(r.result.inputs ?? {}, inputs)) return false;
       return c.question === "reduction_keeps_period" || c.question === spec.question;
     });
+    // A map cell runs the reduction experiment, which settles all three.
+    const cell = this.mapCells.find((m) => sameRun(m.inputs, inputs));
+    if (run && (!cell || run.seq < cell.seq)) return run;
+    return cell ? { seq: cell.seq, purpose: "map" } : undefined;
+  }
+
+  // The recipe part of a set of values, if all of it is there.
+  private recipeOf(values: Record<string, number>): { recipe?: Record<string, number> } {
+    return RECIPE_PARAMS.every((k) => values[k] !== undefined)
+      ? { recipe: Object.fromEntries(RECIPE_PARAMS.map((k) => [k, values[k] ?? NaN])) }
+      : {};
   }
 
   latestRun(node: string): Run | undefined {
@@ -1018,25 +1045,34 @@ export class IdeaTree {
     ]);
   }
 
-  // The runs a routed answer is given, oldest first, at most limit: first
-  // every run on the roots it is about and every run at a recipe value the
-  // question names, then the most recent others. Each says whether it was
+  // The runs a routed answer is given, oldest first, at most limit, in
+  // three tiers: runs at a recipe value the question names, then runs on the
+  // roots it is about, then the most recent others. Each says whether it was
   // reproduced here, whether it is still the root's current run, and the
-  // versions it ran with; omitted counts what did not fit.
+  // recipe and versions it ran with; omitted counts what did not fit, and
+  // named_values_found says whether a value the question names matched any
+  // run in the tree.
   runIndex(about: string[], question: string, limit = RUN_INDEX) {
     const said = numbersIn(question).map((x) => x.value);
     const near = (v: number | undefined) =>
       v !== undefined && said.some((x) => Math.abs(x - v) <= 1e-9 * Math.abs(v));
-    const wanted = (r: Run) =>
-      about.includes(r.node) || RECIPE_PARAMS.some((k) => near(r.result.inputs?.[k]));
-    const first = this.runs.filter(wanted).slice(-limit);
-    const room = limit - first.length;
-    const rest = room > 0 ? this.runs.filter((r) => !wanted(r)).slice(-room) : [];
-    const picked = [...first, ...rest].sort((x, y) => x.seq - y.seq);
+    const named = (r: Run) => RECIPE_PARAMS.some((k) => near(r.recipe?.[k]));
+    const tiers = [
+      this.runs.filter(named),
+      this.runs.filter((r) => !named(r) && about.includes(r.node)),
+      this.runs.filter((r) => !named(r) && !about.includes(r.node)),
+    ];
+    const kept: Run[] = [];
+    for (const tier of tiers) {
+      const room = limit - kept.length;
+      if (room > 0) kept.push(...tier.slice(-room));
+    }
+    const picked = kept.sort((x, y) => x.seq - y.seq);
     const runs = picked.map((r) => ({
       seq: r.seq,
       node: r.node,
       purpose: r.purpose,
+      ...(r.recipe ? { recipe: r.recipe } : {}),
       values: r.result.inputs,
       reproduced_here: r.state,
       current:
@@ -1065,7 +1101,11 @@ export class IdeaTree {
               : {}),
           }),
     }));
-    return { runs, omitted: this.runs.length - runs.length };
+    return {
+      runs,
+      omitted: this.runs.length - runs.length,
+      ...(said.length ? { named_values_found: tiers[0]?.length !== 0 } : {}),
+    };
   }
 
   // The values a root's own text may quote that have changed since Muse

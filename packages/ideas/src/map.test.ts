@@ -160,13 +160,15 @@ describe("the recipe map", () => {
 });
 
 describe("the runs a routed answer is given", () => {
-  it("keeps the first run a question names when there are more than fit", async () => {
+  // Thirty runs on the same experiment root, each at its own bromate, with
+  // the result shape a real run has: model inputs, no recipe.
+  const many = async () => {
     const t = await session();
-    const node = [...t.nodes.values()].find((n) => n.check?.kind === "oregonator");
+    const node = [...t.nodes.values()].find(
+      (n) => n.check?.kind === "oregonator" && n.check.question === "reduction_keeps_period",
+    );
     const base = node ? t.latestRun(node.id)?.result : undefined;
     if (!node || !base || "error" in base) throw new Error("no run");
-    // Thirty runs at thirty bromate values; the result is a recorded one
-    // with its inputs set to each value, enough for the index.
     for (let i = 1; i <= 30; i++) {
       t.append("person", {
         type: "set_param",
@@ -174,22 +176,68 @@ describe("the runs a routed answer is given", () => {
         value: 0.1 + i / 1000,
         source: "test",
       });
-      const inputs = {
-        ...base.inputs,
-        ...Object.fromEntries(SIM_PARAMS.map((k) => [k, t.scope()[k] ?? NaN])),
-        bromate: t.scope().bromate ?? NaN,
-      };
+      const scope = t.scope();
+      const inputs = Object.fromEntries(
+        [...SIM_PARAMS, "time_scale_s", "recipe_version"].map((k) => [k, scope[k] ?? NaN]),
+      );
       t.append("engine", { type: "check", node: node.id, result: { ...base, inputs } });
     }
-    const asked = t.runIndex(["goal"], "What did the run at bromate 0.101 M give?", 24);
+    return { t, node };
+  };
+
+  it("keeps the run a question names, even behind 30 on the root asked about", async () => {
+    const { t, node } = await many();
+    expect(t.runs.at(-1)?.result.inputs?.bromate).toBeUndefined();
+    const asked = t.runIndex([node.id], "What did the run at bromate 0.101 M give?", 24);
     expect(asked.runs).toHaveLength(24);
     expect(asked.omitted).toBe(t.runs.length - 24);
-    expect(asked.runs.some((r) => r.values?.bromate === 0.101)).toBe(true);
-    const first = asked.runs.find((r) => r.values?.bromate === 0.101);
+    expect(asked.named_values_found).toBe(true);
+    const first = asked.runs.find((r) => r.recipe?.bromate === 0.101);
     expect(first?.current).toBe("superseded by a later run");
     expect(first?.reproduced_here).toBe("unconfirmed");
-    // Without the value in the question, the oldest run gives way to recent ones.
-    const plain = t.runIndex(["goal"], "What happened?", 24);
-    expect(plain.runs.some((r) => r.values?.bromate === 0.101)).toBe(false);
+    // Without the value, the root's 24 latest runs fill the index.
+    const plain = t.runIndex([node.id], "What happened?", 24);
+    expect(plain.runs.some((r) => r.recipe?.bromate === 0.101)).toBe(false);
+    expect(plain.runs.every((r) => r.node === node.id)).toBe(true);
+    // A value no run has: the record says so.
+    expect(t.runIndex([node.id], "And at bromate 0.5 M?", 24).named_values_found).toBe(false);
+    // Replayed, the runs keep their recipes.
+    expect(IdeaTree.replay(t.events).runs.some((r) => r.recipe?.bromate === 0.101)).toBe(true);
   });
+
+  it("does not count a prediction as blind where a recorded map already ran", async () => {
+    const t = await session();
+    const setup = mapSetup(t);
+    if (typeof setup === "string") throw new Error(setup);
+    const recipe = { ...setup.recipe, bromate: setup.axes.bromate[5] ?? NaN };
+    const run = runCell(t, setup, recipe);
+    t.append(
+      "engine",
+      mapRecord(setup, [{ recipe, run, v: verdict(t, setup, recipe, run) }], undefined),
+    );
+    const mapSeq = t.events.length - 1;
+    // Another way to the same cell: the person sets the recipe by hand.
+    t.append("person", {
+      type: "set_param",
+      name: "bromate",
+      value: recipe.bromate,
+      source: "test",
+    });
+    const id = [...t.nodes.values()].find((n) => n.check?.kind === "oregonator")?.id ?? "";
+    const scope = t.scope();
+    const inputs = Object.fromEntries(SIM_PARAMS.map((k) => [k, scope[k] ?? NaN]));
+    expect(t.settledBy(id, inputs)).toEqual({ seq: mapSeq, purpose: "map" });
+    t.append("muse", {
+      type: "predict",
+      id: "after-map",
+      node: id,
+      inputs: scope,
+      expect: "holds",
+      confidence: 0.7,
+      reason: "",
+      uses: [],
+      usage: { model: "m", input: 0, cached: 0, output: 0, reasoning: 0, cost: 0 },
+    });
+    expect(t.predictions.find((p) => p.id === "after-map")?.blind).toBe(false);
+  }, 60000);
 });

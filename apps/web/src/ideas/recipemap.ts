@@ -115,11 +115,15 @@ function mapBody(
   const used = shown.filter(([k]) => modelled.has(k));
   const unused = shown.filter(([k]) => !modelled.has(k));
   const list = (xs: [string, number][]) =>
-    xs.map(([k, v]) => `${k.replace(/_/g, " ")} ${num(v)}${unit(k)}`).join(", ");
+    xs
+      .map(
+        ([k, v]) => `${k === "acid" ? "acid as [H+]" : k.replace(/_/g, " ")} ${num(v)}${unit(k)}`,
+      )
+      .join(", ");
   const fixed = el(
     "p",
     { class: "fine map-fixed" },
-    `Fixed, as in the tree, and used by the model: ${list(used) || "none"}. Recipe conversion v${String(RECIPE_VERSION)}, solver v${String(SOLVER_VERSION)}, reduction tolerance ${pct(tolerance)}${target && target.kind !== "oregonator" ? `, target ${target.value} ${target.op} ${target.limit} ${target.unit}` : ", no period target in the tree"}.${unused.length ? ` Other values in the tree, not model inputs: ${list(unused)}.` : ""}`,
+    `Fixed, as in the tree, and used by the model: ${list(used) || "none"}. Initial state "far" from the cycle, the same for every cell. Recipe conversion v${String(RECIPE_VERSION)}, solver v${String(SOLVER_VERSION)}, reduction tolerance ${pct(tolerance)}${target && target.kind !== "oregonator" ? `, target ${target.value} ${target.op} ${target.limit} ${target.unit}` : ", no period target in the tree"}.${unused.length ? ` Other values in the tree, not model inputs: ${list(unused)}.` : ""}`,
   );
   const grid = el("div", {
     class: "map-grid",
@@ -146,7 +150,7 @@ function mapBody(
     const rows: [string, string][] = [
       [
         "Recipe",
-        `bromate ${num(c.recipe.bromate)} M, malonic acid ${num(c.recipe.malonic_acid)} M, acid ${num(c.recipe.acid)} M`,
+        `bromate ${num(c.recipe.bromate)} M, malonic acid ${num(c.recipe.malonic_acid)} M, acid as [H+] ${num(c.recipe.acid)} M`,
       ],
     ];
     const sc = cellScope(tree, c.recipe);

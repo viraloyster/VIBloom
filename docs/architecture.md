@@ -173,8 +173,16 @@ every experiment while Muse is connected, with these rules in
   run, explain loop), or open the recipe map. The engine keeps only roots and
   parameters that exist. The answer gets the selected root, the roots the
   read chose and those whose runs match values in the question, in full, plus
-  every run in the tree; the prompt says that what is not in the input was not
-  shown, not that it does not exist.
+  up to 24 runs in three tiers: runs at a recipe value the question names
+  (each run keeps the recipe it came from, derived from the log), then runs
+  on the roots it is about, then recent ones. Each carries its recipe, whether
+  it was reproduced here and whether it is still current; the input says how
+  many runs were left out and whether any run at the named values exists. The
+  prompt says that what is not in the input was not shown, not that it does
+  not exist.
+- A concluded recipe-map cell settles the reduction question at its model
+  values like a run: a later prediction there is kept but not blind, and the
+  experiment runs without asking Muse.
 - A root's text is Muse's, written once. The engine keeps the values each
   root was written with; when a value its text quotes has changed, the
   monitor says so next to the verdict, which is always for today's values.
