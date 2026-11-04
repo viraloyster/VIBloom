@@ -100,8 +100,9 @@ describe("the recipe map", () => {
     const inputs = Object.fromEntries(
       ["s", "q", "eps", "eps_prime"].map((k) => [k, t.scope()[k] ?? NaN]),
     );
-    // The app runs it without asking Muse: the map's run settles it.
-    expect(t.settledBy("full-oscillates", inputs)?.seq).toBe(t.events.length - 1);
+    // The app runs it without asking Muse: a run at these values settles it.
+    // Here the first is the recorded lesson's test, which ran 0.3 M bromate.
+    expect(t.settledBy("full-oscillates", inputs)?.purpose).toBe("test");
     t.append("muse", {
       type: "predict",
       id: "p-map",
