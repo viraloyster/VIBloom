@@ -80,6 +80,13 @@ the recorded session:
    explanations; the engine's test contradicts one and is consistent with the
    other (eliminating bromide removes the delay that times the cycle).
 
+The **Process** view shows the same session as a timeline read from the log:
+each step says whether Muse, the engine or the person took it, what went in,
+what came out, what it cost and which log entry holds it, and lights the
+roots it touched. Whatever the engine refused (an off-protocol root, a repair
+that changed more than a name, a value the recipe already sets) is listed in
+place, kept beside the log without changing its state.
+
 The monitor shows the period in seconds, a beaker changing colour at that
 rhythm (real time or a stated speed-up) and both models' concentrations side
 by side.

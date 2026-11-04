@@ -1140,3 +1140,29 @@ describe("a real recipe in the tree", () => {
     ).toThrow(/no parameter/);
   }, 60000);
 });
+
+describe("the audit of refusals", () => {
+  it("keeps what the engine refused beside the log, without changing its state", () => {
+    const t = new IdeaTree();
+    t.append("person", { type: "goal", text: "g", mode: "standard" });
+    const before = t.events.length;
+    expect(() =>
+      t.append("muse", {
+        type: "hypotheses",
+        id: "h1",
+        prediction: "nope",
+        candidates: [],
+        test: { param: "s", value: 2 },
+        open: "",
+        usage,
+      }),
+    ).toThrow(/unknown prediction/);
+    expect(t.events.length).toBe(before);
+    expect(t.refused).toEqual([
+      { at: before, actor: "muse", what: "hypotheses", reason: "unknown prediction nope" },
+    ]);
+    // A root off the protocol is dropped and said so.
+    t.admit("goal", [{ ...grown("bad"), axis: "nowhere" }]);
+    expect(t.refused.at(-1)?.reason).toMatch(/did not follow the protocol: bad/);
+  });
+});

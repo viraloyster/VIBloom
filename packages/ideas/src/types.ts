@@ -181,6 +181,15 @@ export type EventBody =
   | { type: "accept"; node: string }
   | { type: "reject"; node: string };
 
+// Something the engine refused: kept for audit beside the log, never part of
+// its state. at is the log length when it was refused.
+export interface Refusal {
+  at: number;
+  actor: string;
+  what: string;
+  reason: string;
+}
+
 export interface IdeaEvent {
   seq: number;
   prev: string;

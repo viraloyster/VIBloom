@@ -25,6 +25,8 @@ export interface TreeView {
   select(id: string | undefined): void;
   focus(id: string): void;
   busy(id: string | undefined): void;
+  // Light up the roots a step of the process touched.
+  mark(ids: string[]): void;
 }
 
 interface Pos {
@@ -488,6 +490,11 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
       parentOf = new Map(all.map((a) => [a.id, a.parent]));
       labels();
       if (autoFit) fit();
+    },
+    mark(ids) {
+      const lit = new Set(ids);
+      for (const g of marks.querySelectorAll(".node"))
+        g.classList.toggle("lit", lit.has(g.getAttribute("data-id") ?? ""));
     },
     select(id) {
       selected = id;

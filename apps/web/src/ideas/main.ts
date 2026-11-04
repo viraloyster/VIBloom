@@ -31,6 +31,7 @@ import {
   estimate,
   runCheck,
   type IdeaEvent,
+  type Refusal,
   type IdeaNode,
   type Mode,
   type Usage,
@@ -41,6 +42,7 @@ import { mountChat } from "./chat";
 import { simulate } from "./chem";
 import { mountMonitor, viewData } from "./monitor";
 import { openPad } from "./pad";
+import { steps } from "./process";
 import { mountTreeView, type Ghost } from "./view";
 
 const EXAMPLES = [
@@ -145,7 +147,7 @@ function landing() {
     "Recorded: Muse surprised, then learns",
   );
   replayLesson.addEventListener("click", () => void playRecorded("period-reduction"));
-  let saved: { events: IdeaEvent[] } | undefined;
+  let saved: { events: IdeaEvent[]; refused?: Refusal[] } | undefined;
   try {
     saved = JSON.parse(localStorage.getItem(PROJECT_STORE) ?? "null") as typeof saved;
   } catch {
@@ -157,7 +159,7 @@ function landing() {
   resume?.addEventListener("click", () => {
     if (!saved) return;
     try {
-      load(saved.events);
+      load(saved.events, saved.refused);
     } catch (e) {
       note.textContent = `The saved project could not be restored: ${e instanceof Error ? e.message : String(e)}`;
     }
@@ -173,7 +175,8 @@ function landing() {
     void f.text().then((text) => {
       try {
         // Replay re-verifies the hash chain and every computed result.
-        load((JSON.parse(text) as { events: IdeaEvent[] }).events);
+        const data = JSON.parse(text) as { events: IdeaEvent[]; refused?: Refusal[] };
+        load(data.events, data.refused);
       } catch (e) {
         note.textContent = `That file is not a valid tree: ${e instanceof Error ? e.message : String(e)}`;
       }
@@ -316,6 +319,11 @@ let hud: HTMLElement;
 let ghosts: Ghost[] = [];
 let selectedId: string | undefined;
 let asking: string | undefined;
+// The process view replaces the monitor's root view while open.
+let processOpen = false;
+// A recorded session is replaying: its steps appear in the process view.
+let playing = false;
+let processButton: HTMLButtonElement;
 
 function workspace(goal: string) {
   const treeHost = el("section", { class: "tree-col", "aria-label": "Tree" });
@@ -328,6 +336,11 @@ function workspace(goal: string) {
   });
   const save = el("button", { class: "ghost-btn" }, "Export");
   save.addEventListener("click", exportTree);
+  processButton = el("button", { class: "ghost-btn process-btn" }, "Process");
+  processButton.addEventListener("click", () => {
+    processOpen = !processOpen;
+    refresh();
+  });
   app.replaceChildren(
     el(
       "main",
@@ -341,6 +354,7 @@ function workspace(goal: string) {
           el("span", { class: "brand small" }, "VIBloom"),
           el("span", { class: "goal-title" }, goal),
           hud,
+          processButton,
           save,
           back,
         ),
@@ -441,15 +455,17 @@ function save() {
   try {
     localStorage.setItem(
       PROJECT_STORE,
-      JSON.stringify({ format: "vibloom-ideas-1", events: tree.events }),
+      JSON.stringify({ format: "vibloom-ideas-1", events: tree.events, refused: tree.refused }),
     );
   } catch {
     // Storage full or blocked: Export still works.
   }
 }
 
-function load(events: IdeaEvent[]) {
+function load(events: IdeaEvent[], refused: Refusal[] = []) {
   const t = IdeaTree.replay(events);
+  // The audit of refusals travels beside the log; it changes no state.
+  t.refused.push(...refused.filter((r) => typeof r.reason === "string"));
   recorded = false;
   tree = t;
   chatUsage.length = 0;
@@ -464,7 +480,15 @@ function refresh() {
   view.render(tree, ghosts);
   if (selectedId && !tree.nodes.has(selectedId)) selectedId = undefined;
   view.select(selectedId);
-  monitor.render(tree, selectedId);
+  processButton.classList.toggle("on", processOpen);
+  if (processOpen) {
+    monitor.process(steps(tree), (ids) => {
+      view.mark(ids);
+    });
+  } else {
+    view.mark([]);
+    monitor.render(tree, selectedId);
+  }
   chat.render(tree, asking, (i) => {
     const u = chatUsage[i];
     return u ? usd(u.cost) : "";
@@ -978,6 +1002,8 @@ async function start(goal: string, mode: Mode, sketch?: string) {
 
 function select(id: string | undefined) {
   selectedId = id && tree.nodes.has(id) ? id : undefined;
+  // Choosing a root shows the root.
+  if (selectedId && !playing) processOpen = false;
   if (selectedId) view.focus(selectedId);
   refresh();
 }
@@ -998,7 +1024,13 @@ function recheck() {
 
 function exportTree() {
   const blob = new Blob(
-    [JSON.stringify({ format: "vibloom-ideas-1", events: tree.events }, null, 1)],
+    [
+      JSON.stringify(
+        { format: "vibloom-ideas-1", events: tree.events, refused: tree.refused },
+        null,
+        1,
+      ),
+    ],
     { type: "application/json" },
   );
   const a = el("a", { href: URL.createObjectURL(blob), download: "vibloom-tree.json" });
@@ -1009,7 +1041,10 @@ function exportTree() {
 // browser, so the reds are computed now rather than shown from the recording.
 async function playRecorded(name: string) {
   const res = await fetch(`examples/${name}.json`);
-  const data = (await res.json()) as { events: IdeaEvent[] };
+  const data = (await res.json()) as { events: IdeaEvent[]; refused?: Refusal[] };
+  const refusals = [...(data.refused ?? [])];
+  playing = true;
+  processOpen = true;
   const full = IdeaTree.replay(data.events);
   recorded = true;
   tree = new IdeaTree();
@@ -1020,6 +1055,10 @@ async function playRecorded(name: string) {
   tree.append(first.actor, first.body);
   workspace(full.goal);
   for (const e of data.events.slice(1)) {
+    while (refusals[0] && refusals[0].at <= tree.events.length) {
+      const r = refusals.shift();
+      if (r) tree.refused.push(r);
+    }
     const b = e.body;
     if (b.type === "check") {
       // The run that settles a prediction is redone here, in order.
@@ -1108,6 +1147,8 @@ async function playRecorded(name: string) {
     tree.lessons.at(-1)?.node ??
     [...tree.nodes.values()].find((n) => n.check?.kind === "oregonator")?.id;
   if (exp && !tree.views.size) select(exp);
+  playing = false;
+  refresh();
   // The story's last step is the lesson: bring it into view.
   if (tree.lessons.length) {
     setTimeout(() => {

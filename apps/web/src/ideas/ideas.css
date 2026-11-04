@@ -1703,3 +1703,143 @@ h1 {
   fill: var(--muted);
   font-size: 11px;
 }
+
+.process-btn.on {
+  color: var(--text);
+  border-color: rgb(180 156 255 / 70%);
+  background: rgb(180 156 255 / 12%);
+}
+
+.process {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  padding: 14px 16px 0;
+}
+
+.process-head p {
+  margin: 0 0 6px;
+}
+
+.steps {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 4px 4px 16px 18px;
+  list-style: none;
+  border-left: 1px solid rgb(255 255 255 / 10%);
+}
+
+.step {
+  position: relative;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgb(255 255 255 / 9%);
+  background: rgb(255 255 255 / 3%);
+  cursor: pointer;
+}
+
+.step::before {
+  content: "";
+  position: absolute;
+  left: -24px;
+  top: 16px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--actor, #8a97a8);
+  box-shadow: 0 0 10px var(--actor, transparent);
+}
+
+.step.muse {
+  --actor: #b49cff;
+}
+
+.step.engine {
+  --actor: #3ddc97;
+}
+
+.step.person {
+  --actor: #e9eef6;
+}
+
+.step:hover {
+  border-color: var(--actor);
+}
+
+.step.fail {
+  background: rgb(255 77 109 / 7%);
+}
+
+.step.warn {
+  background: rgb(255 196 61 / 7%);
+}
+
+.step-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.step-head .actor {
+  color: var(--actor);
+  font-weight: 700;
+}
+
+.step-head .stage {
+  color: var(--muted);
+}
+
+.step-title {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.step-result {
+  white-space: pre-line;
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.step.fail .step-result,
+.step.fail .step-title {
+  color: #ff8fa3;
+}
+
+.step.ok .step-result {
+  color: var(--holds);
+}
+
+.step-detail {
+  display: none;
+  margin: 8px 0 0;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  font-size: 12px;
+}
+
+.step.open .step-detail {
+  display: grid;
+}
+
+.step-detail dt {
+  color: var(--muted);
+}
+
+.step-detail dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.node.lit .orb {
+  filter: drop-shadow(0 0 10px #b49cff) brightness(1.4);
+}

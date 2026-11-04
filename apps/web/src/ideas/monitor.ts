@@ -14,6 +14,7 @@ import {
 import { RECIPE_SOURCE } from "@vibloom/chem";
 import { el } from "../dom";
 import { clockPanel } from "./clock";
+import type { Step } from "./process";
 import { bench } from "./chem";
 import { statusLabel } from "./view";
 
@@ -102,7 +103,9 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
   const stage = el("div", { class: "stage-area" });
   const side = el("div", { class: "instrument" });
   const status = el("div", { class: "monitor-status" });
-  host.replaceChildren(el("div", { class: "monitor-body" }, stage, side), status);
+  const body = el("div", { class: "monitor-body" }, stage, side);
+  host.replaceChildren(body, status);
+  let openStep = -1;
   let shown = "";
 
   // What the view frame shows right now, as an image, or undefined if the
@@ -136,7 +139,68 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
       status.textContent = text;
       status.classList.toggle("live", live);
     },
+    // The process behind the tree, newest last, one card per step.
+    process(list: Step[], mark: (ids: string[]) => void) {
+      shown = "";
+      const cards = list.map((s, i) => {
+        const card = el(
+          "li",
+          { class: `step ${s.actor}${s.tone ? ` ${s.tone}` : ""}${i === openStep ? " open" : ""}` },
+          el(
+            "div",
+            { class: "step-head" },
+            el(
+              "span",
+              { class: "actor" },
+              s.actor === "muse" ? "Muse" : s.actor === "engine" ? "Engine" : "You",
+            ),
+            el("span", { class: "stage" }, s.stage),
+          ),
+          el("p", { class: "step-title" }, s.title),
+          s.result ? el("p", { class: "step-result" }, s.result) : null,
+          el(
+            "dl",
+            { class: "step-detail" },
+            ...s.detail.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]),
+          ),
+        );
+        card.addEventListener("click", () => {
+          openStep = openStep === i ? -1 : i;
+          card.classList.toggle("open", openStep === i);
+          for (const c of list.keys()) if (c !== i) cards[c]?.classList.remove("open");
+        });
+        card.addEventListener("mouseenter", () => {
+          mark(s.nodes);
+        });
+        card.addEventListener("mouseleave", () => {
+          mark([]);
+        });
+        return card;
+      });
+      const counts = (a: Step["actor"]) => list.filter((s) => s.actor === a).length;
+      const refused = list.filter((s) => s.stage === "Refused").length;
+      const timeline = el(
+        "div",
+        { class: "process" },
+        el(
+          "div",
+          { class: "process-head" },
+          el("p", { class: "eyebrow" }, "Process, from the log"),
+          el(
+            "p",
+            { class: "fine" },
+            `${String(counts("muse"))} steps by Muse, ${String(counts("engine"))} by the engine (${String(refused)} refused), ${String(counts("person"))} by you. Muse proposes; the engine computes, runs and decides. Hover a step to light its roots; click to see its inputs, cost and log entry.`,
+          ),
+        ),
+        el("ol", { class: "steps" }, ...cards),
+      );
+      const keep = body.querySelector(".process .steps")?.scrollTop;
+      body.replaceChildren(timeline);
+      const ol = timeline.querySelector(".steps");
+      if (ol) ol.scrollTop = keep ?? ol.scrollHeight;
+    },
     render(tree: IdeaTree, id: string | undefined) {
+      if (body.firstChild !== stage) body.replaceChildren(stage, side);
       if (!id || !tree.nodes.has(id)) {
         overview(tree);
         return;

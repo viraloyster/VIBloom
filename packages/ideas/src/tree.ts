@@ -18,6 +18,7 @@ import type {
   Outcome,
   Prediction,
   Param,
+  Refusal,
   Run,
   SimQuestion,
   Usage,
@@ -45,6 +46,8 @@ export class IdeaTree {
   readonly lessons: Lesson[] = [];
   readonly predictions: Prediction[] = [];
   readonly runs: Run[] = [];
+  // What the engine refused, in order; outside the hash chain on purpose.
+  readonly refused: Refusal[] = [];
   // Visuals Muse designed for a node, latest last.
   readonly views = new Map<string, { title: string; html: string }>();
   // What Muse found when it looked at its latest drawing of a node.
@@ -101,6 +104,7 @@ export class IdeaTree {
     try {
       this.apply(body);
     } catch (e) {
+      this.refuse(actor, body.type, e instanceof Error ? e.message : String(e));
       this.nodes.clear();
       for (const [k, v] of before.nodes) this.nodes.set(k, v);
       this.results.clear();
@@ -607,6 +611,10 @@ export class IdeaTree {
     return up.size;
   }
 
+  refuse(actor: string, what: string, reason: string) {
+    this.refused.push({ at: this.events.length, actor, what, reason: reason.slice(0, 300) });
+  }
+
   // Turn what the model returned into nodes, refusing anything off-protocol.
   // A parameter that already exists is never copied: the node uses it, and a
   // different value becomes a suggestion for a person to adopt.
@@ -618,7 +626,10 @@ export class IdeaTree {
     const out: IdeaNode[] = [];
     const given = new Map<string, string[]>();
     for (const g of grown.slice(0, 8)) {
-      if (!isGrown(g)) continue;
+      if (!isGrown(g)) {
+        this.refuse("engine", "node", `a root Muse wrote did not follow the protocol: ${g.key}`);
+        continue;
+      }
       const slug =
         g.key
           .toLowerCase()
@@ -747,6 +758,11 @@ export class IdeaTree {
         n.params = n.params.filter((x) => !DERIVED.includes(x.name));
         n.suggestions = n.suggestions.filter((x) => !DERIVED.includes(x.name));
         n.overridden = [...new Set(drop)];
+        this.refuse(
+          "engine",
+          "parameter",
+          `${n.overridden.join(", ")} on ${n.id}: the recipe sets ${n.overridden.length > 1 ? "them" : "it"}`,
+        );
       }
     }
     // A formula that reads an experiment's output rests on that experiment.
@@ -995,11 +1011,18 @@ export class IdeaTree {
       .filter((f) => {
         const b = failing.get(f.id);
         if (!b || f.value.length > MAX_EXPR || f.limit.length > MAX_EXPR) return false;
-        return (
+        const ok =
           substitution(b.value, f.value) &&
           substitution(b.limit, f.limit) &&
-          names(f.value + "+" + f.limit).every((x) => known.has(x))
-        );
+          names(f.value + "+" + f.limit).every((x) => known.has(x));
+        if (!ok) {
+          this.refuse(
+            "engine",
+            "repair",
+            `a repair of ${f.id} changed more than a misspelled name`,
+          );
+        }
+        return ok;
       })
       .map((f) => ({ node: f.id, value: f.value, limit: f.limit }));
   }
