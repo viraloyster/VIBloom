@@ -1,17 +1,62 @@
 # Evaluation: does a lesson improve Muse's predictions?
 
-Two small, reproducible measurements of the anticipation loop, run on November
-4, 2026. They are hackathon-sized, not benchmarks: one model
-(`muse-spark-1.3`, effort low), one lesson, one experiment question, 14 new
-points per grid, each predicted twice. Repetitions of the same point are not
-independent cases.
+Three small, reproducible measurements of the anticipation loop, run on
+November 4, 2026. They are hackathon-sized, not benchmarks: one model
+(`muse-spark-1.3`, effort low), one lesson, one experiment question, each point
+predicted twice. Repetitions of the same point are not independent cases.
 
-**Result in one line.** Given the lesson as a measured contrast, Muse got 26
-of 28 predictions right on a grid it had never seen (Brier 0.090), against 22
-of 28 for the same lesson without its numbers (Brier 0.173), 22 of 28 for
-always answering "fails" and a Brier of 0.173 for a constant probability
-estimated on an earlier grid. The whole difference between the two kinds of
-lesson comes from three points, the ones closest to the tolerance.
+**Result in one line.** On the third grid, which varies every model parameter
+and was frozen in a commit before the run, Muse was right on 56% of new
+predictions without a lesson, 75% with the lesson as outcomes and 83% with the
+lesson's measured numbers. A rule with no model that interpolates the lesson's
+two measured gaps scores 78%. The lesson carries most of the gain; Muse's edge
+over that rule is small and within run-to-run variation.
+
+## Third evaluation: every parameter varies, against a model-free rule
+
+The grid ([grid-3.json](../packages/ideas/eval/grid-3.json)) was committed
+before the run (commit `4480544`): q in {7.62e-5, 3e-4} times eps in {0.003,
+0.01, 0.03} times s in {0.6, 1, 2.5} times eps_prime in {1.5e-5, 4e-5, 1e-4},
+54 points. The 18 points at s 2.5 were `not_applicable` (the engine does not
+conclude there) and are excluded; 36 new points remain, 20 of them "holds".
+The lesson is the same as in the second evaluation (learned at q 7.62e-5,
+eps 0.01, s 1, only eps_prime changed).
+
+| Condition, new points (36 points x 2)                  | Right | Accuracy | Brier | Mean confidence |
+| ------------------------------------------------------ | ----: | -------: | ----: | --------------: |
+| No lesson                                              | 40/72 |      56% | 0.332 |             86% |
+| Lesson, outcomes only ("binary")                       | 54/72 |      75% | 0.192 |             67% |
+| Lesson with its measured contrast ("quantitative")     | 60/72 |      83% | 0.158 |             67% |
+| Model-free rule: log-log interpolation of the two gaps | 28/36 |      78% |     - |               - |
+| Always "fails"                                         | 16/36 |      44% | 0.556 |               - |
+| Constant P(holds) = 0.286, from the first grid         |     - |      44% | 0.320 |               - |
+
+Off the lesson's line (33 points that differ from the lesson in more than
+eps_prime): quantitative 82%, the interpolation rule 76%, binary 76%, no
+lesson 58%. On the line (3 points): quantitative and the rule 100%.
+
+### Reading it honestly
+
+- **Without a lesson Muse is near a coin** on this grid (56%) and
+  overconfident (86%).
+- **The lesson does the heavy lifting.** Most of the gain over no lesson is
+  available to a rule that only interpolates the lesson's two numbers. Muse
+  with the measured contrast beats that rule by about 2 points out of 33 off
+  the lesson's line; with two repetitions per point that is not a reliable
+  difference.
+- **Where both go wrong is the same place.** At q 3e-4 the gap is smaller
+  than at the lesson's q, so several points hold (gaps 2.1% to 4.8%) where
+  the lesson suggests they fail. Both the rule and Muse carry the lesson too
+  far there. The lesson never varied q, and nothing in it says how q moves the
+  gap.
+- **What this says about Muse's role.** Muse's measured value here is in
+  producing the lesson (the explanations and the discriminating test) and in
+  using it at all; as a predictor given the lesson it is only slightly better
+  than interpolation. A lesson that varied q, or a second lesson, is what this
+  grid asks for next.
+
+Cost: $1.02 for 228 predictions; 6 to 11 seconds each. Raw results:
+[third grid](eval/predictions-2026-11-04-grid3.json).
 
 ## What is measured
 
@@ -36,6 +81,8 @@ Reproduce with
 (key in `MUSE_API_KEY`).
 
 ## Second evaluation: three conditions on a frozen grid
+
+The second evaluation varied only s and eps_prime; it is kept as run.
 
 The grid ([grid-2.json](../packages/ideas/eval/grid-2.json)) was committed
 before the run (commit `679008b`) and shares no point with the first one: s in
@@ -111,7 +158,8 @@ so it is only a reference. That result is what led to giving Muse the measured
 contrast and to the clearer applicability.
 
 Raw results: [first grid](eval/predictions-2026-11-04.json),
-[second grid](eval/predictions-2026-11-04-grid2.json).
+[second grid](eval/predictions-2026-11-04-grid2.json),
+[third grid](eval/predictions-2026-11-04-grid3.json).
 
 ## What would make this stronger
 
