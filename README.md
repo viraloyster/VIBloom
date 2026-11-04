@@ -15,7 +15,7 @@ built from a real recipe.
 Built during the Meta Global AI Developer Hackathon, from November 2, 2026
 (first commit). More details in [HACKATHON.md](HACKATHON.md).
 
-- **Live app:** https://viraloyster.github.io/VIBloom/ (three recorded
+- **Live app:** https://viraloyster.github.io/VIBloom/ (four recorded
   sessions replay without a key; with your own Meta Model API key, run new
   ones)
 - **Verify without a browser or a key:** `npm ci && npm run verify` replays
@@ -34,7 +34,31 @@ Built during the Meta Global AI Developer Hackathon, from November 2, 2026
 | Do lessons change Muse's predictions?        | On a grid frozen before the run: Muse 67% right with no lesson (the same as always answering "holds"), 76% with one, 85% with two. Two numerical fits on the same lesson runs reach 89% and 67%; how Muse attributes the change between q and eps is not established | [evaluation](docs/evaluation.md)                                                       |
 | Solver against an independent reference      | Oregonator periods agree with SciPy (Radau) to a relative 5e-4                                                                                                                                                                                                       | [validation](docs/validation.md)                                                       |
 | Every recorded run reproduces                | Re-run in the browser and by `npm run verify`, to a relative 1e-4                                                                                                                                                                                                    | [`packages/ideas/eval/verify.ts`](packages/ideas/eval/verify.ts)                       |
-| Tests                                        | 219, including a regression for every issue found in review                                                                                                                                                                                                          | [`packages/ideas/src/ideas.test.ts`](packages/ideas/src/ideas.test.ts) and per package |
+| Tests                                        | 227, including a regression for every issue found in review                                                                                                                                                                                                          | [`packages/ideas/src/ideas.test.ts`](packages/ideas/src/ideas.test.ts) and per package |
+
+## Impact: the task it does
+
+Start from a working recipe and ask for something else: a different period,
+a model that can still be trusted there, a constraint on the chemicals. In
+the recorded search, lab notes give 6.4 min where 60 s +/- 10 is wanted, with
+the two-variable model required within 10% of the full one. VIBloom maps the
+recipes around it, narrows in once, and finds that 0.879 M bromate with
+0.136 M malonic acid gives 55 s with the models 2.3% apart. On the way it
+showed what the target costs. The period scales roughly with one over the
+malonic acid, so 60 s needs about six times as much, and the gap between the
+models depends only on the malonic acid to bromate ratio at fixed acid, so
+bromate has to rise with it. In another run of the same question Muse wrote
+"nearby" into the tree as a total relative change of at most 50%; the map
+marked every recipe that reaches the target as breaking that limit. The
+broken assumption is shown, not hidden.
+
+What a researcher gets, for every recipe tried: the model's answer with the
+conditions it holds under, the tree's own checks evaluated there, which of
+Muse's predictions were made blind and how they scored, and a log anyone can
+replay and re-run. This is the work that reduced kinetic models need before
+they are used to plan an experiment, and it is the work that is usually
+assumed rather than done. The same loop applies to any reaction model with a
+reduction to check, as instruments for it are added.
 
 ## The problem
 
@@ -73,7 +97,14 @@ assumption that breaks, in the open, so research can move past it.
    prediction, runs the test, and decides which explanation the run is
    consistent with. The lesson keeps the measured contrast apart from the
    interpretation and states that one test does not establish a cause.
-6. **The lesson is evidence with conditions.** It records the values,
+6. **Nearby recipes are mapped.** For a tree with a recipe, the Recipe map
+   runs the engine on recipes around it (malonic acid by bromate, other
+   conditions fixed and listed) and shows, per recipe, the period against the
+   tree's own target, the gap between the models against the experiment's
+   tolerance, and any other check in the tree that fails there. Choosing a
+   recipe records it and keeps the run that was computed for it; predictions
+   about what that run already settles are not asked of Muse.
+7. **The lesson is evidence with conditions.** It records the values,
    question, tolerance, recipe conversion and solver version it was learned
    under, and is fed back to Muse with its measured numbers. If any of those
    change, it stays as history and is no longer offered as a current finding.
@@ -121,6 +152,7 @@ recorded chemistry sessions cost $0.04 and $0.07.
 | Recipe to model (rate constants, version)              | [`packages/chem/src/recipe.ts`](packages/chem/src/recipe.ts), [docs/science.md](docs/science.md)                                               |
 | The stiff solver, the models, the classifier           | [`packages/chem/src/`](packages/chem/src/), validated in [docs/validation.md](docs/validation.md)                                              |
 | The arithmetic language (no `eval`)                    | [`packages/ideas/src/expr.ts`](packages/ideas/src/expr.ts)                                                                                     |
+| The recipe map: setup, cells, verdicts                 | [`packages/ideas/src/map.ts`](packages/ideas/src/map.ts), [`apps/web/src/ideas/recipemap.ts`](apps/web/src/ideas/recipemap.ts)                 |
 | The Process view, read from the log                    | [`apps/web/src/ideas/process.ts`](apps/web/src/ideas/process.ts)                                                                               |
 | Faithful replay of a recording                         | `playRecorded` in [`apps/web/src/ideas/main.ts`](apps/web/src/ideas/main.ts), [`packages/ideas/eval/verify.ts`](packages/ideas/eval/verify.ts) |
 | The evaluation, its frozen grids and baselines         | [`packages/ideas/eval/`](packages/ideas/eval/), results in [docs/evaluation.md](docs/evaluation.md) and [docs/eval/](docs/eval/)               |
@@ -129,11 +161,11 @@ recorded chemistry sessions cost $0.04 and $0.07.
 
 ## Status
 
-| State                              | What                                                                                                                                                                                  |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Live in the public app             | Assumption tree, recipe to model, Oregonator experiments, blind predictions, hypotheses and tests, versioned lessons, Process view, faithful replay, handwriting, chat, illustrations |
-| Implemented, not in the public app | Region claims and counterexample search over parameter regions (`apps/api`, `bench.html`, run locally with the Worker)                                                                |
-| Not built                          | Other oscillators and reaction models, temperature and reagent depletion, branches of a tree                                                                                          |
+| State                              | What                                                                                                                                                                                                                  |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Live in the public app             | Assumption tree, recipe to model, Oregonator experiments, recipe map, blind predictions, hypotheses and tests, versioned lessons, Process view, faithful replay, handwriting, chat, illustrations, evaluation dataset |
+| Implemented, not in the public app | Region claims and counterexample search over parameter regions (`apps/api`, `bench.html`, run locally with the Worker)                                                                                                |
+| Not built                          | Other oscillators and reaction models, temperature and reagent depletion, branches of a tree                                                                                                                          |
 
 ## Scope and limits
 
@@ -154,7 +186,13 @@ recorded chemistry sessions cost $0.04 and $0.07.
   experiments outside chemistry, so those results are only as good as the
   numbers in the tree, which are shown as assumed.
 - **The number detector is heuristic.** It flags numbers absent from Muse's
-  data; it cannot prove a number is right.
+  data; it cannot prove a number is right, and it does not check qualitative
+  claims. In the recorded search Muse said lowering the acid would raise q;
+  with these rate constants q is proportional to [H+], so it would fall.
+- **The recipe map is a grid, not an optimiser.** Seven by seven recipes,
+  log-spaced; a narrow target band can fall between cells until the map is
+  re-centred closer in. It explores bromate and malonic acid only, and does
+  not judge whether a recipe is practical (0.879 M bromate is high).
 
 ## Vision
 
@@ -178,7 +216,8 @@ that domain has instruments that can settle its questions.
 ## Run it
 
 - **No key:** open the [app](https://viraloyster.github.io/VIBloom/) and
-  choose a recorded session (handwritten BZ lab notes; Muse surprised and
+  choose a recorded session (handwritten BZ lab notes; a recipe search with
+  the map; Muse surprised and
   learning; the cardboard airliner, a deliberately absurd goal outside
   chemistry). Playback can be paused and stepped; experiments are re-run in
   your browser.

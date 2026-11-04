@@ -145,6 +145,13 @@ every experiment while Muse is connected, with these rules in
 - Selecting a root lights its foundations: the transitive closure of its
   sub-roots and the roots it cites as basis, which is what its status is
   derived from.
+- The recipe map (`packages/ideas/src/map.ts`) runs the reduction experiment
+  on recipes around the tree's and evaluates the tree's own target and other
+  recipe-dependent checks at each, with the period taken from that run. It is
+  computed in the browser and not recorded. Choosing a recipe appends the
+  person's changes and the chosen run (`check` with `via: "map"`); a question
+  that run already settles is run without asking Muse, since a prediction
+  could not be blind.
 
 ## Claim versions
 

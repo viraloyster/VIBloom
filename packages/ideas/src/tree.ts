@@ -1110,7 +1110,7 @@ export class IdeaTree {
 }
 
 // Periods measured by the same experiment in Node 22 and Chromium differed by
-// up to 2.7e-6 relative (docs/validation.md); 1e-4 leaves a wide margin while
+// up to 1.5e-5 relative (docs/validation.md); 1e-4 leaves a margin while
 // staying far below any tolerance a claim uses. The verdict must match exactly.
 export const EXPERIMENT_TOLERANCE = 1e-4;
 

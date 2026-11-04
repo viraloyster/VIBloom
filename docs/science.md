@@ -80,6 +80,15 @@ M malonic acid, about 67 seconds, where the two-variable reduction is already
 42% off. With 0.3 M bromate at that malonic acid concentration the gap falls
 to 6.4% (the recorded session's discriminating test).
 
+At fixed acid, eps and eps_prime are both proportional to the ratio of
+malonic acid to bromate and q depends on the acid alone, so the gap between
+the two models is the same for every recipe with the same ratio; the recipe
+map shows it as equal gaps along its diagonals. The period in seconds is the
+dimensionless period, set by that ratio, times `time_scale_s = 1/(k5 MA)`, so
+at a fixed ratio it falls as one over the malonic acid. Reaching a shorter
+period while keeping the reduction therefore means raising malonic acid and
+bromate together.
+
 ## Initial conditions
 
 Initial conditions are assumptions of every claim. The reduced model has no `y`
