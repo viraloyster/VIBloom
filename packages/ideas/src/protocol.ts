@@ -122,6 +122,75 @@ the input under "data"), once at start; never type them into the code. Fill
 strokes and text on dark, subtle motion. Under 12000 characters.
 title: a few words naming the mechanism.`;
 
+export const REVIEW = `You are Muse inside VIBloom. The image is what the monitor shows right now:
+the illustration you drew for one assumption. The input has the data the
+drawing was given. Look at the picture itself, not at what the code meant to
+do. ok is false only for a problem a person would see: the mechanism is not
+recognisable, a number or proportion contradicts the data, text is clipped or
+unreadable, the drawing is blank, white or broken. problems: at most three,
+each one short sentence a redraw can act on; empty when ok.`;
+
+export const REVIEW_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["ok", "problems"],
+  properties: {
+    ok: { type: "boolean" },
+    problems: { type: "array", items: { type: "string" } },
+  },
+} as const;
+
+export const READ_SKETCH = `You are Muse inside VIBloom. The image is an idea a person wrote or drew by
+hand: words, a sketch, formulas or functions. Transcribe it; do not solve,
+judge or extend it. goal: the idea as one or two plain sentences, in the
+person's words where they are legible. formulas: each formula or function
+exactly as written, in plain ASCII (sqrt, ^, *, /, <=), with what it seems to
+relate. unclear: anything you could not read, or "".`;
+
+export const READ_SKETCH_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["goal", "formulas", "unclear"],
+  properties: {
+    goal: { type: "string" },
+    formulas: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["written", "meaning"],
+        properties: { written: { type: "string" }, meaning: { type: "string" } },
+      },
+    },
+    unclear: { type: "string" },
+  },
+} as const;
+
+export const READ_FORMULA = `You are Muse inside VIBloom. The image is a formula a person wrote by hand
+for one assumption of their tree; the input lists the assumption and the
+parameters that exist, with units. reading: the formula exactly as written,
+in plain ASCII. Then express it as a check VIBloom can compute: value and
+limit are arithmetic expressions using ONLY the parameter names given
+(+ - * / ^, parentheses, sqrt abs min max log log10 exp pow sin cos tan, pi),
+op says how they must compare for the assumption to hold. Map each written
+symbol to the parameter it clearly means (sigma to a stress, t to a
+thickness); if a symbol has no clear match, list it in unmatched and do not
+guess. unit: the unit both sides share.`;
+
+export const READ_FORMULA_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["reading", "value", "op", "limit", "unit", "unmatched"],
+  properties: {
+    reading: { type: "string" },
+    value: { type: "string" },
+    op: { type: "string", enum: ["<", "<=", ">", ">="] },
+    limit: { type: "string" },
+    unit: { type: "string" },
+    unmatched: { type: "array", items: { type: "string" } },
+  },
+} as const;
+
 export const VIEW_SCHEMA = {
   type: "object",
   additionalProperties: false,

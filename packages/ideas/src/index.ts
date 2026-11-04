@@ -11,11 +11,18 @@ export {
   DIAGNOSE_SCHEMA,
   VIEW,
   VIEW_SCHEMA,
+  REVIEW,
+  REVIEW_SCHEMA,
+  READ_SKETCH,
+  READ_SKETCH_SCHEMA,
+  READ_FORMULA,
+  READ_FORMULA_SCHEMA,
   CHAT,
   CHAT_SCHEMA,
   REPAIR_SCHEMA,
   type GrownNode,
 } from "./protocol";
+export { numbersIn, unsupportedNumbers } from "./numbers";
 export { BudgetExceeded, cost, estimate, estimateTokens, Ledger, PRICES, price } from "./cost";
 export { ArrayItems } from "./stream";
 export {

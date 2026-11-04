@@ -46,6 +46,12 @@ export class IdeaTree {
   readonly runs: Run[] = [];
   // Visuals Muse designed for a node, latest last.
   readonly views = new Map<string, { title: string; html: string }>();
+  // What Muse found when it looked at its latest drawing of a node.
+  readonly reviews = new Map<string, { ok: boolean; problems: string[]; redrawn: boolean }>();
+  // Nodes whose drawing was redrawn after a review found problems.
+  readonly redrawn = new Set<string>();
+  // The handwriting each handwritten formula was read from.
+  readonly handwriting = new Map<string, string>();
   readonly chat: {
     focus: string;
     question: string;
@@ -80,6 +86,9 @@ export class IdeaTree {
       nodes: structuredClone(this.nodes),
       results: structuredClone(this.results),
       views: structuredClone(this.views),
+      reviews: structuredClone(this.reviews),
+      redrawn: new Set(this.redrawn),
+      handwriting: new Map(this.handwriting),
       chat: this.chat.length,
       lessons: structuredClone(this.lessons),
       predictions: structuredClone(this.predictions),
@@ -96,6 +105,12 @@ export class IdeaTree {
       for (const [k, v] of before.results) this.results.set(k, v);
       this.views.clear();
       for (const [k, v] of before.views) this.views.set(k, v);
+      this.reviews.clear();
+      for (const [k, v] of before.reviews) this.reviews.set(k, v);
+      this.redrawn.clear();
+      for (const k of before.redrawn) this.redrawn.add(k);
+      this.handwriting.clear();
+      for (const [k, v] of before.handwriting) this.handwriting.set(k, v);
       this.chat.length = before.chat;
       this.lessons.splice(0, Infinity, ...before.lessons);
       this.predictions.splice(0, Infinity, ...before.predictions);
@@ -209,7 +224,47 @@ export class IdeaTree {
       case "view":
         if (!this.nodes.has(b.node)) throw new Error(`unknown node ${b.node}`);
         this.views.set(b.node, { title: b.title, html: b.html });
+        if (this.reviews.get(b.node)?.ok === false) this.redrawn.add(b.node);
+        this.reviews.delete(b.node);
         break;
+      case "review":
+        if (!this.views.has(b.node)) throw new Error(`no drawing on ${b.node}`);
+        this.reviews.set(b.node, {
+          ok: b.ok,
+          problems: b.problems.slice(0, 3).map((x) => x.slice(0, 200)),
+          redrawn: this.redrawn.has(b.node),
+        });
+        break;
+      case "formula": {
+        const n = this.nodes.get(b.node);
+        if (!n || n.role === "goal") throw new Error(`unknown root ${b.node}`);
+        if (n.check?.kind === "oregonator") throw new Error(`${b.node} is an experiment`);
+        const c = b.check;
+        if (
+          !(OPS as readonly string[]).includes(c.op) ||
+          !c.value.trim() ||
+          !c.limit.trim() ||
+          c.value.length > MAX_EXPR ||
+          c.limit.length > MAX_EXPR
+        ) {
+          throw new Error("not a comparison VIBloom can compute");
+        }
+        const known = new Set(Object.keys(this.scope()));
+        const missing = names(`${c.value} + ${c.limit}`).filter((x) => !known.has(x));
+        if (missing.length) throw new Error(`no parameter named ${missing.join(", ")}`);
+        n.check = {
+          description: `Written by hand: ${b.reading}`.slice(0, 400),
+          value: c.value,
+          op: c.op as Op,
+          limit: c.limit,
+          unit: c.unit.slice(0, 24),
+        };
+        this.results.delete(b.node);
+        if (b.image?.startsWith("data:image/jpeg;base64,") && b.image.length < 400_000) {
+          this.handwriting.set(b.node, b.image);
+        } else this.handwriting.delete(b.node);
+        break;
+      }
       case "chat":
         this.chat.push({
           focus: b.focus,

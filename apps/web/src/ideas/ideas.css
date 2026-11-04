@@ -1512,3 +1512,85 @@ h1 {
 .lesson .finding {
   color: var(--text);
 }
+
+.watch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  margin: 4px 0 18px;
+}
+
+.composer-actions {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.sketch {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid rgb(255 255 255 / 18%);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.sketch:hover {
+  border-color: rgb(255 255 255 / 40%);
+}
+
+.pad {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(3 5 9 / 72%);
+  backdrop-filter: blur(6px);
+}
+
+.pad-card {
+  width: min(900px, 100%);
+  padding: 18px;
+  border-radius: 16px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  background: #0b0f17;
+}
+
+.pad-card h3 {
+  margin: 0 0 4px;
+}
+
+.pad-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 10px 0;
+  border-radius: 10px;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.pad-card .spacer {
+  flex: 1;
+}
+
+.provenance .review.ok {
+  color: var(--holds);
+}
+
+.provenance .review.warn {
+  color: var(--at_risk);
+}
+
+.handwriting {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  margin: 8px 0;
+  border-radius: 8px;
+}

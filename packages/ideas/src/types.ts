@@ -155,6 +155,26 @@ export type EventBody =
       usage: Usage;
     }
   | { type: "test"; hypotheses: string; result: CheckResult | CheckError }
+  | {
+      // Muse looked at a picture of its own drawing and compared it with the
+      // data the drawing was given.
+      type: "review";
+      node: string;
+      ok: boolean;
+      problems: string[];
+      usage: Usage;
+    }
+  | {
+      // A formula a person wrote by hand, as Muse read it; the engine decides
+      // whether it can be computed with the tree's names.
+      type: "formula";
+      node: string;
+      reading: string;
+      // The handwriting itself, small, so a replay shows what was read.
+      image?: string;
+      check: { value: string; op: string; limit: string; unit: string };
+      usage: Usage;
+    }
   | { type: "accept"; node: string }
   | { type: "reject"; node: string };
 

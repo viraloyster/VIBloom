@@ -891,3 +891,50 @@ describe("numbers Muse writes", () => {
     expect(copy.chat.map((c) => c.unsupported)).toEqual([[], ["4.2"]]);
   });
 });
+
+describe("what Muse sees", () => {
+  const beam = () => {
+    const t = new IdeaTree();
+    t.append("person", { type: "goal", text: "g", mode: "standard" });
+    const nodes = t.admit("goal", [grown("beam", { params: [p("load", 5), p("strength", 3)] })]);
+    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    return t;
+  };
+
+  it("admits a handwritten formula only in the tree's own names", () => {
+    const t = beam();
+    const formula = (value: string) => ({
+      type: "formula" as const,
+      node: "beam",
+      reading: "sigma <= f_y",
+      check: { value, op: "<=", limit: "strength", unit: "MPa" },
+      usage,
+    });
+    expect(() => t.append("muse", formula("sigma"))).toThrow(/no parameter named sigma/);
+    expect(() => t.append("muse", { ...formula("load"), node: "goal" })).toThrow(/unknown root/);
+    t.append("muse", formula("load * 1.5"));
+    run(t, "beam");
+    expect(t.status("beam")).toBe("broken");
+    expect(t.nodes.get("beam")?.check?.description).toContain("sigma <= f_y");
+  });
+
+  it("keeps what Muse found in its drawing and notes a redraw", () => {
+    const t = beam();
+    const review = (ok: boolean) => ({
+      type: "review" as const,
+      node: "beam",
+      ok,
+      problems: ok ? [] : ["the load arrow points up"],
+      usage,
+    });
+    expect(() => t.append("muse", review(true))).toThrow(/no drawing/);
+    const view = { type: "view" as const, node: "beam", title: "v", html: "<p></p>", usage };
+    t.append("muse", view);
+    t.append("muse", review(false));
+    expect(t.reviews.get("beam")).toMatchObject({ ok: false, redrawn: false });
+    t.append("muse", view);
+    expect(t.reviews.has("beam")).toBe(false);
+    t.append("muse", review(true));
+    expect(t.reviews.get("beam")).toMatchObject({ ok: true, redrawn: true });
+  });
+});

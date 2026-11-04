@@ -20,6 +20,9 @@ export interface AskRequest {
   mode: Mode;
   effort: "minimal" | "low" | "medium" | "high";
   maxOutput: number;
+  // Pictures Muse reads with the text (data: URLs): handwriting, a photo, or
+  // what the monitor shows.
+  images?: string[];
   onThought?: (text: string) => void;
 }
 
@@ -114,7 +117,17 @@ export class Muse {
       model,
       // Fixed instructions first, so the cache can serve them.
       instructions: r.instructions,
-      input: r.input,
+      input: r.images?.length
+        ? [
+            {
+              role: "user",
+              content: [
+                { type: "input_text", text: r.input },
+                ...r.images.map((url) => ({ type: "input_image", image_url: url })),
+              ],
+            },
+          ]
+        : r.input,
       reasoning: { effort: r.effort, summary: "concise" },
       text: { format: { type: "json_schema", name, strict: true, schema } },
       max_output_tokens: r.maxOutput,
@@ -128,7 +141,7 @@ export class Muse {
     const counted = await this.count(body, headers);
     const reserved = cost(
       model,
-      counted ?? estimateTokens(r.instructions + r.input),
+      counted ?? estimateTokens(r.instructions + r.input) + 1500 * (r.images?.length ?? 0),
       0,
       r.maxOutput,
     );

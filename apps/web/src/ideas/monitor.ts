@@ -16,6 +16,7 @@ import { statusLabel } from "./view";
 
 export interface MonitorActions {
   visualize(id: string): void;
+  handwrite(id: string): void;
   investigate(id: string): void;
   expand(id: string): void;
   setParam(name: string, value: number, source: string): void;
@@ -79,12 +80,19 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
   let pending: { html: string; data: unknown } | undefined;
   // The frame has an opaque origin, so "*" is the only target it accepts; it
   // only receives data, never anything secret.
+  let loaded: Promise<void> = Promise.resolve();
+  let markLoaded = () => {};
   frame.addEventListener("load", () => {
     if (pending) frame.contentWindow?.postMessage(pending, "*");
+    markLoaded();
   });
   // A fresh document per view, so nothing from the previous one survives.
   const show = (html: string, data: unknown) => {
     pending = { html, data };
+    loaded = new Promise((resolve) => {
+      // Give the drawing a moment to lay out and start moving.
+      markLoaded = () => setTimeout(resolve, 1500);
+    });
     frame.src = `frame.html?${String(Date.now())}`;
   };
 
@@ -94,7 +102,33 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
   host.replaceChildren(el("div", { class: "monitor-body" }, stage, side), status);
   let shown = "";
 
+  // What the view frame shows right now, as an image, or undefined if the
+  // frame does not answer in time.
+  let asked = 0;
+  const snapshot = async () => {
+    await loaded;
+    return new Promise<string | undefined>((resolve) => {
+      const id = ++asked;
+      const done = (image?: string) => {
+        window.removeEventListener("message", onMessage);
+        clearTimeout(timer);
+        resolve(image);
+      };
+      const onMessage = (e: MessageEvent) => {
+        const d = e.data as { snapshot?: number; image?: unknown } | null;
+        if (e.source !== frame.contentWindow || d?.snapshot !== id) return;
+        done(
+          typeof d.image === "string" && d.image.startsWith("data:image/") ? d.image : undefined,
+        );
+      };
+      const timer = setTimeout(done, 6000);
+      window.addEventListener("message", onMessage);
+      frame.contentWindow?.postMessage({ snapshot: id }, "*");
+    });
+  };
+
   return {
+    snapshot,
     status(text: string, live = false) {
       status.textContent = text;
       status.classList.toggle("live", live);
@@ -133,16 +167,20 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
         redraw.addEventListener("click", () => {
           actions.visualize(id);
         });
-        stage.replaceChildren(
-          frame,
-          el(
-            "p",
-            { class: "provenance" },
-            redraw,
-            " ",
-            `Illustration by Muse: ${v.title}. Not a simulation; the numbers and verdict are in the instrument.`,
-          ),
+        const provenance = el(
+          "p",
+          { class: "provenance" },
+          redraw,
+          " ",
+          `Illustration by Muse: ${v.title}. Not a simulation; the numbers and verdict are in the instrument.`,
+          reviewNote(tree.reviews.get(id)),
         );
+        // Moving an iframe reloads it: keep it in place and swap only the line.
+        if (stage.firstChild === frame && stage.childNodes.length === 2) {
+          stage.lastChild?.replaceWith(provenance);
+        } else {
+          stage.replaceChildren(frame, provenance);
+        }
       } else {
         shown = "";
         const b = el(
@@ -336,12 +374,45 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
     }
     if (n.check?.kind === "oregonator") out.push(...investigation(tree, n));
     if (n.check && n.check.kind !== "oregonator") {
+      const byHand = n.check.description.startsWith("Written by hand:");
       out.push(
         el(
           "details",
-          { class: "code" },
-          el("summary", {}, "Formula by Muse, evaluated by VIBloom"),
+          { class: "code", open: byHand },
+          el(
+            "summary",
+            {},
+            byHand
+              ? "Your handwritten formula, read by Muse, evaluated by VIBloom"
+              : "Formula by Muse, evaluated by VIBloom",
+          ),
+          byHand && tree.handwriting.has(n.id)
+            ? el("img", {
+                class: "handwriting",
+                src: tree.handwriting.get(n.id),
+                alt: "The handwritten formula",
+              })
+            : null,
+          byHand ? el("p", { class: "fine" }, n.check.description) : null,
           el("pre", {}, `${n.check.value}\n  ${n.check.op}\n${n.check.limit}`),
+        ),
+      );
+    }
+    if (n.role !== "goal" && n.check?.kind !== "oregonator") {
+      const w = el(
+        "button",
+        { class: "ghost-btn", disabled: actions.busy() },
+        "Write a formula by hand",
+      );
+      w.addEventListener("click", () => {
+        actions.handwrite(n.id);
+      });
+      out.push(
+        el(
+          "div",
+          { class: "row" },
+          w,
+          el("span", { class: "fine" }, "Muse reads it; the engine computes it."),
         ),
       );
     }
@@ -554,6 +625,18 @@ function measured(tree: IdeaTree, seq: number | undefined): string {
   if (!run || "error" in run.result || spec?.kind !== "oregonator") return "";
   if (spec.question !== "reduction_keeps_period") return "";
   return ` (period difference ${fmt(run.result.value * 100)}%, tolerance ${fmt(spec.tolerance * 100)}%)`;
+}
+
+// What Muse said after looking at a picture of its own drawing.
+function reviewNote(r: { ok: boolean; problems: string[]; redrawn: boolean } | undefined) {
+  if (!r) return null;
+  return el(
+    "span",
+    { class: `review ${r.ok ? "ok" : "warn"}` },
+    r.ok
+      ? ` Muse looked at this drawing and found it matches the data${r.redrawn ? ", after one redraw" : ""}.`
+      : ` Muse looked at this drawing and found: ${r.problems.join("; ")}.`,
+  );
 }
 
 // Accuracy over settled predictions, with the Brier score that also weighs

@@ -21,6 +21,12 @@ import {
   PREDICT_SCHEMA,
   DIAGNOSE,
   DIAGNOSE_SCHEMA,
+  REVIEW,
+  REVIEW_SCHEMA,
+  READ_SKETCH,
+  READ_SKETCH_SCHEMA,
+  READ_FORMULA,
+  READ_FORMULA_SCHEMA,
   SIM_PARAMS,
   estimate,
   runCheck,
@@ -33,6 +39,7 @@ import { el } from "../dom";
 import { mountChat } from "./chat";
 import { simulate } from "./chem";
 import { mountMonitor, viewData } from "./monitor";
+import { openPad } from "./pad";
 import { mountTreeView, type Ghost } from "./view";
 
 const EXAMPLES = [
@@ -42,7 +49,14 @@ const EXAMPLES = [
   "There are infinitely many twin primes",
 ];
 const EFFORT = "low" as const;
-const MAX_OUT = { decompose: 8000, expand: 5000, view: 9000, chat: 1500 };
+const MAX_OUT = {
+  decompose: 8000,
+  expand: 5000,
+  view: 9000,
+  chat: 1500,
+  review: 3000,
+  read: 4000,
+};
 const KEY_STORE = "vibloom.key";
 const PROJECT_STORE = "vibloom.project";
 
@@ -96,6 +110,11 @@ function landing() {
     value: "0.50",
   });
   const grow = el("button", { class: "grow" }, "Grow the roots");
+  const sketch = el(
+    "button",
+    { class: "sketch", title: "Write or sketch it by hand, or use a photo of paper" },
+    "Write it by hand",
+  );
   const note = el("p", { class: "note" });
   const chips = el(
     "div",
@@ -181,6 +200,48 @@ function landing() {
   goal.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) grow.click();
   });
+  // Muse reads handwriting (words, sketches, formulas) into the goal; the
+  // person reads the transcription before anything grows from it.
+  sketch.addEventListener("click", () => {
+    key = keyInput.value.trim();
+    if (!key) {
+      note.textContent = "Reading handwriting uses Muse: add your Meta Model API key first.";
+      return;
+    }
+    ledger.cap = Math.max(0.05, Number(cap.value) || 0.5);
+    openPad({
+      title: "Write or sketch your idea",
+      hint: "Words, a drawing, formulas or functions. Muse transcribes it; you check it before growing.",
+      action: "Read it with Muse",
+      onRead: async (image) => {
+        const { value, usage } = await muse().ask(
+          {
+            instructions: READ_SKETCH,
+            input: "Transcribe this.",
+            images: [image],
+            mode: mode.value as Mode,
+            effort: "low",
+            maxOutput: MAX_OUT.read,
+          },
+          "sketch",
+          READ_SKETCH_SCHEMA,
+        );
+        const v = value as {
+          goal: string;
+          formulas: { written: string; meaning: string }[];
+          unclear: string;
+        };
+        goal.value = [
+          v.goal,
+          ...v.formulas.map((x) => `${x.written}${x.meaning ? ` (${x.meaning})` : ""}`),
+        ]
+          .join("\n")
+          .slice(0, 1200);
+        note.textContent = `Muse read your handwriting (${usd(usage.cost)})${v.unclear ? `; unclear: ${v.unclear}` : ""}. Check it, then grow the roots.`;
+        goal.focus();
+      },
+    });
+  });
 
   app.replaceChildren(
     el(
@@ -198,7 +259,20 @@ function landing() {
           { class: "lede" },
           "Muse grows the assumptions it rests on, down to first principles. Code checks what can be computed. Red means a calculation says it fails.",
         ),
-        el("div", { class: "composer" }, goal, grow),
+        el(
+          "div",
+          { class: "watch" },
+          el("span", { class: "fine" }, "Watch Muse work, no key needed:"),
+          replay,
+          replayChem,
+          replayLesson,
+        ),
+        el(
+          "div",
+          { class: "composer" },
+          goal,
+          el("div", { class: "composer-actions" }, sketch, grow),
+        ),
         chips,
         el(
           "details",
@@ -223,8 +297,6 @@ function landing() {
           ),
         ),
         note,
-        el("p", { class: "fine center" }, "No key needed to watch a recorded Muse session:"),
-        el("div", { class: "row center" }, replay, replayChem, replayLesson),
         el("div", { class: "row center" }, resume, open, file),
       ),
     ),
@@ -280,6 +352,9 @@ function workspace(goal: string) {
   view = mountTreeView(treeHost, select);
   monitor = mountMonitor(monitorHost, {
     visualize: (id) => void visualize(id),
+    handwrite: (id) => {
+      handwrite(id);
+    },
     investigate: (id) => void investigate(id),
     expand: (id) => void grow(id, "expand"),
     setParam: (name, value, source) => {
@@ -474,36 +549,147 @@ async function visualize(id: string) {
   if (busy) return;
   busy = true;
   refresh();
-  monitor.status("Muse is designing a view...", true);
   try {
-    const { value, usage } = await muse().ask(
-      {
-        instructions: VIEW,
-        input: JSON.stringify({ data: nodeData(id) }),
-        mode: tree.mode,
-        effort: "low",
-        maxOutput: MAX_OUT.view,
-      },
-      "view",
-      VIEW_SCHEMA,
-    );
-    const v = value as { title?: unknown; html?: unknown };
-    if (typeof v.html !== "string" || v.html.length > 40_000)
-      throw new MuseError("bad_view", "no usable view");
-    tree.append(`muse:${usage.model}`, {
-      type: "view",
-      node: id,
-      title: typeof v.title === "string" ? v.title.slice(0, 80) : "View",
-      html: v.html,
-      usage,
-    });
-    monitor.status(`View ready (${usd(usage.cost)}).`);
+    let feedback: string[] = [];
+    // One drawing, Muse looks at it, and at most one redraw: never a loop.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      monitor.status(
+        attempt ? "Muse is redrawing what it found wrong..." : "Muse is designing a view...",
+        true,
+      );
+      const { value, usage } = await muse().ask(
+        {
+          instructions: VIEW,
+          input: JSON.stringify({
+            data: nodeData(id),
+            ...(feedback.length ? { fix_what_you_saw: feedback } : {}),
+          }),
+          mode: tree.mode,
+          effort: "low",
+          maxOutput: MAX_OUT.view,
+        },
+        "view",
+        VIEW_SCHEMA,
+      );
+      const v = value as { title?: unknown; html?: unknown };
+      if (typeof v.html !== "string" || v.html.length > 40_000)
+        throw new MuseError("bad_view", "no usable view");
+      tree.append(`muse:${usage.model}`, {
+        type: "view",
+        node: id,
+        title: typeof v.title === "string" ? v.title.slice(0, 80) : "View",
+        html: v.html,
+        usage,
+      });
+      refresh();
+      feedback = await review(id);
+      if (!feedback.length) break;
+    }
+    monitor.status("");
   } catch (e) {
     monitor.status(`Stopped: ${explain(e)}`);
   } finally {
     busy = false;
     refresh();
   }
+}
+
+// Muse looks at a picture of the monitor, as the person sees it, and says
+// whether its drawing matches the data. Returns what it found wrong.
+async function review(id: string): Promise<string[]> {
+  monitor.status("Muse is looking at its drawing...", true);
+  // Let the frame load and the drawing settle before the picture.
+  await sleep(2500);
+  const image = await monitor.snapshot();
+  if (!image) return [];
+  const { value, usage } = await muse().ask(
+    {
+      instructions: REVIEW,
+      input: JSON.stringify({ data: nodeData(id) }),
+      images: [image],
+      mode: tree.mode,
+      effort: "low",
+      maxOutput: MAX_OUT.review,
+    },
+    "review",
+    REVIEW_SCHEMA,
+  );
+  const v = value as { ok: boolean; problems: string[] };
+  tree.append(`muse:${usage.model}`, {
+    type: "review",
+    node: id,
+    ok: v.ok,
+    problems: v.ok ? [] : v.problems,
+    usage,
+  });
+  refresh();
+  return v.ok ? [] : v.problems.slice(0, 3);
+}
+
+// A formula written by hand on a root: Muse reads it into the tree's names,
+// the person confirms the reading, and the engine decides if it computes.
+function handwrite(id: string) {
+  const n = tree.nodes.get(id);
+  if (!n || busy) return;
+  const params = Object.keys(tree.scope()).map((name) => {
+    const p = tree.param(name);
+    return `${name}${p ? ` (${p.unit || "no unit"})` : ""}`;
+  });
+  openPad({
+    title: `A formula for "${n.title}"`,
+    hint: "Write the comparison that would make this assumption hold, with symbols or words. Muse maps it to the tree's parameters; the engine computes it.",
+    action: "Read it with Muse",
+    onRead: async (image) => {
+      busy = true;
+      refresh();
+      try {
+        const { value, usage } = await muse().ask(
+          {
+            instructions: READ_FORMULA,
+            input: JSON.stringify({ assumption: n.statement, parameters: params }),
+            images: [image],
+            mode: tree.mode,
+            effort: "low",
+            maxOutput: MAX_OUT.read,
+          },
+          "formula",
+          READ_FORMULA_SCHEMA,
+        );
+        const v = value as {
+          reading: string;
+          value: string;
+          op: string;
+          limit: string;
+          unit: string;
+          unmatched: string[];
+        };
+        if (v.unmatched.length) {
+          throw new Error(
+            `Muse read "${v.reading}" but found no parameter for ${v.unmatched.join(", ")}. Nothing was changed.`,
+          );
+        }
+        const ok = confirm(
+          `Muse read: ${v.reading}\n\nAs a check: ${v.value} ${v.op} ${v.limit} ${v.unit}\n\nUse it for this root?`,
+        );
+        if (!ok) return;
+        tree.append(`muse:${usage.model}`, {
+          type: "formula",
+          node: id,
+          reading: v.reading.slice(0, 300),
+          image,
+          check: { value: v.value, op: v.op, limit: v.limit, unit: v.unit },
+          usage,
+        });
+        const node = tree.nodes.get(id);
+        if (node) await check(node);
+        recheck();
+        monitor.status(`Your formula is now this root's check (read for ${usd(usage.cost)}).`);
+      } finally {
+        busy = false;
+        refresh();
+      }
+    },
+  });
 }
 
 async function ask(question: string) {
@@ -514,6 +700,8 @@ async function ask(question: string) {
   const focus = selectedId ?? "goal";
   const asked = tree.scope();
   try {
+    // Muse sees the monitor as the person does when it shows its drawing.
+    const image = tree.views.has(focus) ? await monitor.snapshot() : undefined;
     const { value, usage } = await muse().ask(
       {
         instructions: CHAT,
@@ -525,7 +713,9 @@ async function ask(question: string) {
           branch: tree.context(focus),
           tree: [...tree.nodes.values()].map((n) => `${n.id} | ${n.title} | ${tree.status(n.id)}`),
           recent: tree.chat.slice(-4).map((c) => ({ q: c.question, a: c.answer })),
+          ...(image ? { image: "what the monitor shows the person right now" } : {}),
         }),
+        ...(image ? { images: [image] } : {}),
         mode: tree.mode,
         effort: "low",
         maxOutput: MAX_OUT.chat,
@@ -872,6 +1062,18 @@ async function playRecorded(name: string) {
       ledger.entries.push(b.usage);
       select(b.type === "predict" ? b.node : (tree.lessons.at(-1)?.node ?? ""));
       await sleep(1200);
+    } else if (b.type === "review") {
+      tree.append(e.actor, b);
+      ledger.entries.push(b.usage);
+      refresh();
+      await sleep(900);
+    } else if (b.type === "formula") {
+      tree.append(e.actor, b);
+      ledger.entries.push(b.usage);
+      const n = tree.nodes.get(b.node);
+      if (n) await check(n);
+      recheck();
+      refresh();
     } else if (b.type === "chat") {
       tree.append(e.actor, b);
       ledger.entries.push(b.usage);
