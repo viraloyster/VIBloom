@@ -701,10 +701,8 @@ async function playRecorded(name: string) {
   }
   refresh();
   // Land on a real experiment when the session has one, so its bench shows.
-  if (!selectedId) {
-    const exp = [...tree.nodes.values()].find((n) => n.check?.kind === "oregonator");
-    if (exp) select(exp.id);
-  }
+  const exp = [...tree.nodes.values()].find((n) => n.check?.kind === "oregonator");
+  if (exp && !tree.views.size) select(exp.id);
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
