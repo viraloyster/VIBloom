@@ -135,6 +135,8 @@ export function steps(tree: IdeaTree): Step[] {
         const r = b.result;
         const verdict = "error" in r ? "could not conclude" : r.pass ? "holds" : "fails";
         const settles = tree.predictions.find((p) => p.run === e.seq);
+        const before = !b.via && !("error" in r) ? tree.settledBy(b.node, r.inputs) : undefined;
+        const earlier = before && before.seq < e.seq ? before : undefined;
         if (spec?.kind === "oregonator") {
           out.push({
             seq: e.seq,
@@ -148,7 +150,17 @@ export function steps(tree: IdeaTree): Step[] {
                 ? r.error
                 : `${verdict}${spec.question === "reduction_keeps_period" ? `: models differ by ${pct(r.value)} (tolerance ${pct(spec.tolerance)})` : ""}${seconds(r) ? `, ${seconds(r)}` : ""}`,
             tone: "error" in r ? "warn" : r.pass ? "ok" : "fail",
-            badges: runBadges(tree, e.seq, r),
+            badges: [
+              ...runBadges(tree, e.seq, r),
+              ...(earlier && !settles
+                ? [
+                    {
+                      text: `Muse not asked: run #${String(earlier.seq)} already settled it`,
+                      tone: "plain" as const,
+                    },
+                  ]
+                : []),
+            ],
             nodes: [b.node],
             detail: [
               [

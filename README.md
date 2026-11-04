@@ -109,6 +109,8 @@ assumption that breaks, in the open, so research can move past it.
    under, and is fed back to Muse with its measured numbers. If any of those
    change, it stays as history and is no longer offered as a current finding.
 
+![The recipe map: recipes around the chosen one, each run by the engine; period against the tree's target and the gap between models, with the fixed conditions listed](docs/img/map.jpg)
+
 ![The Process view: every step from the log, with who took it, what was recorded and whether it reproduced here](docs/img/process.jpg)
 
 ## What is new in the design
@@ -192,7 +194,8 @@ recorded chemistry sessions cost $0.04 and $0.07.
 - **The recipe map is a grid, not an optimiser.** Seven by seven recipes,
   log-spaced; a narrow target band can fall between cells until the map is
   re-centred closer in. It explores bromate and malonic acid only, and does
-  not judge whether a recipe is practical (0.879 M bromate is high).
+  not judge whether a recipe is practical: around 0.879 M bromate it offers
+  cells above any concentration that would dissolve.
 
 ## Vision
 
