@@ -26,6 +26,11 @@ const asModel = (m: string): OregonatorModel => {
   return m;
 };
 
+// The solver, models and classification protocol behind every verdict. A
+// change to any of them that can move a result raises it, so evidence from
+// an older engine is known as such.
+export const SOLVER_VERSION = 1;
+
 // fixed holds the parameters the claim does not set (q, eps); point overrides them.
 export function evaluatePoint(
   claim: Claim,

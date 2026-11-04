@@ -15,6 +15,15 @@ import { RECIPE_SOURCE } from "@vibloom/chem";
 import { el } from "../dom";
 import { clockPanel } from "./clock";
 import type { Step } from "./process";
+
+export interface Playback {
+  recorded: boolean;
+  playing: boolean;
+  paused: boolean;
+  pause: () => void;
+  next: () => void;
+  replay: () => void;
+}
 import { bench } from "./chem";
 import { statusLabel } from "./view";
 
@@ -106,12 +115,25 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
   const body = el("div", { class: "monitor-body" }, stage, side);
   host.replaceChildren(body, status);
   let openStep = -1;
+  // The process list follows its newest step until the person scrolls back.
+  let following = true;
   let shown = "";
 
   // What the view frame shows right now, as an image, or undefined if the
   // frame does not answer in time.
   let asked = 0;
-  const snapshot = async () => {
+  // The time limit covers the whole operation, a frame that never finishes
+  // loading included.
+  const snapshot = () =>
+    Promise.race([
+      picture(),
+      new Promise<undefined>((resolve) =>
+        setTimeout(() => {
+          resolve(undefined);
+        }, 10000),
+      ),
+    ]);
+  const picture = async () => {
     await loaded;
     return new Promise<string | undefined>((resolve) => {
       const id = ++asked;
@@ -139,13 +161,20 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
       status.textContent = text;
       status.classList.toggle("live", live);
     },
-    // The process behind the tree, newest last, one card per step.
-    process(list: Step[], mark: (ids: string[]) => void) {
+    // The process behind the tree, newest last, one card per step. Cards are
+    // buttons: focus or hover lights a step's roots, Enter or a click opens
+    // it. The list follows the newest step unless the person scrolled back.
+    process(list: Step[], mark: (ids: string[]) => void, play?: Playback) {
       shown = "";
       const cards = list.map((s, i) => {
         const card = el(
           "li",
-          { class: `step ${s.actor}${s.tone ? ` ${s.tone}` : ""}${i === openStep ? " open" : ""}` },
+          {
+            class: `step ${s.actor}${s.tone ? ` ${s.tone}` : ""}${i === openStep ? " open" : ""}${play?.playing && i === list.length - 1 ? " current" : ""}`,
+            tabindex: "0",
+            role: "button",
+            "aria-expanded": String(i === openStep),
+          },
           el(
             "div",
             { class: "step-head" },
@@ -157,6 +186,13 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
             el("span", { class: "stage" }, s.stage),
           ),
           el("p", { class: "step-title" }, s.title),
+          s.badges?.length
+            ? el(
+                "p",
+                { class: "badges" },
+                ...s.badges.map((x) => el("span", { class: `badge ${x.tone}` }, x.text)),
+              )
+            : null,
           s.result ? el("p", { class: "step-result" }, s.result) : null,
           el(
             "dl",
@@ -164,21 +200,54 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
             ...s.detail.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]),
           ),
         );
-        card.addEventListener("click", () => {
+        const toggle = () => {
           openStep = openStep === i ? -1 : i;
-          card.classList.toggle("open", openStep === i);
-          for (const c of list.keys()) if (c !== i) cards[c]?.classList.remove("open");
+          for (const [c, x] of cards.entries()) {
+            x.classList.toggle("open", c === openStep);
+            x.setAttribute("aria-expanded", String(c === openStep));
+          }
+        };
+        card.addEventListener("click", toggle);
+        card.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            toggle();
+          }
         });
-        card.addEventListener("mouseenter", () => {
+        const light = () => {
           mark(s.nodes);
-        });
-        card.addEventListener("mouseleave", () => {
+        };
+        const dark = () => {
           mark([]);
-        });
+        };
+        card.addEventListener("mouseenter", light);
+        card.addEventListener("mouseleave", dark);
+        card.addEventListener("focus", light);
+        card.addEventListener("blur", dark);
         return card;
       });
       const counts = (a: Step["actor"]) => list.filter((s) => s.actor === a).length;
       const refused = list.filter((s) => s.stage === "Refused").length;
+      const controls: Node[] = [];
+      if (play?.recorded) {
+        controls.push(
+          el("p", { class: "provenance" }, "Recorded Muse output - calculations running locally"),
+        );
+        const row = el("div", { class: "row play" });
+        if (play.playing) {
+          const pause = el("button", { class: "ghost-btn" }, play.paused ? "Resume" : "Pause");
+          pause.addEventListener("click", play.pause);
+          const next = el("button", { class: "ghost-btn" }, "Next step");
+          next.addEventListener("click", play.next);
+          row.append(pause, next);
+        }
+        const again = el("button", { class: "ghost-btn" }, "Replay");
+        again.addEventListener("click", play.replay);
+        row.append(again);
+        controls.push(row);
+      }
+      const ol = el("ol", { class: "steps" }, ...cards);
+      const jump = el("button", { class: "ghost-btn jump", hidden: true }, "Jump to latest");
       const timeline = el(
         "div",
         { class: "process" },
@@ -186,21 +255,46 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
           "div",
           { class: "process-head" },
           el("p", { class: "eyebrow" }, "Process, from the log"),
+          ...controls,
           el(
             "p",
             { class: "fine" },
-            `${String(counts("muse"))} steps by Muse, ${String(counts("engine"))} by the engine (${String(refused)} refused), ${String(counts("person"))} by you. Muse proposes; the engine computes, runs and decides. Hover a step to light its roots; click to see its inputs, cost and log entry.`,
+            `${String(counts("muse"))} steps by Muse, ${String(counts("engine"))} by the engine (${String(refused)} refused), ${String(counts("person"))} by you. Muse proposes; the engine computes, runs and decides. Hover or focus a step to light its roots; open it for inputs, cost and log entry.`,
           ),
         ),
-        el("ol", { class: "steps" }, ...cards),
+        ol,
+        jump,
       );
-      const keep = body.querySelector(".process .steps")?.scrollTop;
+      const before = body.querySelector<HTMLElement>(".process .steps");
+      const atEnd = !before || before.scrollTop + before.clientHeight >= before.scrollHeight - 24;
+      const keep = before?.scrollTop ?? 0;
+      const focused = before?.contains(document.activeElement)
+        ? [...before.children].indexOf(document.activeElement as Element)
+        : -1;
       body.replaceChildren(timeline);
-      const ol = timeline.querySelector(".steps");
-      if (ol) ol.scrollTop = keep ?? ol.scrollHeight;
+      if (following && atEnd) ol.scrollTop = ol.scrollHeight;
+      else ol.scrollTop = keep;
+      if (focused >= 0)
+        (ol.children[focused] as HTMLElement | undefined)?.focus({ preventScroll: true });
+      const sync = () => {
+        const end = ol.scrollTop + ol.clientHeight >= ol.scrollHeight - 24;
+        following = end;
+        jump.hidden = end;
+      };
+      ol.addEventListener("scroll", sync, { passive: true });
+      jump.addEventListener("click", () => {
+        following = true;
+        ol.scrollTop = ol.scrollHeight;
+      });
+      sync();
     },
     render(tree: IdeaTree, id: string | undefined) {
-      if (body.firstChild !== stage) body.replaceChildren(stage, side);
+      // Animations stop when taken off screen, so a bench coming back from
+      // the process view is built again rather than shown frozen.
+      if (body.firstChild !== stage) {
+        body.replaceChildren(stage, side);
+        benchEl = undefined;
+      }
       if (!id || !tree.nodes.has(id)) {
         overview(tree);
         return;
@@ -578,7 +672,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
     const go = el(
       "button",
       { class: "primary", disabled: actions.busy() },
-      "Investigate with Muse",
+      "Predict and run again",
     );
     go.addEventListener("click", () => {
       actions.investigate(n.id);
@@ -588,7 +682,9 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
       el(
         "p",
         { class: "fine" },
-        "Muse predicts first; the engine runs; a surprise makes Muse propose two explanations and one more run decides between them.",
+        tree.results.has(n.id)
+          ? "Muse predicts before every run on its own. A run of these values is already in the log, so a prediction made now is kept but not scored."
+          : "Muse predicts first; the engine runs; a surprise makes Muse propose two explanations and one more run decides between them.",
       ),
     );
     for (const p of tree.predictions.filter((x) => x.node === n.id)) {
@@ -764,7 +860,6 @@ function measured(tree: IdeaTree, seq: number | undefined): string {
 // Views of one run, built when first opened.
 function tabs(views: [string, () => HTMLElement][], first: number): HTMLElement {
   const body = el("div", { class: "tab-body" });
-  const built = new Map<number, HTMLElement>();
   const buttons = views.map(([label], i) => {
     const b = el("button", { class: "tab" }, label);
     b.addEventListener("click", () => {
@@ -775,12 +870,8 @@ function tabs(views: [string, () => HTMLElement][], first: number): HTMLElement 
   const open = (i: number) => {
     const make = views[i]?.[1];
     if (!make) return;
-    let v = built.get(i);
-    if (!v) {
-      v = make();
-      built.set(i, v);
-    }
-    body.replaceChildren(v);
+    // Built fresh each time: a panel's animation ends once it leaves the page.
+    body.replaceChildren(make());
     buttons.forEach((b, k) => b.classList.toggle("on", k === i));
   };
   open(first);

@@ -1,7 +1,7 @@
 // Evaluating a check: the model's expressions are parsed by the engine's own
 // arithmetic language, and the engine, not the model, decides pass or fail.
 
-import { evaluatePoint, fromRecipe, RECIPE_VERSION } from "@vibloom/chem";
+import { evaluatePoint, fromRecipe, RECIPE_VERSION, SOLVER_VERSION } from "@vibloom/chem";
 import type { Claim } from "@vibloom/contracts";
 import { compare, evaluate } from "./expr";
 import type { ArithmeticSpec, CheckError, CheckResult, CheckSpec, SimulationSpec } from "./types";
@@ -66,6 +66,7 @@ function simulate(spec: SimulationSpec, scope: Record<string, number>): CheckRes
       op: "<=",
       unit: "",
       inputs,
+      engine: SOLVER_VERSION,
       sim: {
         outcome: e.outcome,
         periods: {

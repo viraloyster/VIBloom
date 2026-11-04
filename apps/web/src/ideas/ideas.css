@@ -1767,8 +1767,68 @@ h1 {
   --actor: #e9eef6;
 }
 
-.step:hover {
+.step:hover,
+.step:focus-visible {
   border-color: var(--actor);
+  outline: none;
+}
+
+.step:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--actor) 45%, transparent);
+}
+
+/* The step a recorded playback just reached. */
+.step.current {
+  border-color: var(--actor);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--actor) 25%, transparent);
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin: 6px 0 0;
+}
+
+.badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--muted);
+  border: 1px solid rgb(255 255 255 / 12%);
+}
+
+.badge.ok {
+  color: var(--holds);
+  border-color: color-mix(in srgb, var(--holds) 35%, transparent);
+}
+
+.badge.fail {
+  color: #ff8fa3;
+  border-color: rgb(255 77 109 / 35%);
+}
+
+.badge.warn {
+  color: var(--at_risk);
+  border-color: color-mix(in srgb, var(--at_risk) 35%, transparent);
+}
+
+.process-head .provenance {
+  color: var(--accent-2);
+  font-size: 12px;
+}
+
+.process-head .play {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.process .jump {
+  align-self: center;
+  margin: -44px 0 12px;
+  position: relative;
 }
 
 .step.fail {

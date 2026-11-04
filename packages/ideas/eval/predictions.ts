@@ -37,7 +37,8 @@ const unseen = earlier.rows.filter((r) => !r.seen);
 const baseRate = unseen.filter((r) => r.truth === "holds").length / unseen.length;
 const BUDGET = 1;
 
-const example = new URL("../../../apps/web/public/examples/period-reduction.json", import.meta.url);
+// The session the lesson came from, frozen with the evaluation.
+const example = new URL("./lesson-session.json", import.meta.url);
 const log = JSON.parse(await readFile(example, "utf8")) as { events: IdeaEvent[] };
 const base = IdeaTree.replay(log.events);
 for (const run of base.runsToConfirm()) {

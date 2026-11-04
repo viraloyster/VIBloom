@@ -14,8 +14,16 @@ export interface Step {
   title: string;
   result?: string;
   tone?: "ok" | "fail" | "warn" | undefined;
+  // Separate facts about the step: what was recorded, whether it reproduced
+  // here, whether it still holds for the tree as it is now.
+  badges?: Badge[];
   nodes: string[];
   detail: [string, string][];
+}
+
+export interface Badge {
+  text: string;
+  tone: "ok" | "fail" | "warn" | "plain";
 }
 
 const pct = (x: number) => `${(x * 100).toFixed(x < 0.1 ? 1 : 0)}%`;
@@ -43,6 +51,27 @@ function seconds(r: CheckResult): string {
   const full = r.sim?.periods.full;
   if (full === undefined) return "";
   return ts === undefined ? `period ${num(full)}` : `period ${num(full * ts)} s`;
+}
+
+// What a recorded run says, whether this browser reproduced it, and whether
+// the tree has moved on from its values since.
+function runBadges(tree: IdeaTree, seq: number, r: CheckResult | { error: string }): Badge[] {
+  const run = tree.runs.find((x) => x.seq === seq);
+  const out: Badge[] = [
+    {
+      text: `Recorded: ${"error" in r ? "no conclusion" : r.pass ? "holds" : "fails"}`,
+      tone: "error" in r ? "warn" : r.pass ? "ok" : "fail",
+    },
+  ];
+  if (run?.state === "confirmed") out.push({ text: "Reproduced here", tone: "ok" });
+  else if (run?.state === "failed") out.push({ text: "Did not reproduce here", tone: "fail" });
+  else out.push({ text: "Not yet re-run here", tone: "warn" });
+  if (run?.purpose === "check") {
+    const latest = tree.latestRun(run.node)?.seq === seq;
+    const stale = tree.status(run.node) === "stale";
+    if (!latest || stale) out.push({ text: "Premises changed since", tone: "plain" });
+  }
+  return out;
 }
 
 export function steps(tree: IdeaTree): Step[] {
@@ -117,6 +146,7 @@ export function steps(tree: IdeaTree): Step[] {
                 ? r.error
                 : `${verdict}${spec.question === "reduction_keeps_period" ? `: models differ by ${pct(r.value)} (tolerance ${pct(spec.tolerance)})` : ""}${seconds(r) ? `, ${seconds(r)}` : ""}`,
             tone: "error" in r ? "warn" : r.pass ? "ok" : "fail",
+            badges: runBadges(tree, e.seq, r),
             nodes: [b.node],
             detail: [
               [
@@ -127,7 +157,7 @@ export function steps(tree: IdeaTree): Step[] {
               ],
               [
                 "Decided by",
-                "stiff solver and the classification protocol, re-run in this browser",
+                "stiff solver and the classification protocol; the recorded result stays as recorded, and this browser runs it again beside it",
               ],
               link(e),
             ],
@@ -153,10 +183,13 @@ export function steps(tree: IdeaTree): Step[] {
         if (batch && batch.stage === "Computation") {
           batch.nodes.push(b.node);
           batch.detail.push([title(b.node), line]);
-          const fails = batch.detail.filter(([, v]) => v.endsWith("fails")).length;
+          const lines = batch.detail.map(([, v]) => v);
+          const fails = lines.filter((v) => v.endsWith(": fails")).length;
+          const holds = lines.filter((v) => v.endsWith(": holds")).length;
+          const open = lines.length - fails - holds;
           batch.title = `Computed ${String(batch.nodes.length)} checks`;
-          batch.result = `${String(fails)} fail, ${String(batch.nodes.length - fails)} do not`;
-          batch.tone = fails ? "fail" : "ok";
+          batch.result = `${String(holds)} hold, ${String(fails)} fail${open ? `, ${String(open)} could not be evaluated` : ""}`;
+          batch.tone = fails ? "fail" : open ? "warn" : "ok";
           break;
         }
         batch = {
@@ -189,15 +222,32 @@ export function steps(tree: IdeaTree): Step[] {
         });
         break;
       }
-      case "predict":
+      case "predict": {
+        const p = tree.predictions.find((x) => x.id === b.id);
+        const prior = tree.runs.find(
+          (r) => r.node === b.node && r.purpose === "check" && r.seq < e.seq,
+        );
         out.push({
           seq: e.seq,
           actor: "muse",
           stage: "Prediction",
           title: `Before the run, Muse committed: it ${b.expect} (${pct(Math.min(0.99, Math.max(0.5, b.confidence)))})`,
           result: b.reason,
+          ...(p && !p.blind ? { tone: "warn" as const } : {}),
+          badges: p?.blind
+            ? [{ text: "Blind: no run of these values existed yet", tone: "ok" }]
+            : [
+                {
+                  text: `Not blind: a run of these values was already in the log${prior ? ` (#${String(prior.seq)})` : ""}; not scored`,
+                  tone: "warn",
+                },
+              ],
           nodes: [b.node],
           detail: [
+            [
+              "Muse was shown",
+              "the assumption, its question and tolerance, the values and earlier lessons; never a result",
+            ],
             [
               "Values",
               Object.entries(b.inputs)
@@ -210,6 +260,7 @@ export function steps(tree: IdeaTree): Step[] {
           ],
         });
         break;
+      }
       case "hypotheses": {
         const l = tree.lessons.find((x) => x.id === b.id);
         out.push({
@@ -251,21 +302,38 @@ export function steps(tree: IdeaTree): Step[] {
               ? r.error
               : `it ${r.pass ? "holds" : "fails"}${r.sim?.periods.reduced !== undefined ? ` (models differ by ${pct(r.value)})` : ""}`,
           tone: "error" in r ? "warn" : undefined,
+          badges: runBadges(tree, e.seq, r),
           nodes: l ? [l.node] : [],
           detail: [link(e)],
         });
         if (l && d) {
           const kept = l.candidates[d.supported];
+          const state = tree.lessonState(l);
+          const changes = tree.lessonChanges(l);
           out.push({
             seq: e.seq,
             actor: "engine",
             stage: "Lesson",
-            title: `Consistent with ${d.supported ? "B" : "A"}, of the two considered; the other is contradicted`,
+            title: `Consistent with hypothesis ${d.supported ? "B" : "A"} of the two considered; the other is contradicted`,
             result: kept?.explanation ?? "",
-            tone: "ok",
+            tone: state === "current" ? "ok" : "warn",
+            badges: [
+              {
+                text:
+                  state === "current"
+                    ? "Current: its runs reproduced, nothing it rests on changed"
+                    : state === "invalidated"
+                      ? `Premises changed: ${changes.join(", ")}; kept as history`
+                      : state === "unverified"
+                        ? "Not yet reproduced here"
+                        : "A run it rests on did not reproduce",
+                tone: state === "current" ? "ok" : "warn",
+              },
+              { text: "Cause not established", tone: "plain" },
+            ],
             nodes: [l.node, ...tree.ancestors(l.node).map((a) => a.id)],
             detail: [
-              ["State", tree.lessonState(l)],
+              ["State", state],
               [
                 "Learned at",
                 Object.entries(l.basis)

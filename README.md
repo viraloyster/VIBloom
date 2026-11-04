@@ -44,8 +44,8 @@ settles.
    ever runs). You can write a formula by hand; Muse maps your symbols to the
    tree's parameters and the engine decides whether it computes. In
    chemistry, Muse attaches real experiments that a stiff solver runs.
-4. **Predict, fail, learn.** Before an experiment runs, Muse commits to an
-   outcome and a confidence. If the run contradicts it, Muse registers two
+4. **Predict, fail, learn.** Before every experiment runs, Muse commits to an
+   outcome and a confidence, shown no result. If the run contradicts it, Muse registers two
    explanations and one discriminating test before that test runs; the engine
    runs it and code decides which explanation the evidence fits. The lesson
    keeps the measured contrast, Muse's interpretation and what one test
@@ -71,21 +71,33 @@ the recorded session:
 1. Muse reads the handwritten recipe and grows the tree: does the recipe
    oscillate, does the period hit 60 s +/- 10, can the reduction be trusted.
 2. VIBloom turns the recipe into the model's parameters with cited rate
-   constants and runs it: it oscillates, but every 6.5 minutes, so the
-   60-second root is red with the real number.
-3. With malonic acid raised to 0.2 M the clock ticks every 67 s and that root
-   turns green, but the two-variable model is now 42% off: speeding the clock
-   up breaks the simplification.
-4. Muse had predicted the reduction would hold (78%). It proposes two
-   explanations; the engine's test contradicts one and is consistent with the
-   other (eliminating bromide removes the delay that times the cycle).
+   constants. Before each experiment runs, Muse commits to an outcome; then
+   the engine runs it: it oscillates, but every 6.5 minutes, so the 60-second
+   root is red with the real number.
+3. With malonic acid raised to 0.2 M, Muse predicts again before the runs.
+   The clock ticks every 67 s and that root turns green, but the two-variable
+   model is now 42% off, against Muse's "holds" (85%): speeding the clock up
+   breaks the simplification.
+4. Muse registers two explanations and a recipe change that tells them apart
+   (ten times the bromate). The engine runs it: the reduction holds again,
+   consistent with one explanation (eps grew too large for the time scales to
+   stay separated) and contradicting the other. One test does not establish
+   a cause, and the lesson says so.
 
 The **Process** view shows the same session as a timeline read from the log:
 each step says whether Muse, the engine or the person took it, what went in,
 what came out, what it cost and which log entry holds it, and lights the
-roots it touched. Whatever the engine refused (an off-protocol root, a repair
-that changed more than a name, a value the recipe already sets) is listed in
-place, kept beside the log without changing its state.
+roots it touched. Each run keeps three facts apart: what was recorded, whether
+this browser reproduced it, and whether the tree has moved on since. Each
+prediction says whether it was blind (no run of its values existed yet; only
+blind ones are scored). Whatever the engine refused (an off-protocol root, a
+repair that changed more than a name, a value the recipe already sets) is
+listed in place, beside the log without changing its state.
+
+A recorded session replays its own log, event by event, with the same order
+and hashes; the browser only adds its re-runs beside it, and the playback can
+be paused, stepped or replayed. Its cost meter shows what the recording cost,
+never this tab's spend.
 
 The monitor shows the period in seconds, a beaker changing colour at that
 rhythm (real time or a stated speed-up) and both models' concentrations side
@@ -135,8 +147,11 @@ the budget. A recorded session costs about $0.03 to $0.12.
   silent "no oscillation" ([validation](docs/validation.md)).
 - **Record**: a hash-chained log; replay recomputes every formula, refuses a
   result that does not reproduce, and re-runs experiments in the browser.
-  Unknown event types are refused.
-- **Tests**: 211, including regressions for every issue found in review
+  Unknown event types are refused. A lesson records what it was learned
+  under (values, question, tolerance, recipe conversion, solver version); if
+  any of them changes, it stays readable as history but is no longer offered
+  as a current finding.
+- **Tests**: 218, including regressions for every issue found in review
   (circular checks, inverted repairs, lessons without history, lost
   prediction history, confirmations that changed the record).
 
@@ -148,7 +163,7 @@ the budget. A recorded session costs about $0.03 to $0.12.
 | Muse's prompts and JSON schemas                                      | [`packages/ideas/src/protocol.ts`](packages/ideas/src/protocol.ts)                                                     |
 | Calls to the Meta Model API (streaming, vision, token count, budget) | [`packages/ideas/src/muse.ts`](packages/ideas/src/muse.ts), [`packages/ideas/src/cost.ts`](packages/ideas/src/cost.ts) |
 | The arithmetic language (no `eval`)                                  | [`packages/ideas/src/expr.ts`](packages/ideas/src/expr.ts)                                                             |
-| The number guard                                                     | [`packages/ideas/src/numbers.ts`](packages/ideas/src/numbers.ts)                                                       |
+| The number detector (heuristic)                                      | [`packages/ideas/src/numbers.ts`](packages/ideas/src/numbers.ts)                                                       |
 | The stiff solver and the Oregonator                                  | [`packages/chem/`](packages/chem/)                                                                                     |
 | Tests                                                                | [`packages/ideas/src/ideas.test.ts`](packages/ideas/src/ideas.test.ts), and next to the code in each package           |
 | The evaluation script and its frozen grid                            | [`packages/ideas/eval/`](packages/ideas/eval/)                                                                         |

@@ -1,0 +1,464 @@
+{
+  "format": "vibloom-ideas-1",
+  "events": [
+    {
+      "seq": 0,
+      "prev": "0000000000000000000000000000000000000000000000000000000000000000",
+      "actor": "person",
+      "body": {
+        "type": "goal",
+        "text": "A Belousov-Zhabotinsky clock whose period I can predict with the simpler two-variable Oregonator instead of the full model",
+        "mode": "standard"
+      },
+      "hash": "a11ca5ccb0442cad9ce67928af58ef0149f799bcf2ad8658f80860f9eb953940"
+    },
+    {
+      "seq": 1,
+      "prev": "a11ca5ccb0442cad9ce67928af58ef0149f799bcf2ad8658f80860f9eb953940",
+      "actor": "muse:muse-spark-1.3",
+      "body": {
+        "type": "grow",
+        "under": "goal",
+        "nodes": [
+          {
+            "id": "full-oscillation",
+            "parent": "goal",
+            "title": "Full model oscillates",
+            "statement": "The full three-variable Oregonator sustains limit-cycle oscillations at the chosen chemistry.",
+            "axis": "principles",
+            "role": "assumption",
+            "criticality": "critical",
+            "risk": "medium",
+            "rationale": "If the full model does not oscillate there is no clock period to preserve.",
+            "params": [
+              {
+                "name": "s",
+                "kind": "external",
+                "value": 1,
+                "unit": "dimensionless",
+                "origin": "reference",
+                "source": "Field and Noyes 1974 J. Chem. Phys; Tyson 1982 rate compilation"
+              },
+              {
+                "name": "q",
+                "kind": "external",
+                "value": 0.0000762,
+                "unit": "dimensionless",
+                "origin": "reference",
+                "source": "Field and Noyes 1974 J. Chem. Phys; Tyson 1982"
+              },
+              {
+                "name": "eps",
+                "kind": "external",
+                "value": 0.01,
+                "unit": "dimensionless",
+                "origin": "reference",
+                "source": "Field and Noyes 1974 J. Chem. Phys; Tyson 1982"
+              },
+              {
+                "name": "eps_prime",
+                "kind": "external",
+                "value": 0.0002,
+                "unit": "dimensionless",
+                "origin": "reference",
+                "source": "Tyson 1982 quasi-steady Oregonator range"
+              }
+            ],
+            "uses": [],
+            "suggestions": [],
+            "check": {
+              "kind": "oregonator",
+              "description": "Engine integrates the full three-variable Oregonator at the chosen kinetics to decide sustained oscillation.",
+              "question": "oscillates",
+              "tolerance": 0.05,
+              "op": "<=",
+              "unit": ""
+            },
+            "basis": [],
+            "proposed": false,
+            "expanded": false
+          },
+          {
+            "id": "reduced-oscillation",
+            "parent": "goal",
+            "title": "Reduction still oscillates",
+            "statement": "The simpler two-variable reduction still sustains oscillations at the same chemistry.",
+            "axis": "methods",
+            "role": "assumption",
+            "criticality": "critical",
+            "risk": "medium",
+            "rationale": "Fast-variable elimination can stabilize the steady state and kill the rhythm even when the full model oscillates.",
+            "params": [],
+            "uses": ["eps_prime", "eps", "q", "s"],
+            "suggestions": [],
+            "check": {
+              "kind": "oregonator",
+              "description": "Engine integrates the two-variable quasi-steady reduction at the same kinetics to decide sustained oscillation.",
+              "question": "reduced_oscillates",
+              "tolerance": 0.05,
+              "op": "<=",
+              "unit": ""
+            },
+            "basis": [],
+            "proposed": false,
+            "expanded": false
+          },
+          {
+            "id": "period-preserved",
+            "parent": "goal",
+            "title": "Period matches within tolerance",
+            "statement": "The two-variable period stays within five percent of the full-model period.",
+            "axis": "methods",
+            "role": "assumption",
+            "criticality": "critical",
+            "risk": "high",
+            "rationale": "This is the core predictability claim: the cheap model gives the same clock rate as the full model.",
+            "params": [],
+            "uses": ["s", "q", "eps", "eps_prime"],
+            "suggestions": [],
+            "check": {
+              "kind": "oregonator",
+              "description": "Engine compares full versus reduced dimensionless periods; holds when relative period error is within tolerance.",
+              "question": "reduction_keeps_period",
+              "tolerance": 0.05,
+              "op": "<=",
+              "unit": ""
+            },
+            "basis": [],
+            "proposed": false,
+            "expanded": false
+          },
+          {
+            "id": "timescale-separation",
+            "parent": "goal",
+            "title": "Fast-slow separation holds",
+            "statement": "The fast intermediate relaxes much faster than the activator so elimination is justified.",
+            "axis": "principles",
+            "role": "assumption",
+            "criticality": "major",
+            "risk": "low",
+            "rationale": "The reduction is justified only when the eliminated variable relaxes much faster than the activator.",
+            "params": [],
+            "uses": ["eps_prime", "eps"],
+            "suggestions": [],
+            "check": {
+              "description": "Tests fast-slow separation required for quasi-steady elimination of the fast intermediate.",
+              "value": "eps_prime / eps",
+              "op": "<=",
+              "limit": "0.05",
+              "unit": "dimensionless"
+            },
+            "basis": [],
+            "proposed": false,
+            "expanded": false
+          },
+          {
+            "id": "seconds-mapping",
+            "parent": "goal",
+            "title": "Clock time scale is known",
+            "statement": "The dimensionless time unit converts to laboratory seconds through a known and stable rate scale.",
+            "axis": "definitions",
+            "role": "assumption",
+            "criticality": "major",
+            "risk": "high",
+            "rationale": "Oregonator time is dimensionless; a wall-clock prediction needs an externally calibrated time scale.",
+            "params": [
+              {
+                "name": "tau_seconds",
+                "kind": "external",
+                "value": 10,
+                "unit": "second",
+                "origin": "reference",
+                "source": "Field Noyes 1974 rate constants, Tyson scaling discussion: inverse pseudo-first-order rate"
+              }
+            ],
+            "uses": [],
+            "suggestions": [],
+            "basis": [],
+            "proposed": false,
+            "expanded": false
+          },
+          {
+            "id": "lab-realization",
+            "parent": "goal",
+            "title": "Chemistry is realizable in glassware",
+            "statement": "A stirred Belousov-Zhabotinsky mixture can be prepared that realizes the modeled regime without chaos or extinction.",
+            "axis": "cases",
+            "role": "assumption",
+            "criticality": "minor",
+            "risk": "high",
+            "rationale": "Model agreement does not guarantee a bench recipe with matching stoichiometry, concentrations, and mixing.",
+            "params": [],
+            "uses": ["s", "q"],
+            "suggestions": [],
+            "basis": [],
+            "proposed": false,
+            "expanded": false
+          }
+        ],
+        "summary": "Read as predicting the dimensionless oscillation period with the quasi-steady two-variable Oregonator within 5 percent, not as building calibrated wall-clock hardware. The main alternative would require absolute seconds accuracy including measured rates and reactor nonidealities.",
+        "usage": {
+          "model": "muse-spark-1.3",
+          "input": 1663,
+          "cached": 1649,
+          "output": 3653,
+          "reasoning": 1535,
+          "cost": 0.0157901
+        }
+      },
+      "hash": "c758ca863e4ab9a4da4d89a1c86f8dce68e1df496de51382fb6d022c46258a07"
+    },
+    {
+      "seq": 2,
+      "prev": "c758ca863e4ab9a4da4d89a1c86f8dce68e1df496de51382fb6d022c46258a07",
+      "actor": "engine",
+      "body": {
+        "type": "check",
+        "node": "full-oscillation",
+        "result": {
+          "pass": true,
+          "value": 0,
+          "limit": 0,
+          "op": "<=",
+          "unit": "",
+          "inputs": {
+            "s": 1,
+            "q": 0.0000762,
+            "eps": 0.01,
+            "eps_prime": 0.0002
+          },
+          "sim": {
+            "outcome": "holds",
+            "periods": {
+              "full": 11.548595419017692
+            },
+            "observations": {
+              "full": "oscillation"
+            }
+          }
+        }
+      },
+      "hash": "fc9d0a977027f7a1165059d3519fb2d8a5422ff36fc8e216a8053f0f3a585eb5"
+    },
+    {
+      "seq": 3,
+      "prev": "fc9d0a977027f7a1165059d3519fb2d8a5422ff36fc8e216a8053f0f3a585eb5",
+      "actor": "engine",
+      "body": {
+        "type": "check",
+        "node": "reduced-oscillation",
+        "result": {
+          "pass": true,
+          "value": 0,
+          "limit": 0,
+          "op": "<=",
+          "unit": "",
+          "inputs": {
+            "s": 1,
+            "q": 0.0000762,
+            "eps": 0.01,
+            "eps_prime": 0.0002
+          },
+          "sim": {
+            "outcome": "holds",
+            "periods": {
+              "reduced": 7.450052995895725
+            },
+            "observations": {
+              "reduced": "oscillation"
+            }
+          }
+        }
+      },
+      "hash": "33b62eacc8b1c85b66ba111d4146bf66e7569909f03182777a82792989a13650"
+    },
+    {
+      "seq": 4,
+      "prev": "33b62eacc8b1c85b66ba111d4146bf66e7569909f03182777a82792989a13650",
+      "actor": "engine",
+      "body": {
+        "type": "check",
+        "node": "period-preserved",
+        "result": {
+          "pass": false,
+          "value": 0.5501360091505223,
+          "limit": 0.05,
+          "op": "<=",
+          "unit": "",
+          "inputs": {
+            "s": 1,
+            "q": 0.0000762,
+            "eps": 0.01,
+            "eps_prime": 0.0002
+          },
+          "sim": {
+            "outcome": "fails",
+            "periods": {
+              "full": 11.548595419017692,
+              "reduced": 7.450052995895725
+            },
+            "observations": {
+              "full": "oscillation",
+              "reduced": "oscillation"
+            }
+          }
+        }
+      },
+      "hash": "8ab3adff59984e0d0b95289b644a75d1eec19817d0c8110b17fce8481af8970f"
+    },
+    {
+      "seq": 5,
+      "prev": "8ab3adff59984e0d0b95289b644a75d1eec19817d0c8110b17fce8481af8970f",
+      "actor": "engine",
+      "body": {
+        "type": "check",
+        "node": "timescale-separation",
+        "result": {
+          "pass": true,
+          "value": 0.02,
+          "limit": 0.05,
+          "op": "<=",
+          "unit": "dimensionless",
+          "inputs": {
+            "eps_prime": 0.0002,
+            "eps": 0.01
+          }
+        }
+      },
+      "hash": "beb423440472e971ff0e5656d472a5d922cd88ee1c493d50fbc5d0b3e3557202"
+    },
+    {
+      "seq": 6,
+      "prev": "beb423440472e971ff0e5656d472a5d922cd88ee1c493d50fbc5d0b3e3557202",
+      "actor": "muse:muse-spark-1.3",
+      "body": {
+        "type": "predict",
+        "id": "p1",
+        "node": "period-preserved",
+        "inputs": {
+          "s": 1,
+          "q": 0.0000762,
+          "eps": 0.01,
+          "eps_prime": 0.0002
+        },
+        "expect": "holds",
+        "confidence": 0.85,
+        "reason": "eps_prime is 50x smaller than eps so fast-variable QSSA should keep period error below 5%.",
+        "uses": [],
+        "usage": {
+          "model": "muse-spark-1.3",
+          "input": 242,
+          "cached": 113,
+          "output": 625,
+          "reasoning": 556,
+          "cost": 0.0028344499999999996
+        }
+      },
+      "hash": "8d8e055f5c61d3715a48c98fd05d98e9759da72f60272e5cf5f5ff2404e449da"
+    },
+    {
+      "seq": 7,
+      "prev": "8d8e055f5c61d3715a48c98fd05d98e9759da72f60272e5cf5f5ff2404e449da",
+      "actor": "engine",
+      "body": {
+        "type": "check",
+        "node": "period-preserved",
+        "result": {
+          "pass": false,
+          "value": 0.5501360091505223,
+          "limit": 0.05,
+          "op": "<=",
+          "unit": "",
+          "inputs": {
+            "s": 1,
+            "q": 0.0000762,
+            "eps": 0.01,
+            "eps_prime": 0.0002
+          },
+          "sim": {
+            "outcome": "fails",
+            "periods": {
+              "full": 11.548595419017692,
+              "reduced": 7.450052995895725
+            },
+            "observations": {
+              "full": "oscillation",
+              "reduced": "oscillation"
+            }
+          }
+        }
+      },
+      "hash": "74d3f188f4467b451abee5c8d8ef4e53683e0a7774592aae1e3206b413eccba2"
+    },
+    {
+      "seq": 8,
+      "prev": "74d3f188f4467b451abee5c8d8ef4e53683e0a7774592aae1e3206b413eccba2",
+      "actor": "muse:muse-spark-1.3",
+      "body": {
+        "type": "hypotheses",
+        "id": "lesson-1",
+        "prediction": "p1",
+        "candidates": [
+          {
+            "expect": "holds",
+            "explanation": "Incomplete timescale separation leaves fast-variable transient timing in the full period that the reduction removes",
+            "scope": "applies where fast-variable relaxation still contributes period error and shrinking eps_prime removes it"
+          },
+          {
+            "expect": "fails",
+            "explanation": "Reduction deletes slow feedback that sets oscillation period independently of fast-variable speed",
+            "scope": "applies where period mismatch persists under further timescale separation at current s and q"
+          }
+        ],
+        "test": {
+          "param": "eps_prime",
+          "value": 0.00002
+        },
+        "open": "A single test cannot establish the range of eps_prime over which the responsible mechanism governs period error.",
+        "usage": {
+          "model": "muse-spark-1.3",
+          "input": 550,
+          "cached": 113,
+          "output": 2228,
+          "reasoning": 2021,
+          "cost": 0.010032200000000002
+        }
+      },
+      "hash": "635f0e51fcc043df3e052b9e74929f8f41342d01ea5bf44c158fba5ab7bf6fbe"
+    },
+    {
+      "seq": 9,
+      "prev": "635f0e51fcc043df3e052b9e74929f8f41342d01ea5bf44c158fba5ab7bf6fbe",
+      "actor": "engine",
+      "body": {
+        "type": "test",
+        "hypotheses": "lesson-1",
+        "result": {
+          "pass": true,
+          "value": 0.03916139589088791,
+          "limit": 0.05,
+          "op": "<=",
+          "unit": "",
+          "inputs": {
+            "s": 1,
+            "q": 0.0000762,
+            "eps": 0.01,
+            "eps_prime": 0.00002
+          },
+          "sim": {
+            "outcome": "holds",
+            "periods": {
+              "full": 7.741807470676093,
+              "reduced": 7.450052995895725
+            },
+            "observations": {
+              "full": "oscillation",
+              "reduced": "oscillation"
+            }
+          }
+        }
+      },
+      "hash": "fe91a7140ee064b4b43ce10d1ddc4a1e728646eeed48c0995e2253fc5e9f4071"
+    }
+  ]
+}

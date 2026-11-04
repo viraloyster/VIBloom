@@ -190,7 +190,8 @@ function animate(
       return;
     }
     shown = true;
-    t = (t + ((now - last) / 1000) * speed()) % span;
+    // A hidden tab pauses frames; resume where it was, not with a jump.
+    t = (t + (Math.min(now - last, 100) / 1000) * speed()) % span;
     last = now;
     // Nearest sample: the trace is evenly spaced.
     const i = Math.min(zs.length - 1, Math.round((t / span) * (zs.length - 1)));

@@ -19,8 +19,9 @@ lesson comes from three points, the ones closest to the tolerance.
   model's period within 5%? (`reduction_keeps_period`, q 7.62e-5, eps 0.01.)
 - **Ground truth first.** The chemistry engine settles every point before Muse
   is asked anything. Points the engine cannot conclude on are excluded.
-- **The lesson.** The one in the recorded session
-  (`apps/web/public/examples/period-reduction.json`): at s 1, eps_prime 2e-4
+- **The lesson.** The one in the session frozen with the evaluation
+  (`packages/ideas/eval/lesson-session.json`; the app's example has since
+  been re-recorded with every prediction made before its run): at s 1, eps_prime 2e-4
   the reduction was 55% off; at eps_prime 2e-5 it was 3.9% off, consistent
   with the time-scale explanation.
 - **Blind predictions.** The same prompt and input the app uses. The lesson's

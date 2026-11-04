@@ -14,7 +14,7 @@ export {
 export type { Classification, ModelPoint, Reading, Run } from "./classify";
 export { DETECTION, PROTOCOL, classify, peaks, read, runOnce } from "./classify";
 export type { PointEvaluation } from "./evaluate";
-export { evaluatePoint } from "./evaluate";
+export { evaluatePoint, SOLVER_VERSION } from "./evaluate";
 export type { Recipe, RecipeParams } from "./recipe";
 export {
   fromRecipe,

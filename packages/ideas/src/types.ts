@@ -62,6 +62,8 @@ export interface CheckResult {
   unit: string;
   // Parameters the check read, as they were when it ran.
   inputs: Record<string, number>;
+  // For an experiment: the solver version it ran on (absent means 1).
+  engine?: number;
   // For an experiment: what each model did.
   sim?: {
     outcome: string;
@@ -244,6 +246,16 @@ export interface Lesson {
   run?: number;
   // Numbers in Muse's text that were not in the data it was given.
   unsupported: string[];
+  // What the surprise was learned under, besides the values: the question,
+  // its tolerance, the recipe conversion and the solver.
+  identity: LessonIdentity;
+}
+
+export interface LessonIdentity {
+  question: string;
+  tolerance: number;
+  recipe_version?: number;
+  engine: number;
 }
 
 export interface Prediction {
@@ -256,5 +268,8 @@ export interface Prediction {
   uses: string[];
   // The first run of exactly these values after the prediction; permanent.
   run?: number;
+  // No run of these values on this experiment was in the log yet. A
+  // prediction made after one is kept, but it is not counted as foresight.
+  blind: boolean;
   unsupported: string[];
 }

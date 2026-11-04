@@ -775,6 +775,44 @@ describe("predictions and lessons", () => {
       }),
     ).toThrow(/different outcomes/);
   });
+
+  it("keeps a prediction made after a run of its values, but does not score it", () => {
+    const t = clock();
+    const spec = runNow(t);
+    t.confirm(seqOf(t, "kinetics"), runCheck(spec, t.scope()));
+    t.append("muse", predict("holds"));
+    expect(t.predictions[0]?.blind).toBe(false);
+    runNow(t);
+    expect(t.calibration()).toMatchObject({ made: 0 });
+    // At new values nothing was run yet: the next prediction is foresight.
+    t.append("person", { type: "set_param", name: "s", value: 2, source: "edit" });
+    t.append("muse", { ...predict("holds", "p2"), inputs: { ...inputs, s: 2 } });
+    expect(t.predictions[1]?.blind).toBe(true);
+  });
+
+  it("records what a lesson was learned under and stops calling it current when that changes", () => {
+    const t = clock();
+    t.append("muse", predict("holds"));
+    const spec = runNow(t);
+    t.confirm(seqOf(t, "kinetics"), runCheck(spec, t.scope()));
+    t.append("muse", hypotheses());
+    const r = runCheck(spec, { ...inputs, s: 2 });
+    t.append("engine", { type: "test", hypotheses: "h1", result: r });
+    const l = t.lessons[0];
+    if (!l) throw new Error("no lesson");
+    t.confirm(l.run ?? -1, r);
+    expect(l.identity).toMatchObject({
+      question: "reduction_keeps_period",
+      tolerance: 0.05,
+      engine: 1,
+    });
+    expect(t.lessonState(l)).toBe("current");
+    // The same log under a newer solver: history, not a current finding.
+    l.identity.engine = 0;
+    expect(t.lessonChanges(l)).toEqual(["solver"]);
+    expect(t.lessonState(l)).toBe("invalidated");
+    expect(t.lessonsForModel("kinetics")[0]?.applies_here).toMatch(/history/);
+  });
 });
 
 describe("cost", () => {
@@ -856,6 +894,10 @@ describe("recorded sessions", () => {
         expect(run.state).toBe("confirmed");
       }
       for (const l of t.lessons) expect(t.lessonState(l)).toBe("current");
+      // Every prediction was made before any run of its values, and nothing
+      // in a recording is stale under the current engine.
+      for (const p of t.predictions) expect(p.blind).toBe(true);
+      for (const n of t.nodes.values()) expect(t.status(n.id)).not.toBe("stale");
     }, 60000);
   }
 });
@@ -869,6 +911,30 @@ describe("numbers Muse writes", () => {
     expect(unsupportedNumbers("the error scales like 0.003 per step", data)).toEqual(["0.003"]);
     // Counts and digits inside names are prose, not claims.
     expect(unsupportedNumbers("two explanations, 3 runs, eps_prime2 and s1", data)).toEqual([]);
+  });
+
+  it("treats a small number with a unit as a quantity, not a count", () => {
+    expect(unsupportedNumbers("it ticks every 5 s at 2 M", [60])).toEqual(["5", "2"]);
+    expect(unsupportedNumbers("3 runs and 2 explanations", [60])).toEqual([]);
+  });
+
+  it("does not let an earlier answer make its own figure supported", () => {
+    const t = new IdeaTree();
+    t.append("person", { type: "goal", text: "g", mode: "standard" });
+    const nodes = t.admit("goal", [grown("beam", { params: [p("load", 5), p("strength", 3)] })]);
+    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    const chat = (answer: string) => ({
+      type: "chat" as const,
+      focus: "beam",
+      question: "why?",
+      answer,
+      cites: ["beam"],
+      asked: t.scope(),
+      usage,
+    });
+    t.append("muse", chat("It would need 4.2 MPa."));
+    t.append("muse", chat("As I said, 4.2 MPa."));
+    expect(t.chat.map((c) => c.unsupported)).toEqual([["4.2"], ["4.2"]]);
   });
 
   it("derives the flags from the log, so a recorded answer is checked on every replay", () => {

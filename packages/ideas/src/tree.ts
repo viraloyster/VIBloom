@@ -1,7 +1,7 @@
 // The idea tree as a hash-chained log. State is derived by replaying events;
 // what the model returns is validated here before it becomes a node.
 
-import { RECIPE_RELATIONS } from "@vibloom/chem";
+import { RECIPE_RELATIONS, SOLVER_VERSION } from "@vibloom/chem";
 import { canonical, sha256 } from "@vibloom/engine";
 import { RECIPE_PARAMS, recipeDerived, runCheck, SIM_PARAMS, thresholds } from "./check";
 import { numbersOf, unsupportedNumbers } from "./numbers";
@@ -9,11 +9,13 @@ import { bare, MAX_EXPR, names, OPS, rename, tokens, type Op } from "./expr";
 import { AXES, type GrownNode } from "./protocol";
 import type {
   CheckError,
+  CheckSpec,
   CheckResult,
   EventBody,
   IdeaEvent,
   IdeaNode,
   Lesson,
+  LessonIdentity,
   Mode,
   Outcome,
   Prediction,
@@ -301,6 +303,12 @@ export class IdeaTree {
           expect: b.expect,
           confidence: Math.min(0.99, Math.max(0.5, b.confidence)),
           reason: b.reason,
+          blind: !this.runs.some(
+            (r) =>
+              r.node === b.node &&
+              r.purpose === "check" &&
+              sameRun(r.result.inputs ?? {}, b.inputs),
+          ),
           uses: b.uses.filter((u) => this.lessons.some((l) => l.id === u && l.run !== undefined)),
           unsupported: unsupportedNumbers(
             b.reason,
@@ -356,6 +364,7 @@ export class IdeaTree {
           intervention: onRecipe ? "recipe" : "model",
           ...(recipe ? { recipe } : {}),
           open: b.open,
+          identity: identityOf(this.nodes.get(p.node)?.check, first.result),
           unsupported: unsupportedNumbers(
             [...b.candidates.flatMap((x) => [x.explanation, x.scope]), b.open].join(" \n "),
             numbersOf([
@@ -843,8 +852,22 @@ export class IdeaTree {
     const runs = [this.verdict(l.surprise), this.verdict(l.run)];
     if (runs.includes("failed")) return "failed";
     if (runs.includes("pending")) return "unverified";
+    return this.lessonChanges(l).length ? "invalidated" : "current";
+  }
+
+  // What a lesson depended on that is no longer so: the values, the
+  // question or tolerance, the recipe conversion, the solver. A lesson with
+  // changes stays readable as history; it is not a current finding.
+  lessonChanges(l: Lesson): string[] {
     const now = this.scope();
-    return Object.entries(l.basis).every(([k, v]) => same(now[k], v)) ? "current" : "invalidated";
+    const out: string[] = [];
+    if (!Object.entries(l.basis).every(([k, v]) => same(now[k], v))) out.push("values");
+    const id = identityOf(this.nodes.get(l.node)?.check, { inputs: now, engine: SOLVER_VERSION });
+    if (id.question !== l.identity.question || id.tolerance !== l.identity.tolerance)
+      out.push("question or tolerance");
+    if (l.recipe && id.recipe_version !== l.identity.recipe_version) out.push("recipe conversion");
+    if (id.engine !== l.identity.engine) out.push("solver");
+    return out;
   }
 
   // What the model is shown of past lessons on a node: only decided ones.
@@ -877,12 +900,15 @@ export class IdeaTree {
         const d = this.decided(l);
         if (!d) return [];
         const here = SIM_PARAMS.every((k) => same(l.basis[k], now[k]));
+        const other = this.lessonChanges(l).filter((c) => c !== "values");
         return [
           {
             id: l.id,
-            applies_here: here
-              ? "learned at exactly these values"
-              : "learned at other values: evidence about those values; whether it carries over here is not checked",
+            applies_here: other.length
+              ? `learned under another ${other.join(", ")}: kept as history, not a current finding`
+              : here
+                ? "learned at exactly these values"
+                : "learned at other values: evidence about those values; whether it carries over here is not checked",
             contrast: {
               ...(detail === "quantitative" && tolerance !== undefined
                 ? { tolerance, difference: "|full - reduced| / reduced" }
@@ -923,8 +949,11 @@ export class IdeaTree {
       [...this.results.values()],
       flips,
       this.lessonsForModel(focus),
-      [...this.nodes.values()].map((x) => [x.title, x.statement, x.rationale, x.check]),
-      this.chat.slice(-4).map((c) => c.answer),
+      // Muse's own earlier prose is not a source: a figure it made up must
+      // not become supported by being repeated. The person's words are.
+      this.goal,
+      [...this.nodes.values()].map((x) => [x.params, x.check]),
+      this.chat.slice(-4).map((c) => c.question),
       Object.keys(this.derived()).length ? RECIPE_RELATIONS : "",
       question,
     ]);
@@ -944,7 +973,10 @@ export class IdeaTree {
     let right = 0;
     let pending = 0;
     let sq = 0;
+    // Only foresight is scored: a prediction made after a run of its values
+    // was already in the log is kept, but not counted.
     for (const p of this.predictions) {
+      if (!p.blind) continue;
       const v = this.verdict(p.run);
       if (v === "pending") pending++;
       if (v !== "holds" && v !== "fails") continue;
@@ -1057,6 +1089,21 @@ export class IdeaTree {
 // up to 2.7e-6 relative (docs/validation.md); 1e-4 leaves a wide margin while
 // staying far below any tolerance a claim uses. The verdict must match exactly.
 export const EXPERIMENT_TOLERANCE = 1e-4;
+
+// A run's identity beyond its values. Runs recorded before versions existed
+// carry none: their recipe conversion is unknown and their solver is the first.
+function identityOf(
+  spec: CheckSpec | undefined,
+  r: { inputs?: Record<string, number>; engine?: number },
+): LessonIdentity {
+  const sim = spec?.kind === "oregonator" ? spec : undefined;
+  return {
+    question: sim?.question ?? "",
+    tolerance: sim?.tolerance ?? NaN,
+    ...(r.inputs?.recipe_version !== undefined ? { recipe_version: r.inputs.recipe_version } : {}),
+    engine: r.engine ?? 1,
+  };
+}
 
 const DERIVED = ["q", "eps", "eps_prime", "time_scale_s", "recipe_version"];
 
