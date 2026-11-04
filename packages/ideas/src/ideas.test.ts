@@ -1267,3 +1267,69 @@ describe("the audit of refusals", () => {
     expect(t.refused.at(-1)?.reason).toMatch(/did not follow the protocol: bad/);
   });
 });
+
+describe("routed requests and text written for older values", () => {
+  const tree = () => {
+    const t = new IdeaTree();
+    t.append("person", { type: "goal", text: "A vessel", mode: "standard" });
+    const nodes = t.admit("goal", [
+      grown("skin", {
+        statement: "At 55 MPa the skin holds against a strength of 12 MPa.",
+        params: [p("stress need", 55, "reference"), p("strength", 12)],
+        check: {
+          description: "stress against strength",
+          value: "stress_need",
+          op: "<=",
+          limit: "strength",
+          unit: "MPa",
+        },
+      }),
+      grown("cost"),
+    ]);
+    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    return t;
+  };
+
+  it("says which quoted values have changed since a root was written", () => {
+    const t = tree();
+    expect(t.staleText("skin")).toEqual([]);
+    t.append("person", { type: "set_param", name: "strength", value: 80, source: "test" });
+    expect(t.staleText("skin")).toEqual([{ name: "strength", then: 12, now: 80 }]);
+    // Derived from the log: a replay gives the same answer.
+    expect(IdeaTree.replay(t.events).staleText("skin")).toEqual(t.staleText("skin"));
+    // A root that quotes no value is never flagged.
+    expect(t.staleText("cost")).toEqual([]);
+  });
+
+  it("keeps a request's read only with roots and parameters that exist", () => {
+    const t = tree();
+    const read = { type: "route" as const, question: "q", focus: "cost", why: "", usage };
+    t.append("muse", { ...read, intent: "answer", nodes: ["skin"], values: {} });
+    expect(t.routes).toHaveLength(1);
+    expect(() =>
+      t.append("muse", { ...read, intent: "answer", nodes: ["nowhere"], values: {} }),
+    ).toThrow(/unknown node/);
+    expect(() =>
+      t.append("muse", { ...read, intent: "run", nodes: [], values: { made_up: 1 } }),
+    ).toThrow(/no parameter/);
+    expect(() =>
+      t.append("muse", { ...read, intent: "run", nodes: [], values: { strength: -1 } }),
+    ).toThrow(/no parameter/);
+  });
+
+  it("replays a routed answer with the roots it was given", () => {
+    const t = tree();
+    const chat = {
+      type: "chat" as const,
+      focus: "cost",
+      question: "Does the skin hold?",
+      answer: "The skin check holds at 55 MPa.",
+      cites: ["skin"],
+      asked: t.scope(),
+      usage,
+    };
+    t.append("muse", { ...chat, consulted: ["skin"] });
+    expect(t.chat[0]?.unsupported).toEqual([]);
+    expect(IdeaTree.replay(t.events).chat[0]?.unsupported).toEqual([]);
+  });
+});

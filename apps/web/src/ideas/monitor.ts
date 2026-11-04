@@ -13,6 +13,7 @@ import {
   mapSetup,
   type CheckError,
   type Recipe,
+  type EventBody,
 } from "@vibloom/ideas";
 import { RECIPE_SOURCE } from "@vibloom/chem";
 import { el } from "../dom";
@@ -38,6 +39,7 @@ export interface MonitorActions {
   expand(id: string): void;
   setParam(name: string, value: number, source: string): void;
   useRecipe(recipe: Recipe, run: CheckResult | CheckError): void;
+  recordMap(body: Extract<EventBody, { type: "map" }>): void;
   accept(id: string): void;
   reject(id: string): void;
   estimate(kind: "view" | "expand", id: string): number;
@@ -109,6 +111,26 @@ export function viewData(tree: IdeaTree, n: IdeaNode) {
         : null,
     children: tree.children(n.id).map((c) => ({ title: c.title, status: tree.status(c.id) })),
   };
+}
+
+// Text Muse wrote for values that have since changed: said beside it, so a
+// verdict about today's values is never read as about the quoted ones.
+function writtenFor(tree: IdeaTree, id: string): HTMLElement[] {
+  const stale = tree.staleText(id);
+  if (!stale.length) return [];
+  const unit = (k: string) => {
+    const u = tree.param(k)?.unit ?? "";
+    return u && u !== "1" ? ` ${u}` : "";
+  };
+  const fmt = (pick: (x: (typeof stale)[number]) => number) =>
+    stale.map((x) => `${x.name.replace(/_/g, " ")} ${String(pick(x))}${unit(x.name)}`).join(", ");
+  return [
+    el(
+      "p",
+      { class: "written-for" },
+      `Written for ${fmt((x) => x.then)}; the verdict below is for ${fmt((x) => x.now)}.`,
+    ),
+  ];
 }
 
 export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
@@ -357,6 +379,9 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
                             actions.useRecipe(r, run);
                           },
                           () => actions.busy(),
+                          (body) => {
+                            actions.recordMap(body);
+                          },
                         ),
                     ],
                   ] as [string, () => HTMLElement][])),
@@ -477,6 +502,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
       el("h2", {}, n.title),
       n.check?.kind === "oregonator" ? glance(tree, n) : null,
       el("p", { class: "statement" }, n.statement),
+      ...writtenFor(tree, n.id),
     ];
     if (r && "error" in r)
       out.push(el("div", { class: "result error" }, `Check could not run: ${r.error}`));

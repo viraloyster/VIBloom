@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { recipeEffects, runCheck } from "./check";
-import { axis, cellScope, mapSetup, recenter, runCell, verdict } from "./map";
+import { axis, cellScope, mapRecord, mapSetup, recenter, replayMap, runCell, verdict } from "./map";
+import { EXPERIMENT_TOLERANCE } from "./tree";
 import { IdeaTree } from "./tree";
 import type { IdeaEvent } from "./types";
 import type { GrownNode } from "./protocol";
@@ -125,4 +126,35 @@ describe("the recipe map", () => {
     expect(e["raising bromate"]).toMatchObject({ q: "same", eps: "down", eps_prime: "down" });
     expect(e["raising malonic_acid"]).toMatchObject({ eps: "up", time_scale_s: "down" });
   });
+
+  it("records a map in the log and finds a cell whose record was altered", async () => {
+    const t = await session();
+    const setup = mapSetup(t);
+    if (typeof setup === "string") throw new Error(setup);
+    // Two cells keep the test short; a recorded map holds all 49.
+    const recipes = [setup.recipe, { ...setup.recipe, bromate: setup.axes.bromate[4] ?? NaN }];
+    const cells = recipes.map((recipe) => {
+      const run = runCell(t, setup, recipe);
+      return { recipe, run, v: verdict(t, setup, recipe, run) };
+    });
+    const above = {
+      recipe: { ...setup.recipe, bromate: setup.axes.bromate[6] ?? NaN },
+      excluded: true,
+    };
+    const body = mapRecord(setup, [...cells, above], 1);
+    const before = t.events.length;
+    t.append("engine", body);
+    const replayed = IdeaTree.replay(t.events);
+    expect(replayed.maps).toHaveLength(1);
+    const then = IdeaTree.replay(t.events.slice(0, before));
+    expect(replayMap(then, body, EXPERIMENT_TOLERANCE)).toEqual([]);
+    const bent = structuredClone(body);
+    const first = bent.cells[0];
+    if (first) first.concordant = !first.concordant;
+    expect(replayMap(then, bent, EXPERIMENT_TOLERANCE)).toHaveLength(1);
+    // A cell off the map's axes is refused by the log.
+    const off = structuredClone(body);
+    if (off.cells[0]) off.cells[0].bromate = 123;
+    expect(() => t.append("engine", off)).toThrow(/off its axes/);
+  }, 60000);
 });

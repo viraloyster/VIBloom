@@ -19,6 +19,8 @@ export {
   READ_FORMULA_SCHEMA,
   CHAT,
   CHAT_SCHEMA,
+  ROUTE,
+  ROUTE_SCHEMA,
   REPAIR_SCHEMA,
   type GrownNode,
 } from "./protocol";
@@ -38,8 +40,10 @@ export { IdeaTree, outputKey, type Status } from "./tree";
 export {
   axis,
   cellScope,
+  mapRecord,
   mapSetup,
   recenter,
+  replayMap,
   runCell,
   verdict,
   type MapSetup,

@@ -49,7 +49,22 @@ export function mountChat(host: HTMLElement, actions: ChatActions) {
         el("span", { class: "fine" }, "Discussing: "),
         el("b", {}, short(tree.nodes.get(focus)?.title ?? tree.goal)),
       );
-      const items = tree.chat.map((c, i) => {
+      // How Muse read each request, shown with the answer it led to.
+      const routes = tree.routes;
+      const readOf = (seq: number) => {
+        const r = routes.filter((x) => x.seq < seq).at(-1);
+        return r && !tree.chat.some((c) => c.seq > r.seq && c.seq < seq) ? r : undefined;
+      };
+      const readLine = (r: (typeof routes)[number], consulted: string[]) =>
+        el(
+          "p",
+          { class: "note-line read" },
+          `Read as: ${{ answer: "answer from the record", run: "run a recipe", map: "open the recipe map" }[r.intent]}` +
+            (consulted.length
+              ? `; consulted ${consulted.map((id) => short(tree.nodes.get(id)?.title ?? id)).join(", ")} and every run`
+              : ""),
+        );
+      const turns = tree.chat.map((c, i) => {
         const cites = c.cites.map((id) => {
           const n = tree.nodes.get(id);
           const b = el(
@@ -72,6 +87,10 @@ export function mountChat(host: HTMLElement, actions: ChatActions) {
             "div",
             { class: "msg muse" },
             el("span", { class: "who" }, "Muse", about ? el("small", {}, ` on ${about}`) : null),
+            ...(() => {
+              const r = readOf(c.seq);
+              return r ? [readLine(r, c.consulted ?? [])] : [];
+            })(),
             el("p", {}, c.answer),
             tree.outdated(i)
               ? el("p", { class: "note-line warn" }, "Values have changed since this answer.")
@@ -95,6 +114,29 @@ export function mountChat(host: HTMLElement, actions: ChatActions) {
           ),
         );
       });
+      // A request that opened the map has no answer of its own.
+      const items = [
+        ...turns.map((t, i) => ({ seq: tree.chat[i]?.seq ?? 0, t })),
+        ...routes
+          .filter((r) => r.intent === "map")
+          .map((r) => ({
+            seq: r.seq,
+            t: el(
+              "div",
+              { class: `turn${r.focus === focus ? "" : " other"}` },
+              el("div", { class: "msg me" }, el("p", {}, r.question)),
+              el(
+                "div",
+                { class: "msg muse" },
+                el("span", { class: "who" }, "Muse"),
+                readLine(r, []),
+                el("p", {}, r.why),
+              ),
+            ),
+          })),
+      ]
+        .sort((a, b) => a.seq - b.seq)
+        .map((x) => x.t);
       if (pending) {
         items.push(
           el(

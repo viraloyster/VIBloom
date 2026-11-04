@@ -1,12 +1,13 @@
 // Recipes near the tree's own: for each, the engine's run of the reduction
 // experiment and the tree's own period target, evaluated at that recipe. The
-// map is exploration computed by the engine, not a record; choosing a recipe
-// puts that recipe and its run into the log.
+// map is computed by the engine; a finished map goes into the log with every
+// cell, and choosing a recipe puts that recipe and its run in too.
 
+import { RECIPE_VERSION, SOLVER_VERSION } from "@vibloom/chem";
 import { RECIPE_PARAMS, recipeDerived, runCheck } from "./check";
 import { names } from "./expr";
 import type { IdeaTree } from "./tree";
-import type { CheckError, CheckResult, IdeaNode } from "./types";
+import type { CheckError, CheckResult, EventBody, IdeaNode, MapCellRecord } from "./types";
 
 export type Recipe = Record<(typeof RECIPE_PARAMS)[number], number>;
 
@@ -155,4 +156,64 @@ function safeNames(src: string): string[] {
 
 function periodNames(src: string): string[] {
   return safeNames(src).filter((n) => /_period_(full|reduced)(_s)?$/.test(n));
+}
+
+// What a finished map puts in the log: its setup and, per cell, what the
+// engine found, in seconds and fractions so it reads without the app.
+export function mapRecord(
+  setup: MapSetup,
+  cells: { recipe: Recipe; run?: CheckResult | CheckError; v?: MapVerdict; excluded?: boolean }[],
+  limit: number | undefined,
+): Extract<EventBody, { type: "map" }> {
+  return {
+    type: "map",
+    node: setup.node.id,
+    center: { ...setup.recipe },
+    axes: { malonic_acid: [...setup.axes.malonic_acid], bromate: [...setup.axes.bromate] },
+    span: setup.span,
+    ...(limit !== undefined ? { limit } : {}),
+    recipe_version: RECIPE_VERSION,
+    engine: SOLVER_VERSION,
+    cells: cells.map((c): MapCellRecord => {
+      const at = { bromate: c.recipe.bromate, malonic_acid: c.recipe.malonic_acid };
+      if (c.excluded || !c.run) return { ...at, excluded: true };
+      if ("error" in c.run) return { ...at, error: c.run.error };
+      return {
+        ...at,
+        gap: c.run.value,
+        concordant: c.run.pass,
+        ...(c.v?.periodS !== undefined ? { period_s: c.v.periodS } : {}),
+        ...(c.v?.meetsTarget !== undefined ? { meets_target: c.v.meetsTarget } : {}),
+      };
+    }),
+  };
+}
+
+// Runs every recorded cell again on the tree as it was when the map was
+// recorded; returns the cells whose verdicts or numbers differ.
+export function replayMap(
+  tree: IdeaTree,
+  body: Extract<EventBody, { type: "map" }>,
+  tolerance: number,
+): { cell: MapCellRecord; why: string }[] {
+  const setup = mapSetup(tree);
+  if (typeof setup === "string") return body.cells.map((cell) => ({ cell, why: setup }));
+  const at = { ...setup, recipe: body.center as Recipe, axes: body.axes, span: body.span };
+  const close = (a: number | undefined, b: number | undefined) =>
+    a === b || (a !== undefined && b !== undefined && Math.abs(a - b) <= tolerance * Math.abs(b));
+  return body.cells.flatMap((cell) => {
+    if (cell.excluded) return [];
+    const recipe = { ...at.recipe, bromate: cell.bromate, malonic_acid: cell.malonic_acid };
+    const run = runCell(tree, at, recipe);
+    if ("error" in run) return cell.error === run.error ? [] : [{ cell, why: `now ${run.error}` }];
+    const v = verdict(tree, at, recipe, run);
+    const same =
+      cell.concordant === run.pass &&
+      cell.meets_target === v.meetsTarget &&
+      close(cell.gap, run.value) &&
+      close(cell.period_s, v.periodS);
+    return same
+      ? []
+      : [{ cell, why: `now gap ${String(run.value)}, period ${String(v.periodS)} s` }];
+  });
 }

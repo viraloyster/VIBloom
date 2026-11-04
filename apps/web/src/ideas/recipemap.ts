@@ -6,6 +6,7 @@
 import { RECIPE_VERSION, SOLVER_VERSION } from "@vibloom/chem";
 import {
   cellScope,
+  mapRecord,
   recenter,
   verdict,
   type CheckError,
@@ -43,7 +44,13 @@ const over = (c: Cell) =>
   limit !== undefined && Math.max(c.recipe.bromate, c.recipe.malonic_acid, c.recipe.acid) > limit;
 
 function state(c: Cell): { cls: string; label: string } {
-  if (over(c)) return { cls: "none", label: "above your concentration limit; not run" };
+  if (over(c))
+    return {
+      cls: "none",
+      label: c.run
+        ? "computed before your limit; now excluded"
+        : "above your concentration limit; not run",
+    };
   if (!c.run) return { cls: "pending", label: "computing" };
   if ("error" in c.run) return { cls: "none", label: "no conclusion" };
   const t = c.v?.meetsTarget;
@@ -61,10 +68,11 @@ export function mapPanel(
   setup: MapSetup,
   use: (recipe: Recipe, run: CheckResult | CheckError) => void,
   busy: () => boolean,
+  record: (body: ReturnType<typeof mapRecord>) => void,
 ): HTMLElement {
   const host = el("div", { class: "recipe-map-host" });
   const go = (s: MapSetup) => {
-    host.replaceChildren(mapBody(tree, s, use, busy, go, setup));
+    host.replaceChildren(mapBody(tree, s, use, busy, go, setup, record));
   };
   go(setup);
   return host;
@@ -77,6 +85,7 @@ function mapBody(
   busy: () => boolean,
   go: (s: MapSetup) => void,
   home: MapSetup,
+  record: (body: ReturnType<typeof mapRecord>) => void,
 ): HTMLElement {
   const spec = setup.node.check;
   const tolerance = spec?.kind === "oregonator" ? spec.tolerance : NaN;
@@ -219,8 +228,9 @@ function mapBody(
           const c = all[i];
           if (!c) return;
           const s = state(c);
-          const period = c.v?.periodS;
-          const gap = c.run && !("error" in c.run) ? c.run.value : undefined;
+          // An excluded cell shows no numbers, even if they were computed.
+          const period = over(c) ? undefined : c.v?.periodS;
+          const gap = !over(c) && c.run && !("error" in c.run) ? c.run.value : undefined;
           const here =
             c.recipe.bromate === setup.recipe.bromate &&
             c.recipe.malonic_acid === setup.recipe.malonic_acid;
@@ -231,7 +241,11 @@ function mapBody(
               title: s.label,
               "aria-label": `bromate ${num(c.recipe.bromate)}, malonic acid ${num(c.recipe.malonic_acid)}: ${s.label}`,
             },
-            el("b", {}, period !== undefined ? short(period) : c.run ? "-" : "..."),
+            el(
+              "b",
+              {},
+              period !== undefined ? short(period) : over(c) ? "excl." : c.run ? "-" : "...",
+            ),
             el("small", {}, gap !== undefined ? pct(gap) : ""),
           );
           btn.addEventListener("click", () => {
@@ -300,7 +314,7 @@ function mapBody(
     el(
       "p",
       { class: "fine" },
-      "Oregonator model results at the tree's fixed conditions; not laboratory validation. The map is computed here and not recorded; choosing a recipe records it.",
+      "Oregonator model results at the tree's fixed conditions; not laboratory validation. A finished map is recorded in the log with every cell, and npm run verify runs each again; choosing a recipe records that recipe and its run.",
     ),
   );
   paint();
@@ -309,6 +323,7 @@ function mapBody(
   // Cells run one after another in the worker, stopping if the panel leaves
   // the page; the cache keeps what is done.
   let seen = false;
+  const values = JSON.stringify(cellScope(tree, setup.recipe));
   void (async () => {
     for (const c of all) {
       if (c.run || over(c)) continue;
@@ -321,6 +336,20 @@ function mapBody(
       paint();
       if (chosen >= 0) show(chosen);
     }
+    // Recorded only if some cell ran and the tree still has the values the
+    // cells ran with.
+    if (
+      all.every((c) => c.run || over(c)) &&
+      all.some((c) => !over(c)) &&
+      JSON.stringify(cellScope(tree, setup.recipe)) === values
+    )
+      record(
+        mapRecord(
+          setup,
+          all.map((c) => ({ ...c, excluded: over(c) })),
+          limit,
+        ),
+      );
   })();
   return panel;
 }

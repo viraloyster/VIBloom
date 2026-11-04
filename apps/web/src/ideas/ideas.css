@@ -1001,6 +1001,15 @@ h1 {
   color: #cdd6e3;
 }
 
+.written-for {
+  margin: -4px 0 10px;
+  padding: 6px 10px;
+  border-left: 2px solid #f2c14e;
+  background: rgba(242, 193, 78, 0.08);
+  color: #f3dca0;
+  font-size: 0.85rem;
+}
+
 .result {
   margin: 12px 0;
   padding: 10px 12px;
@@ -1287,6 +1296,12 @@ h1 {
 .note-line {
   margin-top: 6px !important;
   font-size: 12px;
+}
+
+.note-line.read {
+  color: #7fd8e8;
+  font-size: 0.78rem;
+  margin: 2px 0 4px;
 }
 
 .note-line.warn {

@@ -429,7 +429,68 @@ export function steps(tree: IdeaTree): Step[] {
           nodes: b.cites,
           detail: [
             ["Numbers not in its data", c?.unsupported.join(", ") || "none"],
+            [
+              "Given in full",
+              [b.focus, ...(b.consulted ?? [])].map(title).join("; ") +
+                (b.consulted ? "; and every run in the tree" : "; and this root's runs"),
+            ],
             ...usage(b.usage),
+            link(e),
+          ],
+        });
+        break;
+      }
+      case "route": {
+        const did = {
+          answer: "answer from the record",
+          run: `run ${Object.entries(b.values)
+            .map(([k, v]) => `${k.replace(/_/g, " ")} ${String(v)}`)
+            .join(", ")}, after the person confirms`,
+          map: "open the recipe map",
+        }[b.intent];
+        out.push({
+          seq: e.seq,
+          actor: "muse",
+          stage: "Request read",
+          title: b.why || b.question,
+          result: `Muse chose to ${did}${b.nodes.length ? `, consulting ${b.nodes.map(title).join(", ")}` : ""}.`,
+          nodes: b.nodes,
+          detail: [
+            ["Request", b.question],
+            ["Engine", "kept only roots and parameters that exist, and positive values"],
+            ...usage(b.usage),
+            link(e),
+          ],
+        });
+        break;
+      }
+      case "map": {
+        const run = b.cells.filter((c) => !c.excluded);
+        const both = run.filter((c) => c.concordant && c.meets_target).length;
+        const agree = run.filter((c) => c.concordant).length;
+        const hasTarget = run.some((c) => c.meets_target !== undefined);
+        out.push({
+          seq: e.seq,
+          actor: "engine",
+          stage: "Recipe map",
+          title: `Explored ${String(run.length)} recipes around bromate ${String(b.center.bromate)} M, malonic acid ${String(b.center.malonic_acid)} M`,
+          result: hasTarget
+            ? `${String(both)} meet the period target with the models agreeing; ${String(agree)} keep the models within tolerance.`
+            : `${String(agree)} keep the models within tolerance; the tree has no period target.`,
+          nodes: [b.node],
+          detail: [
+            ["Reach", `x${String(+b.span.toPrecision(3))} either way, 7 x 7 cells`],
+            [
+              "Limit",
+              b.limit !== undefined
+                ? `${String(b.limit)} M, set by the person; ${String(b.cells.length - run.length)} cells excluded`
+                : "none set",
+            ],
+            [
+              "Versions",
+              `recipe conversion v${String(b.recipe_version)}, solver v${String(b.engine)}`,
+            ],
+            ["Check", "npm run verify runs every cell again"],
             link(e),
           ],
         });

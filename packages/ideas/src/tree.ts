@@ -4,7 +4,7 @@
 import { RECIPE_RELATIONS, SOLVER_VERSION } from "@vibloom/chem";
 import { canonical, sha256 } from "@vibloom/engine";
 import { RECIPE_PARAMS, recipeDerived, runCheck, SIM_PARAMS, thresholds } from "./check";
-import { numbersOf, unsupportedNumbers } from "./numbers";
+import { numbersIn, numbersOf, unsupportedNumbers } from "./numbers";
 import { bare, MAX_EXPR, names, OPS, rename, tokens, type Op } from "./expr";
 import { AXES, type GrownNode } from "./protocol";
 import type {
@@ -58,8 +58,13 @@ export class IdeaTree {
   readonly redrawn = new Set<string>();
   // The handwriting each handwritten formula was read from.
   readonly handwriting = new Map<string, string>();
+  // Each root's own values when Muse wrote it, so text written for an older
+  // recipe can be told apart from a verdict about the current one.
+  readonly written = new Map<string, Record<string, number>>();
   readonly chat: {
+    seq: number;
     focus: string;
+    consulted?: string[];
     question: string;
     answer: string;
     cites: string[];
@@ -96,6 +101,7 @@ export class IdeaTree {
       reviews: structuredClone(this.reviews),
       redrawn: new Set(this.redrawn),
       handwriting: new Map(this.handwriting),
+      written: new Map(this.written),
       chat: this.chat.length,
       lessons: structuredClone(this.lessons),
       predictions: structuredClone(this.predictions),
@@ -119,6 +125,8 @@ export class IdeaTree {
       for (const k of before.redrawn) this.redrawn.add(k);
       this.handwriting.clear();
       for (const [k, v] of before.handwriting) this.handwriting.set(k, v);
+      this.written.clear();
+      for (const [k, v] of before.written) this.written.set(k, v);
       this.chat.length = before.chat;
       this.lessons.splice(0, Infinity, ...before.lessons);
       this.predictions.splice(0, Infinity, ...before.predictions);
@@ -172,6 +180,7 @@ export class IdeaTree {
           this.nodes.set(n.id, structuredClone(n));
         }
         under.expanded = true;
+        for (const n of b.nodes) this.written.set(n.id, this.ownValues());
         break;
       }
       case "check": {
@@ -278,15 +287,36 @@ export class IdeaTree {
       }
       case "chat":
         this.chat.push({
+          seq: this.events.length,
           focus: b.focus,
+          ...(b.consulted ? { consulted: [...b.consulted] } : {}),
           question: b.question,
           answer: b.answer,
           cites: b.cites.filter((c) => this.nodes.has(c)),
           // Spread, so logs recorded before this field existed still replay.
           asked: { ...b.asked },
-          unsupported: unsupportedNumbers(b.answer, this.shown(b.focus, b.question)),
+          unsupported: unsupportedNumbers(b.answer, this.shown(b.focus, b.question, b.consulted)),
         });
         break;
+      case "route":
+        for (const id of [b.focus, ...b.nodes])
+          if (id !== "goal" && !this.nodes.has(id)) throw new Error(`unknown node ${id}`);
+        for (const [k, v] of Object.entries(b.values))
+          if (!this.param(k) || !(Number.isFinite(v) && v > 0))
+            throw new Error(`no parameter ${k} for that value`);
+        break;
+      case "map": {
+        const n = this.nodes.get(b.node);
+        if (n?.check?.kind !== "oregonator") throw new Error(`no experiment on ${b.node}`);
+        const on = (xs: number[], x: number) => xs.includes(x);
+        if (
+          !b.cells.every(
+            (c) => on(b.axes.bromate, c.bromate) && on(b.axes.malonic_acid, c.malonic_acid),
+          )
+        )
+          throw new Error("a map cell is off its axes");
+        break;
+      }
       case "predict": {
         const n = this.nodes.get(b.node);
         if (n?.check?.kind !== "oregonator") throw new Error(`no experiment on ${b.node}`);
@@ -960,7 +990,7 @@ export class IdeaTree {
   // Every number Muse was shown when answering about a node: the tree's
   // values and results, where the focus check would flip, its lessons and the
   // question itself.
-  private shown(focus: string, question: string): number[] {
+  private shown(focus: string, question: string, consulted?: string[]): number[] {
     const n = this.nodes.get(focus);
     const r = this.results.get(focus);
     const flips =
@@ -970,9 +1000,12 @@ export class IdeaTree {
     return numbersOf([
       this.scope(),
       [...this.results.values()],
-      this.runs.filter((r) => r.node === focus).map((r) => r.result),
+      // A routed answer was given every run in the tree; an older one, the
+      // focus node's runs only.
+      consulted ? this.runIndex() : this.runs.filter((r) => r.node === focus).map((r) => r.result),
       flips,
-      this.lessonsForModel(focus),
+      [focus, ...(consulted ?? [])].map((id) => this.lessonsForModel(id)),
+      consulted ? consulted.map((id) => this.written.get(id)) : [],
       // Muse's own earlier prose is not a source: a figure it made up must
       // not become supported by being repeated. The person's words are.
       this.goal,
@@ -981,6 +1014,64 @@ export class IdeaTree {
       Object.keys(this.derived()).length ? RECIPE_RELATIONS : "",
       question,
     ]);
+  }
+
+  // Every run in the tree, newest last, as Muse is given them: which root,
+  // what for, at which values, and what the engine found.
+  runIndex(limit = RUN_INDEX) {
+    return this.runs.slice(-limit).map((r) => ({
+      seq: r.seq,
+      node: r.node,
+      purpose: r.purpose,
+      values: r.result.inputs,
+      ...("error" in r.result
+        ? { error: r.result.error }
+        : {
+            outcome: r.result.pass ? "holds" : "fails",
+            gap: r.result.value,
+            ...(r.result.inputs.time_scale_s !== undefined && r.result.sim
+              ? {
+                  periods_seconds: Object.fromEntries(
+                    Object.entries(r.result.sim.periods).map(([k, v]) => [
+                      k,
+                      v * (r.result.inputs?.time_scale_s ?? NaN),
+                    ]),
+                  ),
+                }
+              : {}),
+          }),
+    }));
+  }
+
+  // The values a root's own text may quote that have changed since Muse
+  // wrote it: the text is about those, the verdict about today's.
+  staleText(id: string): { name: string; then: number; now: number }[] {
+    const n = this.nodes.get(id);
+    const then = this.written.get(id);
+    if (!n || !then) return [];
+    const quoted = numbersIn(`${n.title} ${n.statement}`).map((x) => x.value);
+    const now = this.ownValues();
+    return Object.entries(then).flatMap(([name, v]) => {
+      const x = now[name];
+      return x !== undefined && x !== v && quoted.some((q) => Math.abs(q - v) <= 1e-9 * Math.abs(v))
+        ? [{ name, then: v, now: x }]
+        : [];
+    });
+  }
+
+  // Parameters only, as their roots hold them: no derived values or outputs.
+  ownValues(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const n of this.nodes.values()) for (const p of n.params) out[p.name] = p.value;
+    return out;
+  }
+
+  get maps() {
+    return this.events.flatMap((e) => (e.body.type === "map" ? [{ seq: e.seq, ...e.body }] : []));
+  }
+
+  get routes() {
+    return this.events.flatMap((e) => (e.body.type === "route" ? [{ seq: e.seq, ...e.body }] : []));
   }
 
   // Each prediction against the run it was settled by, for good. Accuracy is
@@ -1113,6 +1204,9 @@ export class IdeaTree {
 // up to 1.5e-5 relative (docs/validation.md); 1e-4 leaves a margin while
 // staying far below any tolerance a claim uses. The verdict must match exactly.
 export const EXPERIMENT_TOLERANCE = 1e-4;
+
+// How many runs a routed chat is given; a session rarely holds more.
+const RUN_INDEX = 24;
 
 // A run's identity beyond its values. Runs recorded before versions existed
 // carry none: their recipe conversion is unknown and their solver is the first.

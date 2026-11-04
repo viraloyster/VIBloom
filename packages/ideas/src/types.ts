@@ -132,7 +132,36 @@ export type EventBody =
       // Every value as it was when Muse answered, so a later edit marks the
       // answer as about other numbers.
       asked: Record<string, number>;
+      // The roots Muse was given in full; the whole tree's runs come with
+      // them. Absent in logs recorded before routing: the focus only.
+      consulted?: string[];
       usage: Usage;
+    }
+  | {
+      // Muse read a request first and chose what it needs and what to do:
+      // answer from the record, run a recipe (the person confirms), or open
+      // the recipe map. The engine checks every id and value it names.
+      type: "route";
+      question: string;
+      focus: string;
+      intent: RouteIntent;
+      nodes: string[];
+      values: Record<string, number>;
+      why: string;
+      usage: Usage;
+    }
+  | {
+      // An exploration of nearby recipes, each cell run by the engine at the
+      // tree's values then; npm run verify runs every cell again.
+      type: "map";
+      node: string;
+      center: Record<string, number>;
+      axes: { malonic_acid: number[]; bromate: number[] };
+      span: number;
+      limit?: number;
+      recipe_version: number;
+      engine: number;
+      cells: MapCellRecord[];
     }
   | {
       type: "predict";
@@ -183,6 +212,20 @@ export type EventBody =
     }
   | { type: "accept"; node: string }
   | { type: "reject"; node: string };
+
+export type RouteIntent = "answer" | "run" | "map";
+
+export interface MapCellRecord {
+  bromate: number;
+  malonic_acid: number;
+  // Above the person's concentration limit: not run.
+  excluded?: boolean;
+  error?: string;
+  period_s?: number;
+  gap?: number;
+  concordant?: boolean;
+  meets_target?: boolean;
+}
 
 // Something the engine refused: kept for audit beside the log, never part of
 // its state. at is the log length when it was refused.

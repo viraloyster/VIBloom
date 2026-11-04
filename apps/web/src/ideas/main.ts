@@ -17,6 +17,8 @@ import {
   VIEW_SCHEMA,
   CHAT,
   CHAT_SCHEMA,
+  ROUTE,
+  ROUTE_SCHEMA,
   PREDICT,
   PREDICT_SCHEMA,
   DIAGNOSE,
@@ -31,6 +33,7 @@ import {
   RECIPE_PARAMS,
   estimate,
   mapSetup,
+  numbersIn,
   recipeEffects,
   runCheck,
   type IdeaEvent,
@@ -38,6 +41,7 @@ import {
   type IdeaNode,
   type Mode,
   type Usage,
+  type RouteIntent,
 } from "@vibloom/ideas";
 import { RECIPE_RELATIONS, RECIPE_SOURCE } from "@vibloom/chem";
 import { el } from "../dom";
@@ -65,6 +69,7 @@ const MAX_OUT = {
   view: 9000,
   // Muse reasons before it answers; 1500 left a third of answers unfinished.
   chat: 4000,
+  route: 3000,
   review: 3000,
   read: 4000,
 };
@@ -365,8 +370,8 @@ function workspace(goal: string) {
     stopPlayback();
     landing();
   });
-  const save = el("button", { class: "ghost-btn" }, "Export");
-  save.addEventListener("click", exportTree);
+  const exportBtn = el("button", { class: "ghost-btn" }, "Export");
+  exportBtn.addEventListener("click", exportTree);
   processButton = el("button", { class: "ghost-btn process-btn" }, "Process");
   processButton.addEventListener("click", () => {
     processOpen = !processOpen;
@@ -386,7 +391,7 @@ function workspace(goal: string) {
           el("span", { class: "goal-title", title: goal }, shortTitle(goal)),
           hud,
           processButton,
-          save,
+          exportBtn,
           back,
         ),
         monitorHost,
@@ -433,6 +438,16 @@ function workspace(goal: string) {
         }
       }
       recheck();
+    },
+    // A finished map, once per identical result; a replay in progress owns
+    // the log, so nothing is added while it plays.
+    recordMap: (body) => {
+      if (playing) return;
+      const same = JSON.stringify(body);
+      if (tree.events.some((e) => e.body.type === "map" && JSON.stringify(e.body) === same)) return;
+      tree.append("engine", body);
+      save();
+      if (processOpen) refresh();
     },
     accept: (id) => {
       tree.append("person", { type: "accept", node: id });
@@ -786,66 +801,42 @@ function handwrite(id: string) {
   });
 }
 
+// Everything typed in the chat is read by Muse first, as JSON: what it is
+// asking for and which roots it needs. The engine checks every id and value,
+// then the request goes where it belongs: an answer from the record, a recipe
+// run the person confirms, or the recipe map.
 async function ask(question: string) {
   if (busy) return;
   busy = true;
   asking = question;
   refresh();
   const focus = selectedId ?? "goal";
-  const asked = tree.scope();
   try {
-    // Muse sees the monitor as the person does when it shows its drawing.
-    const image = tree.views.has(focus) ? await monitor.snapshot() : undefined;
-    const { value, usage } = await muse().ask(
-      {
-        instructions: CHAT,
-        // The selected branch in full, the rest as a one-line index, and the
-        // last turns, so Muse answers about what the person is looking at.
-        input: JSON.stringify({
-          question,
-          selected: nodeData(focus),
-          branch: tree.context(focus),
-          tree: [...tree.nodes.values()].map((n) => `${n.id} | ${n.title} | ${tree.status(n.id)}`),
-          recent: tree.chat.slice(-4).map((c) => ({ q: c.question, a: c.answer })),
-          // Earlier runs of the selected root, so a question about how it
-          // changed can be answered from the record.
-          runs: tree.runs
-            .filter((r) => r.node === focus)
-            .slice(-4)
-            .map((r) => ({
-              seq: r.seq,
-              purpose: r.purpose,
-              values: r.result.inputs,
-              ...("error" in r.result
-                ? { error: r.result.error }
-                : { outcome: r.result.pass ? "holds" : "fails", gap: r.result.value }),
-            })),
-          ...recipeContext(),
-          ...(image ? { image: "what the monitor shows the person right now" } : {}),
-        }),
-        ...(image ? { images: [image] } : {}),
-        mode: tree.mode,
-        effort: "low",
-        maxOutput: MAX_OUT.chat,
-      },
-      "chat",
-      CHAT_SCHEMA,
-    );
-    const v = value as { answer?: unknown; cites?: unknown };
-    // Only roots that exist may be cited.
-    const cites = (Array.isArray(v.cites) ? v.cites : []).filter(
-      (c): c is string => typeof c === "string" && tree.nodes.has(c),
-    );
-    tree.append(`muse:${usage.model}`, {
-      type: "chat",
-      focus,
-      question,
-      answer: typeof v.answer === "string" ? v.answer.slice(0, 1200) : "",
-      cites: [...new Set(cites)].slice(0, 6),
-      asked,
-      usage,
-    });
-    chatUsage[tree.chat.length - 1] = usage;
+    monitor.status("Muse is reading the request...", true);
+    const route = await routeOf(question, focus);
+    if (route?.intent === "map") {
+      const setup = mapSetup(tree);
+      if (typeof setup !== "string") {
+        select(setup.node.id);
+        openTab("Recipe map");
+        monitor.status(`Muse: ${route.why} The engine is running the recipe map.`);
+        return;
+      }
+    }
+    if (route?.intent === "run" && Object.keys(route.values).length) {
+      const list = Object.entries(route.values)
+        .map(([k, v]) => `${k.replace(/_/g, " ")} ${String(v)}`)
+        .join(", ");
+      if (
+        confirm(`Muse read this as: run ${list}.\n\n${route.why}\n\nChange the tree and run it?`)
+      ) {
+        for (const [name, value] of Object.entries(route.values))
+          if (tree.scope()[name] !== value)
+            tree.append("person", { type: "set_param", name, value, source: "chat, read by Muse" });
+        await recheckAndWait();
+      }
+    }
+    await answer(question, focus, route?.nodes ?? []);
   } catch (e) {
     monitor.status(`Stopped: ${explain(e)}`);
   } finally {
@@ -853,6 +844,141 @@ async function ask(question: string) {
     asking = undefined;
     refresh();
   }
+}
+
+function openTab(name: string) {
+  const b = [...document.querySelectorAll<HTMLButtonElement>("button.tab")].find(
+    (x) => x.textContent === name,
+  );
+  b?.click();
+}
+
+// The first, cheap read. A failed read is not fatal: the answer still gets
+// the selected root and every run.
+async function routeOf(question: string, focus: string) {
+  const params = Object.keys(tree.scope()).filter((k) => tree.param(k));
+  try {
+    const { value, usage } = await muse().ask(
+      {
+        instructions: ROUTE,
+        input: JSON.stringify({
+          request: question,
+          selected: focus,
+          roots: [...tree.nodes.values()].map(
+            (n) =>
+              `${n.id} | ${n.title} | ${tree.status(n.id)} | runs ${String(tree.runs.filter((r) => r.node === n.id).length)}`,
+          ),
+          runs: tree.runs.map(
+            (r) =>
+              `#${String(r.seq)} ${r.node} ${r.purpose} ${RECIPE_PARAMS.map((k) => `${k}=${String(r.result.inputs?.[k] ?? "-")}`).join(" ")} ${"error" in r.result ? r.result.error : r.result.pass ? "holds" : "fails"}`,
+          ),
+          params,
+        }),
+        mode: tree.mode,
+        effort: "low",
+        maxOutput: MAX_OUT.route,
+      },
+      "route",
+      ROUTE_SCHEMA,
+    );
+    const v = value as {
+      intent: RouteIntent;
+      nodes: string[];
+      values: { name: string; value: number }[];
+      why: string;
+    };
+    // What the engine keeps: known ids, named parameters, positive values.
+    const nodes = [...new Set(v.nodes)]
+      .filter((id) => tree.nodes.has(id) && id !== focus)
+      .slice(0, 4);
+    const values = Object.fromEntries(
+      v.values
+        .filter((x) => params.includes(x.name) && Number.isFinite(x.value) && x.value > 0)
+        .map((x) => [x.name, x.value]),
+    );
+    const body = {
+      type: "route" as const,
+      question,
+      focus,
+      intent: ["answer", "run", "map"].includes(v.intent) ? v.intent : "answer",
+      nodes,
+      values,
+      why: v.why.slice(0, 240),
+      usage,
+    };
+    tree.append(`muse:${usage.model}`, body);
+    return body;
+  } catch (e) {
+    if (e instanceof BudgetExceeded) throw e;
+    return undefined;
+  }
+}
+
+async function answer(question: string, focus: string, routed: string[]) {
+  const asked = tree.scope();
+  // Roots whose runs were at values the question names are consulted too,
+  // whatever the read chose: evidence is never left out by a routing miss.
+  const said = numbersIn(question).map((x) => x.value);
+  const named = tree.runs
+    .filter((r) => RECIPE_PARAMS.some((k) => said.includes(r.result.inputs?.[k] ?? NaN)))
+    .map((r) => r.node);
+  const consulted = [...new Set([...routed, ...named])]
+    .filter((id) => id !== focus && tree.nodes.has(id))
+    .slice(0, 5);
+  monitor.status(
+    consulted.length
+      ? `Muse is answering from ${[focus, ...consulted].map((id) => tree.nodes.get(id)?.title ?? id).join(", ")}...`
+      : "Muse is answering...",
+    true,
+  );
+  // Muse sees the monitor as the person does when it shows its drawing.
+  const image = tree.views.has(focus) ? await monitor.snapshot() : undefined;
+  const brief = (id: string) => ({
+    id,
+    ...nodeData(id),
+    ...(tree.staleText(id).length ? { written_for: tree.staleText(id) } : {}),
+  });
+  const { value, usage } = await muse().ask(
+    {
+      instructions: CHAT,
+      input: JSON.stringify({
+        question,
+        selected: brief(focus),
+        branch: tree.context(focus),
+        branches: consulted.map(brief),
+        tree: [...tree.nodes.values()].map((n) => `${n.id} | ${n.title} | ${tree.status(n.id)}`),
+        recent: tree.chat.slice(-4).map((c) => ({ q: c.question, a: c.answer })),
+        // Every run in the tree, so a question about any of them is answered
+        // from the record, whichever root is selected.
+        runs: tree.runIndex(),
+        ...recipeContext(),
+        ...(image ? { image: "what the monitor shows the person right now" } : {}),
+      }),
+      ...(image ? { images: [image] } : {}),
+      mode: tree.mode,
+      effort: "low",
+      maxOutput: MAX_OUT.chat,
+    },
+    "chat",
+    CHAT_SCHEMA,
+  );
+  const v = value as { answer?: unknown; cites?: unknown };
+  // Only roots that exist may be cited.
+  const cites = (Array.isArray(v.cites) ? v.cites : []).filter(
+    (c): c is string => typeof c === "string" && tree.nodes.has(c),
+  );
+  tree.append(`muse:${usage.model}`, {
+    type: "chat",
+    focus,
+    question,
+    answer: typeof v.answer === "string" ? v.answer.slice(0, 1200) : "",
+    cites: [...new Set(cites)].slice(0, 6),
+    asked,
+    consulted,
+    usage,
+  });
+  chatUsage[tree.chat.length - 1] = usage;
+  monitor.status("");
 }
 
 // When the tree holds a recipe, what the engine knows about how it sets the
@@ -1160,10 +1286,14 @@ function select(id: string | undefined) {
 // After a person edits a number, every check that read it runs again, and
 // then whatever read those results, until nothing is stale.
 function recheck() {
+  void recheckAndWait();
+}
+
+async function recheckAndWait() {
   const t = tree;
   const own = !busy;
   if (own) busy = true;
-  void (async () => {
+  await (async () => {
     try {
       for (let pass = 0; pass < 4; pass++) {
         const stale = [...t.nodes.values()].filter((n) => t.status(n.id) === "stale");

@@ -7,7 +7,8 @@
 
 import { readFile } from "node:fs/promises";
 import { runCheck } from "../src/check";
-import { IdeaTree } from "../src/tree";
+import { replayMap } from "../src/map";
+import { EXPERIMENT_TOLERANCE, IdeaTree } from "../src/tree";
 import type { IdeaEvent, Refusal } from "../src/types";
 
 const dir = new URL("../../../apps/web/public/examples/", import.meta.url);
@@ -57,6 +58,16 @@ for (const name of SESSIONS) {
         (d
           ? `; consistent with ${d.supported ? "B" : "A"}: ${l.candidates[d.supported]?.explanation ?? ""}`
           : ""),
+    );
+  }
+  // A map ran on the tree as it was then: replay the log up to it.
+  for (const m of t.maps) {
+    const then = IdeaTree.replay(data.events.slice(0, m.seq));
+    const off = replayMap(then, m, EXPERIMENT_TOLERANCE);
+    const ran = m.cells.filter((c) => !c.excluded).length;
+    if (off.length) failures += off.length;
+    console.log(
+      `  #${String(m.seq)} recipe map around bromate ${String(m.center.bromate)}, malonic acid ${String(m.center.malonic_acid)}: ${String(ran)} cells run again, ${off.length ? `${String(off.length)} DID NOT REPRODUCE` : "all reproduced"}`,
     );
   }
   const formulas = data.events.filter(
