@@ -7,7 +7,7 @@ import { rng } from "../canopy";
 import { hash } from "../layout";
 
 const DX = 112;
-const DY = 165;
+const DY = 205;
 const CROWN_W = 600;
 const CROWN_H = 316;
 
@@ -63,6 +63,31 @@ function place(tree: IdeaTree, ghosts: Ghost[]): Map<string, Pos> {
 
 type Pt = [number, number];
 
+// A faint web of rootlets under the whole tree, fixed by a seed: the soil is
+// full of roots; the evidence is in the ones that carry a node.
+function mesh(): string {
+  const r = rng(7);
+  const out: string[] = [];
+  const f = (x: number, y: number) => `${x.toFixed(0)},${y.toFixed(0)}`;
+  const fork = (x: number, y: number, ang: number, len: number, depth: number) => {
+    const ex = x + Math.cos(ang) * len;
+    const ey = y + Math.sin(ang) * len;
+    out.push(
+      `M${f(x, y)} Q${f(x + Math.cos(ang) * len * 0.5 + (r() - 0.5) * len * 0.4, y + Math.sin(ang) * len * 0.5)} ${f(ex, ey)}`,
+    );
+    if (depth === 0) return;
+    for (let i = 0; i < 2 + Math.floor(r() * 2); i++) {
+      const t = 0.5 + r() * 0.5;
+      fork(x + (ex - x) * t, y + (ey - y) * t, ang + (r() - 0.5) * 1.1, len * 0.6, depth - 1);
+    }
+  };
+  for (let i = 0; i < 14; i++) {
+    const ang = Math.PI * (0.12 + 0.76 * (i / 13)) + (r() - 0.5) * 0.2;
+    fork((r() - 0.5) * 40, -10, ang, 150 + r() * 120, 4);
+  }
+  return out.join(" ");
+}
+
 // A root as a filled shape that tapers from parent to child, with a slight
 // wander seeded by its id so it keeps the same form on every redraw.
 function rootShape(
@@ -117,18 +142,37 @@ function rootShape(
       return f([p[0] - ((q[1] - o[1]) / len) * w, p[1] + ((q[0] - o[0]) / len) * w]);
     })
     .join(" L")}`;
-  // Fine rootlets along the way, the way real roots feather out.
+  // Rootlets that fork as they thin, along the root and in a fan at its tip.
   const hairs: string[] = [];
-  for (const t of [0.35, 0.6, 0.85]) {
-    if (r() < 0.35) continue;
+  const fork = (x: number, y: number, ang: number, len: number, depth: number) => {
+    const ex = x + Math.cos(ang) * len;
+    const ey = y + Math.sin(ang) * len;
+    const mx = x + Math.cos(ang) * len * 0.5 + (r() - 0.5) * len * 0.3;
+    const my = y + Math.sin(ang) * len * 0.5 + (r() - 0.5) * len * 0.3;
+    hairs.push(`M${f([x, y])} Q${f([mx, my])} ${f([ex, ey])}`);
+    if (depth === 0) return;
+    const n = 2 + Math.floor(r() * 2);
+    for (let i = 0; i < n; i++) {
+      const t = 0.45 + r() * 0.5;
+      fork(
+        x + (ex - x) * t,
+        y + (ey - y) * t,
+        ang + (r() - 0.5) * 1.3,
+        len * (0.45 + r() * 0.2),
+        depth - 1,
+      );
+    }
+  };
+  for (const t of [0.3, 0.5, 0.7, 0.88]) {
+    if (r() < 0.3) continue;
     const [x, y] = at(t);
-    const ang = Math.PI / 2 + (r() - 0.5) * 2.4;
-    const len = 14 + r() * 22;
-    hairs.push(
-      `M${f([x, y])} Q${f([x + Math.cos(ang) * len * 0.6 + (r() - 0.5) * 8, y + Math.sin(ang) * len * 0.5])} ${f([x + Math.cos(ang) * len, y + Math.sin(ang) * len])}`,
-    );
+    const side = r() < 0.5 ? -1 : 1;
+    fork(x, y, Math.PI / 2 + side * (0.5 + r() * 0.7), 18 + r() * 26, 2);
   }
-  return { body, core, hairs, lit };
+  for (let i = 0; i < 4; i++) fork(bx, by, Math.PI / 2 + (r() - 0.5) * 1.8, 26 + r() * 30, 2);
+  // Beads along the root, as in a circuit of evidence.
+  const beads = [0.32, 0.62].map((t) => at(t));
+  return { body, core, hairs, lit, beads };
 }
 
 const STATUS_LABEL: Record<Status, string> = {
@@ -158,9 +202,9 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     height: CROWN_H,
     class: "crown",
   });
-  const ground = svg("ellipse", { cx: 0, cy: -18, rx: 520, ry: 26, class: "ground" });
+  const ground = svg("ellipse", { cx: 0, cy: -16, rx: 900, ry: 9, class: "ground" });
   const trunk = svg("path", {
-    d: "M-34,-110 C-26,-60 -40,-30 -60,-14 L60,-14 C40,-30 26,-60 34,-110 Z",
+    d: "M-24,-118 C-20,-70 -24,-40 -64,-14 L64,-14 C24,-40 20,-70 24,-118 Z",
     class: "trunk",
   });
   // Shared shading for the orbs: one light from the upper left.
@@ -200,7 +244,8 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     svg("circle", { r: 40, class: "ring r3" }),
     svg("ellipse", { rx: 13, ry: 9, class: "kernel" }),
   );
-  stage.append(defs, ground, crown, trunk, roots, marks, seed);
+  const web = svg("path", { d: mesh(), class: "mesh" });
+  stage.append(defs, web, ground, crown, trunk, roots, marks, seed);
   const canvas = svg("svg", { class: "canvas", "aria-label": "Idea tree" }, stage);
   host.append(canvas);
 
@@ -215,6 +260,13 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
   let selected: string | undefined;
   let working: string | undefined;
   let goals = new Map<string, Pos>();
+  // A tall, narrow column lets the roots run deeper instead of leaving the
+  // soil empty: depth is stretched to the column's shape.
+  let placed = new Map<string, Pos>();
+  const stretched = () => {
+    const k = box.width ? Math.min(2.2, Math.max(1, (box.height / box.width) * 1.15)) : 1;
+    return new Map([...placed].map(([id, p]) => [id, { x: p.x, y: p.y * k }]));
+  };
   // Drawn positions glide toward the layout, so a reflow never jumps.
   const drawn = new Map<string, Pos>();
   const groups = new Map<string, SVGGElement>();
@@ -237,6 +289,14 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     for (const [id, g] of groups)
       g.classList.toggle("labeled", near.has(id) || id.startsWith("ghost:"));
     declutter();
+  };
+
+  // The selected root's line of support, from it up to the goal, is lit.
+  const chain = () => {
+    const on = new Set<string>();
+    for (let id = selected; id; id = parentOf.get(id) ?? undefined) on.add(id);
+    for (const [id, { el: g }] of paths) g.classList.toggle("path", on.has(id));
+    for (const [id, g] of groups) g.classList.toggle("path", on.has(id));
   };
 
   // Names keep their size at any zoom, so when the tree is far away some
@@ -273,8 +333,9 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     // Frame the roots; the crown may run past the column's sides.
     const minX = Math.min(...xs, -180) - 80;
     const maxX = Math.max(...xs, 180) + 80;
-    const minY = -CROWN_H * 0.5;
-    const maxY = Math.max(...ys) + 80;
+    // The canopy may be cut at the top: the roots are the instrument.
+    const minY = -CROWN_H * 0.32;
+    const maxY = Math.max(...ys) + 130;
     const k = Math.min(1.2, (r.width - 20) / (maxX - minX), (r.height - 40) / (maxY - minY));
     // The stage origin sits at 42% of the height; aim the box centre at the screen centre.
     target = {
@@ -370,6 +431,7 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
   const sizer = new ResizeObserver(() => {
     const r = canvas.getBoundingClientRect();
     box = { width: r.width, height: r.height };
+    goals = stretched();
     if (autoFit) fit();
     wake();
   });
@@ -383,11 +445,18 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     const depth = Math.max(0, Math.round(q.y / DY));
     const w0 = Math.max(1.4, 10 - depth * 3);
     const s = rootShape(q.x, q.y + (parent === "goal" ? 0 : 8), p.x, p.y - 8, id, w0, w0 * 0.42);
-    const [body, lit, core, hairs] = [...g.children];
+    const [body, lit, core, hairs, b1, b2] = [...g.children];
     body?.setAttribute("d", s.body);
     lit?.setAttribute("d", s.lit);
     core?.setAttribute("d", s.core);
     hairs?.setAttribute("d", s.hairs.join(" "));
+    for (const [i, b] of [b1, b2].entries()) {
+      const p2 = s.beads[i];
+      if (b && p2) {
+        b.setAttribute("cx", String(p2[0]));
+        b.setAttribute("cy", String(p2[1]));
+      }
+    }
   };
 
   const linkPath = (a: string, b: string) => {
@@ -519,7 +588,8 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
 
   return {
     render(tree, ghosts = []) {
-      goals = place(tree, ghosts);
+      placed = place(tree, ghosts);
+      goals = stretched();
       roots.replaceChildren();
       marks.replaceChildren();
       groups.clear();
@@ -559,6 +629,8 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
             svg("path", { class: "lit" }),
             svg("path", { class: "core" }),
             svg("path", { class: "hairs" }),
+            svg("circle", { r: 2.6, class: "bead" }),
+            svg("circle", { r: 2.6, class: "bead" }),
           );
           shapeRoot(path, id, parent);
           roots.append(path);
@@ -590,6 +662,7 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
       }
       for (const { id } of all) if (!id.startsWith("ghost:")) seen.add(id);
       parentOf = new Map(all.map((a) => [a.id, a.parent]));
+      chain();
       labels();
       if (autoFit) fit();
       scaleLabels(true);
@@ -604,6 +677,7 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
       selected = id;
       for (const g of marks.querySelectorAll(".node"))
         g.classList.toggle("selected", g.getAttribute("data-id") === id);
+      chain();
       labels();
     },
     focus(id) {
