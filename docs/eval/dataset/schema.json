@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VIBloom evaluation dataset",
+  "description": "Blind predictions by Muse Spark on Oregonator experiments whose outcome the engine settled first. Three files: protocols.json (one object per evaluation), points.jsonl (one line per point and evaluation), predictions.jsonl (one line per prediction). Repetitions of a point are not independent cases.",
+  "$defs": {
+    "protocol": {
+      "type": "object",
+      "required": [
+        "id",
+        "file",
+        "question",
+        "tolerance",
+        "model",
+        "effort",
+        "grid",
+        "frozen",
+        "lessons",
+        "conditions",
+        "repetitions"
+      ],
+      "properties": {
+        "id": { "type": "string", "description": "e1 to e4" },
+        "file": { "type": "string", "description": "Raw results in docs/eval/" },
+        "question": { "const": "reduction_keeps_period" },
+        "tolerance": {
+          "type": "number",
+          "description": "Largest relative period gap the reduction may show"
+        },
+        "model": { "type": "string" },
+        "effort": { "type": "string" },
+        "grid": { "type": "string", "description": "The grid file, or its definition" },
+        "frozen": { "type": "string", "description": "Commit that fixed the grid before the run" },
+        "lessons": { "type": "string", "description": "The session the lessons came from" },
+        "conditions": { "type": "object", "additionalProperties": { "type": "string" } },
+        "repetitions": { "type": "integer" }
+      }
+    },
+    "point": {
+      "type": "object",
+      "required": ["evaluation", "point", "values", "seen_in_lesson", "truth", "gap"],
+      "properties": {
+        "evaluation": { "type": "string" },
+        "point": { "type": "string", "description": "Unique within the dataset" },
+        "values": {
+          "type": "object",
+          "properties": {
+            "s": { "type": "number" },
+            "q": { "type": "number" },
+            "eps": { "type": "number" },
+            "eps_prime": { "type": "number" }
+          }
+        },
+        "seen_in_lesson": {
+          "type": "boolean",
+          "description": "One of the lesson's own runs; reported apart, recall is not learning"
+        },
+        "truth": {
+          "enum": ["holds", "fails"],
+          "description": "Settled by the engine before Muse was asked"
+        },
+        "gap": { "type": ["number", "null"], "description": "|full - reduced| / reduced" }
+      }
+    },
+    "prediction": {
+      "type": "object",
+      "required": [
+        "evaluation",
+        "point",
+        "condition",
+        "repetition",
+        "expect",
+        "confidence",
+        "right",
+        "cited_lessons",
+        "cost_usd"
+      ],
+      "properties": {
+        "evaluation": { "type": "string" },
+        "point": { "type": "string", "description": "A point id in points.jsonl" },
+        "condition": { "type": "string", "description": "A key of the protocol's conditions" },
+        "repetition": { "type": "integer" },
+        "expect": { "enum": ["holds", "fails", null] },
+        "confidence": { "type": ["number", "null"], "description": "Clamped to 0.5 - 0.99" },
+        "right": { "type": ["boolean", "null"] },
+        "cited_lessons": { "type": "array", "items": { "type": "string" } },
+        "cost_usd": { "type": "number" },
+        "error": { "type": "string" }
+      }
+    }
+  }
+}

@@ -124,6 +124,7 @@ recorded chemistry sessions cost $0.04 and $0.07.
 | The Process view, read from the log                    | [`apps/web/src/ideas/process.ts`](apps/web/src/ideas/process.ts)                                                                               |
 | Faithful replay of a recording                         | `playRecorded` in [`apps/web/src/ideas/main.ts`](apps/web/src/ideas/main.ts), [`packages/ideas/eval/verify.ts`](packages/ideas/eval/verify.ts) |
 | The evaluation, its frozen grids and baselines         | [`packages/ideas/eval/`](packages/ideas/eval/), results in [docs/evaluation.md](docs/evaluation.md) and [docs/eval/](docs/eval/)               |
+| The evaluations as an open dataset (604 predictions)   | [docs/eval/dataset/](docs/eval/dataset/), schema and counts checked against the report                                                         |
 | Tests                                                  | [`packages/ideas/src/ideas.test.ts`](packages/ideas/src/ideas.test.ts), [`packages/chem/src/`](packages/chem/src/)                             |
 
 ## Status

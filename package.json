@@ -19,7 +19,8 @@
     "test": "vitest run",
     "build": "npm run build -w @vibloom/web",
     "dev": "npm run dev -w @vibloom/web",
-    "verify": "vite-node packages/ideas/eval/verify.ts"
+    "verify": "vite-node packages/ideas/eval/verify.ts",
+    "dataset": "vite-node packages/ideas/eval/build-dataset.ts"
   },
   "prettier": {
     "printWidth": 100

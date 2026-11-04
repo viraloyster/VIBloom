@@ -1,0 +1,69 @@
+[
+ {
+  "id": "e1",
+  "file": "predictions-2026-11-04.json",
+  "question": "reduction_keeps_period",
+  "tolerance": 0.05,
+  "model": "muse-spark-1.3",
+  "effort": "low",
+  "grid": "s in {0.75, 1, 1.5, 2} x eps_prime in {1e-5, 5e-5, 2e-4, 1e-3}, q 7.62e-5, eps 0.01",
+  "frozen": "defined in the evaluation script before the run; no separate commit",
+  "lessons": "packages/ideas/eval/lesson-session.json, lesson-1",
+  "conditions": {
+   "none": "no lesson",
+   "binary": "the lesson as outcomes, shown as invalidated at other values"
+  },
+  "repetitions": 2
+ },
+ {
+  "id": "e2",
+  "file": "predictions-2026-11-04-grid2.json",
+  "question": "reduction_keeps_period",
+  "tolerance": 0.05,
+  "model": "muse-spark-1.3",
+  "effort": "low",
+  "grid": "packages/ideas/eval/grid-2.json",
+  "frozen": "679008b",
+  "lessons": "packages/ideas/eval/lesson-session.json, lesson-1",
+  "conditions": {
+   "none": "no lesson",
+   "binary": "the lesson as outcomes only",
+   "quantitative": "the lesson with its measured contrast"
+  },
+  "repetitions": 2
+ },
+ {
+  "id": "e3",
+  "file": "predictions-2026-11-04-grid3.json",
+  "question": "reduction_keeps_period",
+  "tolerance": 0.05,
+  "model": "muse-spark-1.3",
+  "effort": "low",
+  "grid": "packages/ideas/eval/grid-3.json",
+  "frozen": "4480544",
+  "lessons": "packages/ideas/eval/lesson-session.json, lesson-1",
+  "conditions": {
+   "none": "no lesson",
+   "binary": "the lesson as outcomes only",
+   "quantitative": "the lesson with its measured contrast"
+  },
+  "repetitions": 2
+ },
+ {
+  "id": "e4",
+  "file": "predictions-2026-11-04-two-lessons.json",
+  "question": "reduction_keeps_period",
+  "tolerance": 0.05,
+  "model": "muse-spark-1.3",
+  "effort": "low",
+  "grid": "packages/ideas/eval/grid-4.json",
+  "frozen": "486eb21",
+  "lessons": "packages/ideas/eval/lesson-session-2.json, lesson-1 and lesson-2",
+  "conditions": {
+   "none": "no lesson",
+   "one": "the first lesson with its measured contrast",
+   "two": "both lessons with their measured contrasts"
+  },
+  "repetitions": 2
+ }
+]

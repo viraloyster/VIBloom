@@ -14,6 +14,24 @@ numerical fit evaluated. The two alternative fits on the same four lesson runs
 reach 89% (on eps_prime and q) and 67% (on eps_prime and eps). This evaluation
 does not establish how Muse attributes the change between q and eps.
 
+## Dataset
+
+All four evaluations are published as one dataset in
+[docs/eval/dataset/](eval/dataset/), described by
+[schema.json](eval/dataset/schema.json):
+
+| File                | One entry per                                                            | Entries |
+| ------------------- | ------------------------------------------------------------------------ | ------: |
+| `protocols.json`    | evaluation (grid, frozen commit, lessons, conditions)                    |       4 |
+| `points.jsonl`      | point of an evaluation, with the engine's outcome and gap                |     106 |
+| `predictions.jsonl` | prediction (condition, repetition, outcome, confidence, citations, cost) |     604 |
+
+Points and predictions are separate so a point counts once however many times
+it was predicted; repetitions share a point id and are not independent cases.
+`npm run dataset` rebuilds it from the raw results and fails if any count or
+score differs from the tables in this report; a test checks the committed
+files the same way.
+
 ## Fourth evaluation: two lessons, against rules that fit their numbers
 
 The second lesson was learned in a live continuation of the first lesson's
