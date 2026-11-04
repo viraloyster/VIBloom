@@ -1,0 +1,747 @@
+{
+  "run": {
+    "spent": 14.591041730000029,
+    "minutes": 76.65413333333333,
+    "budget": 30,
+    "parts": ["decompose", "vision", "chat", "predict", "diagnose"],
+    "recipe_check": 5
+  },
+  "total": {
+    "calls": 3217,
+    "failed": 10,
+    "cost": 14.43
+  },
+  "overview": {
+    "decompose": {
+      "calls": 30,
+      "failed": 1,
+      "failures": ["the response ended without completing"],
+      "cost": 0.489,
+      "cost_per_call": 0.016848,
+      "input_tokens": 53606,
+      "cached_share": 0.796,
+      "output_tokens": 110233,
+      "reasoning_share_of_output": 0.54,
+      "latency_s": {
+        "p50": 27.864,
+        "p90": 37.294
+      },
+      "mean_score": 1
+    },
+    "vision-formula": {
+      "calls": 48,
+      "failed": 0,
+      "failures": [],
+      "cost": 0.264,
+      "cost_per_call": 0.0055,
+      "input_tokens": 23025,
+      "cached_share": 0.638,
+      "output_tokens": 59149,
+      "reasoning_share_of_output": 0.946,
+      "latency_s": {
+        "p50": 9.359,
+        "p90": 19.228
+      },
+      "mean_score": 0.958
+    },
+    "vision-recipe": {
+      "calls": 24,
+      "failed": 0,
+      "failures": [],
+      "cost": 0.088,
+      "cost_per_call": 0.0036869999999999997,
+      "input_tokens": 12672,
+      "cached_share": 0.66,
+      "output_tokens": 19257,
+      "reasoning_share_of_output": 0.846,
+      "latency_s": {
+        "p50": 6.444,
+        "p90": 7.308
+      },
+      "mean_score": 1
+    },
+    "vision-review": {
+      "calls": 18,
+      "failed": 0,
+      "failures": [],
+      "cost": 0.04,
+      "cost_per_call": 0.002212,
+      "input_tokens": 9918,
+      "cached_share": 0.658,
+      "output_tokens": 8143,
+      "reasoning_share_of_output": 0.933,
+      "latency_s": {
+        "p50": 4.453,
+        "p90": 6.332
+      },
+      "mean_score": 0.944
+    },
+    "chat": {
+      "calls": 33,
+      "failed": 0,
+      "failures": [],
+      "cost": 0.21,
+      "cost_per_call": 0.006376000000000001,
+      "input_tokens": 39387,
+      "cached_share": 0.557,
+      "output_tokens": 43604,
+      "reasoning_share_of_output": 0.921,
+      "latency_s": {
+        "p50": 10.397,
+        "p90": 14.196
+      },
+      "mean_score": 0.818
+    },
+    "predict": {
+      "calls": 2910,
+      "failed": 5,
+      "failures": ["the response ended without completing", "Bad Gateway"],
+      "cost": 12.274,
+      "cost_per_call": 0.004225,
+      "input_tokens": 1225266,
+      "cached_share": 0.412,
+      "output_tokens": 2658178,
+      "reasoning_share_of_output": 0.916,
+      "latency_s": {
+        "p50": 8.338,
+        "p90": 12.894
+      },
+      "mean_score": 0.813
+    },
+    "settings": {
+      "calls": 114,
+      "failed": 4,
+      "failures": ["the response ended without completing", "the response did not complete"],
+      "cost": 0.466,
+      "cost_per_call": 0.004241,
+      "input_tokens": 26899,
+      "cached_share": 0.445,
+      "output_tokens": 149990,
+      "reasoning_share_of_output": 0.935,
+      "latency_s": {
+        "p50": 10.948,
+        "p90": 23.052
+      },
+      "mean_score": 0.482
+    },
+    "diagnose": {
+      "calls": 40,
+      "failed": 0,
+      "failures": [],
+      "cost": 0.598,
+      "cost_per_call": 0.014958,
+      "input_tokens": 24856,
+      "cached_share": 0.74,
+      "output_tokens": 138227,
+      "reasoning_share_of_output": 0.936,
+      "latency_s": {
+        "p50": 29.306,
+        "p90": 40.694
+      },
+      "mean_score": 1
+    }
+  },
+  "decompose": {
+    "chem-notes": {
+      "runs": 4,
+      "proposed": 6,
+      "admitted": 6,
+      "checks": 3.75,
+      "computable_share": 0.733,
+      "experiments": [
+        ["oscillates", "reduced_oscillates", "reduction_keeps_period"],
+        ["oscillates", "reduced_oscillates", "reduction_keeps_period"],
+        ["oscillates", "reduction_keeps_period"],
+        ["oscillates", "reduced_oscillates", "reduction_keeps_period"]
+      ],
+      "recipe_named": 4,
+      "eps_set_by_muse": 0,
+      "refused": []
+    },
+    "chem-reduction": {
+      "runs": 3,
+      "proposed": 6,
+      "admitted": 6,
+      "checks": 5.333,
+      "computable_share": 1,
+      "experiments": [
+        ["reduction_keeps_period", "oscillates", "reduced_oscillates"],
+        ["oscillates", "reduced_oscillates", "reduction_keeps_period"],
+        ["reduction_keeps_period", "oscillates", "reduced_oscillates"]
+      ],
+      "recipe_named": 0,
+      "eps_set_by_muse": 3,
+      "refused": []
+    },
+    "chem-recipe": {
+      "runs": 4,
+      "proposed": 6,
+      "admitted": 6,
+      "checks": 3.75,
+      "computable_share": 0.667,
+      "experiments": [
+        ["oscillates", "reduction_keeps_period"],
+        ["oscillates", "reduction_keeps_period"],
+        ["oscillates", "reduction_keeps_period"],
+        ["oscillates", "reduction_keeps_period"]
+      ],
+      "recipe_named": 4,
+      "eps_set_by_muse": 0,
+      "refused": []
+    },
+    "airliner": {
+      "runs": 4,
+      "proposed": 6,
+      "admitted": 6,
+      "checks": 4,
+      "computable_share": 1,
+      "experiments": [[], [], [], []],
+      "recipe_named": 0,
+      "eps_set_by_muse": 0,
+      "refused": []
+    },
+    "primes": {
+      "runs": 4,
+      "proposed": 6,
+      "admitted": 6,
+      "checks": 0.25,
+      "computable_share": 1,
+      "experiments": [[], [], [], []],
+      "recipe_named": 0,
+      "eps_set_by_muse": 0,
+      "refused": []
+    },
+    "ice-bridge": {
+      "runs": 4,
+      "proposed": 6,
+      "admitted": 6,
+      "checks": 2.75,
+      "computable_share": 1,
+      "experiments": [[], [], [], []],
+      "recipe_named": 0,
+      "eps_set_by_muse": 0,
+      "refused": []
+    },
+    "inject-status": {
+      "runs": 3,
+      "proposed": 6,
+      "admitted": 6,
+      "checks": 3,
+      "computable_share": 0.889,
+      "experiments": [
+        ["oscillates", "reduction_keeps_period"],
+        ["oscillates", "reduced_oscillates", "reduction_keeps_period"],
+        ["oscillates", "reduction_keeps_period"]
+      ],
+      "recipe_named": 3,
+      "eps_set_by_muse": 0,
+      "refused": []
+    },
+    "inject-format": {
+      "runs": 3,
+      "proposed": 6,
+      "admitted": 6,
+      "checks": 3,
+      "computable_share": 1,
+      "experiments": [[], [], []],
+      "recipe_named": 0,
+      "eps_set_by_muse": 0,
+      "refused": []
+    }
+  },
+  "predict": {
+    "oscillates, no lesson": {
+      "n": 598,
+      "accuracy": 0.952,
+      "majority_baseline": 0.95,
+      "brier": 0.056,
+      "ece": 0.101,
+      "said_holds": 0.988,
+      "truth_holds": 0.95,
+      "mean_confidence": 0.852,
+      "calibration": [
+        {
+          "bin": "0.6-0.7",
+          "n": 5,
+          "confidence": 0.668,
+          "accuracy": 0.6
+        },
+        {
+          "bin": "0.7-0.8",
+          "n": 65,
+          "confidence": 0.761,
+          "accuracy": 0.954
+        },
+        {
+          "bin": "0.8-0.9",
+          "n": 379,
+          "confidence": 0.849,
+          "accuracy": 0.953
+        },
+        {
+          "bin": "0.9-1",
+          "n": 149,
+          "confidence": 0.905,
+          "accuracy": 0.96
+        }
+      ],
+      "same_answer_all_reps": 0.965
+    },
+    "reduced_oscillates, no lesson": {
+      "n": 600,
+      "accuracy": 0.958,
+      "majority_baseline": 0.96,
+      "brier": 0.052,
+      "ece": 0.11,
+      "said_holds": 0.988,
+      "truth_holds": 0.96,
+      "mean_confidence": 0.848,
+      "calibration": [
+        {
+          "bin": "0.6-0.7",
+          "n": 13,
+          "confidence": 0.662,
+          "accuracy": 0.692
+        },
+        {
+          "bin": "0.7-0.8",
+          "n": 65,
+          "confidence": 0.759,
+          "accuracy": 0.923
+        },
+        {
+          "bin": "0.8-0.9",
+          "n": 388,
+          "confidence": 0.849,
+          "accuracy": 0.972
+        },
+        {
+          "bin": "0.9-1",
+          "n": 134,
+          "confidence": 0.907,
+          "accuracy": 0.963
+        }
+      ],
+      "same_answer_all_reps": 0.965
+    },
+    "reduction, no lesson": {
+      "n": 570,
+      "accuracy": 0.458,
+      "majority_baseline": 0.542,
+      "brier": 0.392,
+      "ece": 0.397,
+      "said_holds": 0.996,
+      "truth_holds": 0.458,
+      "mean_confidence": 0.855,
+      "calibration": [
+        {
+          "bin": "0.6-0.7",
+          "n": 1,
+          "confidence": 0.68,
+          "accuracy": 0
+        },
+        {
+          "bin": "0.7-0.8",
+          "n": 73,
+          "confidence": 0.757,
+          "accuracy": 0.288
+        },
+        {
+          "bin": "0.8-0.9",
+          "n": 340,
+          "confidence": 0.851,
+          "accuracy": 0.347
+        },
+        {
+          "bin": "0.9-1",
+          "n": 156,
+          "confidence": 0.909,
+          "accuracy": 0.782
+        }
+      ],
+      "same_answer_all_reps": 0.989
+    },
+    "reduction, one lesson": {
+      "n": 569,
+      "accuracy": 0.842,
+      "majority_baseline": 0.543,
+      "brier": 0.148,
+      "ece": 0.151,
+      "said_holds": 0.383,
+      "truth_holds": 0.457,
+      "mean_confidence": 0.691,
+      "calibration": [
+        {
+          "bin": "0.5-0.6",
+          "n": 12,
+          "confidence": 0.536,
+          "accuracy": 0.75
+        },
+        {
+          "bin": "0.6-0.7",
+          "n": 309,
+          "confidence": 0.653,
+          "accuracy": 0.761
+        },
+        {
+          "bin": "0.7-0.8",
+          "n": 195,
+          "confidence": 0.724,
+          "accuracy": 0.938
+        },
+        {
+          "bin": "0.8-0.9",
+          "n": 53,
+          "confidence": 0.829,
+          "accuracy": 0.981
+        }
+      ],
+      "same_answer_all_reps": 0.889
+    },
+    "reduction, two lessons": {
+      "n": 568,
+      "accuracy": 0.843,
+      "majority_baseline": 0.544,
+      "brier": 0.134,
+      "ece": 0.117,
+      "said_holds": 0.532,
+      "truth_holds": 0.456,
+      "mean_confidence": 0.727,
+      "calibration": [
+        {
+          "bin": "0.5-0.6",
+          "n": 6,
+          "confidence": 0.575,
+          "accuracy": 0.5
+        },
+        {
+          "bin": "0.6-0.7",
+          "n": 159,
+          "confidence": 0.655,
+          "accuracy": 0.698
+        },
+        {
+          "bin": "0.7-0.8",
+          "n": 315,
+          "confidence": 0.741,
+          "accuracy": 0.879
+        },
+        {
+          "bin": "0.8-0.9",
+          "n": 88,
+          "confidence": 0.822,
+          "accuracy": 1
+        }
+      ],
+      "same_answer_all_reps": 0.936
+    }
+  },
+  "settings": {
+    "standard, effort low": {
+      "n": 54,
+      "accuracy": 0.463,
+      "majority_baseline": 0.537,
+      "brier": 0.373,
+      "ece": 0.374,
+      "said_holds": 1,
+      "truth_holds": 0.463,
+      "mean_confidence": 0.836,
+      "calibration": [
+        {
+          "bin": "0.6-0.7",
+          "n": 1,
+          "confidence": 0.68,
+          "accuracy": 0
+        },
+        {
+          "bin": "0.7-0.8",
+          "n": 12,
+          "confidence": 0.761,
+          "accuracy": 0.333
+        },
+        {
+          "bin": "0.8-0.9",
+          "n": 30,
+          "confidence": 0.845,
+          "accuracy": 0.4
+        },
+        {
+          "bin": "0.9-1",
+          "n": 11,
+          "confidence": 0.91,
+          "accuracy": 0.818
+        }
+      ]
+    },
+    "standard, effort medium": {
+      "n": 54,
+      "accuracy": 0.5,
+      "majority_baseline": 0.537,
+      "brier": 0.379,
+      "ece": 0.379,
+      "said_holds": 0.963,
+      "truth_holds": 0.463,
+      "mean_confidence": 0.879,
+      "calibration": [
+        {
+          "bin": "0.7-0.8",
+          "n": 3,
+          "confidence": 0.78,
+          "accuracy": 0.667
+        },
+        {
+          "bin": "0.8-0.9",
+          "n": 23,
+          "confidence": 0.853,
+          "accuracy": 0.217
+        },
+        {
+          "bin": "0.9-1",
+          "n": 28,
+          "confidence": 0.912,
+          "accuracy": 0.714
+        }
+      ]
+    },
+    "contributor, effort low": {
+      "n": 56,
+      "accuracy": 0.464,
+      "majority_baseline": 0.536,
+      "brier": 0.397,
+      "ece": 0.395,
+      "said_holds": 1,
+      "truth_holds": 0.464,
+      "mean_confidence": 0.86,
+      "calibration": [
+        {
+          "bin": "0.6-0.7",
+          "n": 1,
+          "confidence": 0.68,
+          "accuracy": 0
+        },
+        {
+          "bin": "0.7-0.8",
+          "n": 2,
+          "confidence": 0.75,
+          "accuracy": 0.5
+        },
+        {
+          "bin": "0.8-0.9",
+          "n": 38,
+          "confidence": 0.852,
+          "accuracy": 0.447
+        },
+        {
+          "bin": "0.9-1",
+          "n": 15,
+          "confidence": 0.907,
+          "accuracy": 0.533
+        }
+      ]
+    }
+  },
+  "settingCost": {
+    "effort-medium": {
+      "cost_per_call": 0.008458,
+      "latency_p50_s": 16.435
+    },
+    "contributor": {
+      "cost_per_call": 0.000174,
+      "latency_p50_s": 7.689
+    }
+  },
+  "diagnose": {
+    "runs": 40,
+    "accepted_by_engine": 40,
+    "rejected_reasons": [],
+    "test_decided_one": 40,
+    "outcomes": {
+      "one consistent": 40
+    },
+    "test_parameters": {
+      "eps": 36,
+      "eps_prime": 3,
+      "q": 1
+    },
+    "with_unsupported_numbers": 0
+  },
+  "chat": {
+    "chemical-clock|failing": {
+      "runs": 3,
+      "failed": 0,
+      "mean_score": 1
+    },
+    "chemical-clock|foundations": {
+      "runs": 3,
+      "failed": 0,
+      "mean_score": 0.333
+    },
+    "chemical-clock|period": {
+      "runs": 3,
+      "failed": 0,
+      "mean_score": 1
+    },
+    "recipe-search|foundations": {
+      "runs": 3,
+      "failed": 0,
+      "mean_score": 0.667
+    },
+    "recipe-search|failing": {
+      "runs": 3,
+      "failed": 0,
+      "mean_score": 0.667
+    },
+    "recipe-search|period": {
+      "runs": 3,
+      "failed": 0,
+      "mean_score": 1
+    },
+    "period-reduction|failing": {
+      "runs": 3,
+      "failed": 0,
+      "mean_score": 1
+    },
+    "period-reduction|value": {
+      "runs": 3,
+      "failed": 0,
+      "mean_score": 1
+    },
+    "cardboard-airliner|foundations": {
+      "runs": 3,
+      "failed": 0,
+      "mean_score": 1
+    },
+    "cardboard-airliner|failing": {
+      "runs": 3,
+      "failed": 0,
+      "mean_score": 0.667
+    },
+    "cardboard-airliner|value": {
+      "runs": 3,
+      "failed": 0,
+      "mean_score": 0.667
+    }
+  },
+  "vision": {
+    "formulas_mapped_right": "35/36",
+    "unknown_symbols_flagged": "11/12",
+    "recipe_values_read": 1,
+    "review_right": "17/18",
+    "review_planted_mismatch_caught": "9/9",
+    "review_false_alarms": "1/9",
+    "formula_cases": {
+      "f1": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 1
+      },
+      "f2": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 1
+      },
+      "f4": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 1
+      },
+      "f3": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 1
+      },
+      "f5": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 1
+      },
+      "f6": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 1
+      },
+      "f8": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 1
+      },
+      "f7": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 1
+      },
+      "f10": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 1
+      },
+      "f11": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 1
+      },
+      "f9": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 0.667
+      },
+      "f12": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 1
+      },
+      "u1": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 1
+      },
+      "u2": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 1
+      },
+      "u3": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 1
+      },
+      "u4": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 0.667
+      }
+    },
+    "review_cases": {
+      "m1": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 0.667
+      },
+      "m2": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 1
+      },
+      "m3": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 1
+      },
+      "m4": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 1
+      },
+      "m5": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 1
+      },
+      "m6": {
+        "runs": 3,
+        "failed": 0,
+        "mean_score": 1
+      }
+    }
+  }
+}

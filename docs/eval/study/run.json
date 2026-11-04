@@ -1,0 +1,7 @@
+{
+  "spent": 14.591041730000029,
+  "minutes": 76.65413333333333,
+  "budget": 30,
+  "parts": ["decompose", "vision", "chat", "predict", "diagnose"],
+  "recipe_check": 5
+}

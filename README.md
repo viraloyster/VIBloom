@@ -21,7 +21,8 @@ Built during the Meta Global AI Developer Hackathon, from November 2, 2026
 - **Verify without a browser or a key:** `npm ci && npm run verify` replays
   every recorded session, checks its hash chain and runs each experiment
   again (about 6 s)
-- **Evaluation:** [docs/evaluation.md](docs/evaluation.md)
+- **Evaluation:** [docs/evaluation.md](docs/evaluation.md); a study of
+  3,217 Muse calls: [docs/study.md](docs/study.md)
 
 ![A recorded session: the experiment's outcome first, the clock in seconds, both models' traces, and the selected root's foundations lit in the tree](docs/img/experiment.jpg)
 
@@ -32,9 +33,10 @@ Built during the Meta Global AI Developer Hackathon, from November 2, 2026
 | Handwritten BZ lab notes, tested             | Period 6.5 min against a 60 s target; at 0.2 M malonic acid 67 s, but the two-variable model is then 42% off (tolerance 15%)                                                                                                                                         | [recorded session](apps/web/public/examples/chemical-clock.json), `npm run verify`     |
 | Muse proven wrong, then a discriminating run | Muse predicted the reduction would hold (82%, blind); it failed. Its test (five times the bromate, gap 6.4%) contradicts one explanation and is consistent with the other                                                                                            | Same session, Process view                                                             |
 | Do lessons change Muse's predictions?        | On a grid frozen before the run: Muse 67% right with no lesson (the same as always answering "holds"), 76% with one, 85% with two. Two numerical fits on the same lesson runs reach 89% and 67%; how Muse attributes the change between q and eps is not established | [evaluation](docs/evaluation.md)                                                       |
+| The same, at scale                           | 200 seeded points, 3 repetitions: with no lesson Muse says "holds" 99.6% of the time and is right 45.8% (always answering the majority: 54.2%); with one lesson 84.2%, with two 84.3%, Brier 0.392 to 0.134. More reasoning effort: 50.0%, at twice the cost         | [study](docs/study.md), [call log](docs/eval/study/)                                   |
 | Solver against an independent reference      | Oregonator periods agree with SciPy (Radau) to a relative 5e-4                                                                                                                                                                                                       | [validation](docs/validation.md)                                                       |
 | Every recorded run reproduces                | Re-run in the browser and by `npm run verify`, to a relative 1e-4                                                                                                                                                                                                    | [`packages/ideas/eval/verify.ts`](packages/ideas/eval/verify.ts)                       |
-| Tests                                        | 227, including a regression for every issue found in review                                                                                                                                                                                                          | [`packages/ideas/src/ideas.test.ts`](packages/ideas/src/ideas.test.ts) and per package |
+| Tests                                        | 232, including a regression for every issue found in review                                                                                                                                                                                                          | [`packages/ideas/src/ideas.test.ts`](packages/ideas/src/ideas.test.ts) and per package |
 
 ## Impact: the task it does
 
