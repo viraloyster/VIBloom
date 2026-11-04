@@ -34,14 +34,21 @@ export function mountChat(host: HTMLElement, actions: ChatActions) {
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") submit();
   });
+  // What the next question is about, always in sight above the field.
+  const about = el("p", { class: "discussing" });
   host.replaceChildren(
     el("div", { class: "chat-head" }, el("span", { class: "eyebrow" }, "Chat with Muse"), grow),
     log,
+    about,
     el("div", { class: "chat-bar" }, input, send),
   );
 
   return {
-    render(tree: IdeaTree, pending?: string, cost?: (i: number) => string) {
+    render(tree: IdeaTree, pending?: string, cost?: (i: number) => string, focus = "goal") {
+      about.replaceChildren(
+        el("span", { class: "fine" }, "Discussing: "),
+        el("b", {}, short(tree.nodes.get(focus)?.title ?? tree.goal)),
+      );
       const items = tree.chat.map((c, i) => {
         const cites = c.cites.map((id) => {
           const n = tree.nodes.get(id);
@@ -56,9 +63,10 @@ export function mountChat(host: HTMLElement, actions: ChatActions) {
           return b;
         });
         const about = tree.nodes.get(c.focus)?.title;
+        // Answers about another root step back when this one is selected.
         return el(
           "div",
-          { class: "turn" },
+          { class: `turn${c.focus === focus ? "" : " other"}` },
           el("div", { class: "msg me" }, el("p", {}, c.question)),
           el(
             "div",

@@ -13,7 +13,7 @@ import {
 } from "@vibloom/ideas";
 import { RECIPE_SOURCE } from "@vibloom/chem";
 import { el } from "../dom";
-import { clockPanel } from "./clock";
+import { clockPanel, duration } from "./clock";
 import type { Step } from "./process";
 
 export interface Playback {
@@ -430,6 +430,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
     const out: (Node | null)[] = [
       el("p", { class: `status ${st}` }, statusLabel(st)),
       el("h2", {}, n.title),
+      n.check?.kind === "oregonator" ? glance(tree, n) : null,
       el("p", { class: "statement" }, n.statement),
     ];
     if (r && "error" in r)
@@ -876,6 +877,52 @@ function tabs(views: [string, () => HTMLElement][], first: number): HTMLElement 
   };
   open(first);
   return el("div", { class: "tabs" }, el("div", { class: "tab-row" }, ...buttons), body);
+}
+
+// What happened, before why to trust it: the period, the target and the
+// reduction's error, each with its verdict in words. Details follow below.
+function glance(tree: IdeaTree, n: IdeaNode): HTMLElement | null {
+  const r = tree.results.get(n.id);
+  if (!r || "error" in r || tree.unconfirmed.has(n.id)) return null;
+  const rows: HTMLElement[] = [];
+  const ts = r.inputs.time_scale_s;
+  const full = r.sim?.periods.full;
+  if (full !== undefined)
+    rows.push(
+      el(
+        "p",
+        { class: "big" },
+        ts === undefined ? `Period ${full.toPrecision(3)} (model units)` : duration(full * ts),
+      ),
+    );
+  // Any comparison that reads a period in seconds: a target on the clock.
+  for (const m of tree.nodes.values()) {
+    const c = m.check;
+    const res = tree.results.get(m.id);
+    if (!c || c.kind === "oregonator" || !res || "error" in res) continue;
+    if (!/_period_(full|reduced)_s\b/.test(`${c.value} ${c.limit}`)) continue;
+    rows.push(
+      el(
+        "p",
+        { class: res.pass ? "ok" : "bad" },
+        `${m.title}: ${res.value.toPrecision(3)} ${res.op} ${res.limit.toPrecision(3)} ${res.unit} - ${res.pass ? "meets it" : "misses it"}`,
+      ),
+    );
+  }
+  for (const m of tree.nodes.values()) {
+    const c = m.check;
+    const res = tree.results.get(m.id);
+    if (c?.kind !== "oregonator" || c.question !== "reduction_keeps_period") continue;
+    if (!res || "error" in res) continue;
+    rows.push(
+      el(
+        "p",
+        { class: res.pass ? "ok" : "bad" },
+        `Reduction error ${(res.value * 100).toFixed(1)}%, allowed ${(c.tolerance * 100).toFixed(0)}% - ${res.pass ? "holds" : "fails"}`,
+      ),
+    );
+  }
+  return rows.length ? el("div", { class: "glance" }, ...rows) : null;
 }
 
 // What Muse said after looking at a picture of its own drawing.

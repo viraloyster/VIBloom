@@ -205,6 +205,9 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
   host.append(canvas);
 
   let view = { x: 0, y: 0, k: 0.8 };
+  // Measured when the column changes size, not read on every frame.
+  let box = { width: 0, height: 0 };
+  const calm = matchMedia("(prefers-reduced-motion: reduce)");
   let target = { ...view };
   // Until a person pans or zooms, the camera keeps the whole tree in frame.
   let autoFit = true;
@@ -233,12 +236,37 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     }
     for (const [id, g] of groups)
       g.classList.toggle("labeled", near.has(id) || id.startsWith("ghost:"));
+    declutter();
+  };
+
+  // Names keep their size at any zoom, so when the tree is far away some
+  // would cover others: the selected root and the goal keep theirs, then
+  // the higher roots; a hidden name returns on hover or focus.
+  const declutter = () => {
+    const placed: DOMRect[] = [];
+    const rank = (id: string) => (id === selected ? 0 : id === "goal" ? 1 : 2);
+    const order = [...groups.entries()]
+      .filter(([, g]) => g.classList.contains("labeled"))
+      .sort(([a], [b]) => rank(a) - rank(b) || (goals.get(a)?.y ?? 0) - (goals.get(b)?.y ?? 0));
+    for (const [, g] of order) {
+      const r = g.querySelector(".chip")?.getBoundingClientRect();
+      if (!r) continue;
+      const hit = placed.some(
+        (q) =>
+          r.left < q.right + 2 &&
+          q.left < r.right + 2 &&
+          r.top < q.bottom + 2 &&
+          q.top < r.bottom + 2,
+      );
+      g.classList.toggle("crowded", hit);
+      if (!hit) placed.push(r);
+    }
   };
 
   const ease = (a: number, b: number, f: number) => (Math.abs(b - a) < 0.05 ? b : a + (b - a) * f);
 
   const fit = () => {
-    const r = canvas.getBoundingClientRect();
+    const r = box;
     if (r.width === 0 || goals.size === 0) return;
     const xs = [...goals.values()].map((p) => p.x);
     const ys = [...goals.values()].map((p) => p.y);
@@ -269,7 +297,7 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     return 0;
   };
   const clamp = () => {
-    const r = canvas.getBoundingClientRect();
+    const r = box;
     if (r.width === 0 || goals.size === 0) return;
     const xs = [...goals.values()].map((p) => p.x);
     const ys = [...goals.values()].map((p) => p.y);
@@ -287,24 +315,39 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     if (dx || dy) target = { ...target, x: target.x + dx, y: target.y + dy };
   };
 
+  // Labels and hit areas keep their size on screen at any zoom.
+  let labelK = 0;
+  const scaleLabels = (force = false) => {
+    if (!force && labelK === view.k) return;
+    labelK = view.k;
+    const t = `scale(${String(1 / view.k)})`;
+    for (const g of groups.values()) g.querySelector(".fixed")?.setAttribute("transform", t);
+  };
+
+  // The loop sleeps once the camera and every root have arrived, and wakes
+  // on any change; a still tree costs no frames.
   const tick = () => {
+    frame = 0;
     clamp();
+    const f = calm.matches ? 1 : 0.12;
+    const prev = view;
     view = {
-      x: ease(view.x, target.x, 0.12),
-      y: ease(view.y, target.y, 0.12),
-      k: ease(view.k, target.k, 0.12),
+      x: ease(view.x, target.x, f),
+      y: ease(view.y, target.y, f),
+      k: Math.abs(target.k - view.k) < 0.002 ? target.k : view.k + (target.k - view.k) * f,
     };
-    const r = canvas.getBoundingClientRect();
+    const r = box;
     stage.setAttribute(
       "transform",
       `translate(${String(r.width / 2 + view.x)} ${String(r.height * 0.42 + view.y)}) scale(${String(view.k)})`,
     );
+    scaleLabels();
     let moved = false;
     for (const [id, goal] of goals) {
       const cur = drawn.get(id);
       if (!cur) continue;
-      const nx = ease(cur.x, goal.x, 0.16);
-      const ny = ease(cur.y, goal.y, 0.16);
+      const nx = ease(cur.x, goal.x, calm.matches ? 1 : 0.16);
+      const ny = ease(cur.y, goal.y, calm.matches ? 1 : 0.16);
       if (nx === cur.x && ny === cur.y) continue;
       moved = true;
       cur.x = nx;
@@ -315,10 +358,22 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
       for (const [id, { el: g, parent }] of paths) shapeRoot(g, id, parent);
       for (const l of links) l.el.setAttribute("d", linkPath(l.a, l.b));
     }
-    if (alive) frame = requestAnimationFrame(tick);
+    const still = !moved && prev.x === view.x && prev.y === view.y && prev.k === view.k;
+    if (alive && !still) frame = requestAnimationFrame(tick);
+    else declutter();
   };
   let alive = true;
-  let frame = requestAnimationFrame(tick);
+  let frame = 0;
+  const wake = () => {
+    if (alive && !frame) frame = requestAnimationFrame(tick);
+  };
+  const sizer = new ResizeObserver(() => {
+    const r = canvas.getBoundingClientRect();
+    box = { width: r.width, height: r.height };
+    if (autoFit) fit();
+    wake();
+  });
+  sizer.observe(canvas);
 
   // Thick near the trunk, thin toward the tips.
   const shapeRoot = (g: SVGGElement, id: string, parent: string) => {
@@ -355,6 +410,7 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
         y: my - ((my - target.y) * k) / target.k,
         k,
       };
+      wake();
     },
     { passive: false },
   );
@@ -370,6 +426,7 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     // Panning follows the pointer directly; easing here feels like lag.
     target = { ...target, x: e.clientX - drag.x, y: e.clientY - drag.y };
     view = { ...target };
+    wake();
   });
   canvas.addEventListener("pointerup", () => {
     drag = undefined;
@@ -377,11 +434,44 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
   canvas.addEventListener("dblclick", () => {
     autoFit = true;
     fit();
+    wake();
   });
-  const onResize = () => {
-    if (autoFit) fit();
+  // Camera controls: whole tree, closer, farther, the selected root.
+  const zoom = (by: number) => {
+    autoFit = false;
+    const k = Math.min(2.2, Math.max(0.3, target.k * by));
+    target = { x: (target.x * k) / target.k, y: (target.y * k) / target.k, k };
+    wake();
   };
-  window.addEventListener("resize", onResize);
+  const control = (label: string, title: string, act: () => void) => {
+    const b = el("button", { class: "cam", title, "aria-label": title }, label);
+    b.addEventListener("click", act);
+    return b;
+  };
+  host.append(
+    el(
+      "div",
+      { class: "camera" },
+      control("Fit", "Show the whole tree", () => {
+        autoFit = true;
+        fit();
+        wake();
+      }),
+      control("+", "Zoom in", () => {
+        zoom(1.25);
+      }),
+      control("-", "Zoom out", () => {
+        zoom(0.8);
+      }),
+      control("Focus", "Center the selected root", () => {
+        const p = selected ? goals.get(selected) : undefined;
+        if (!p) return;
+        autoFit = false;
+        target = { ...target, x: -p.x * target.k, y: -p.y * target.k + 40 };
+        wake();
+      }),
+    ),
+  );
   // While Muse works on the first roots, a seed germinates where they will grow.
   const seedNote = el("div", { class: "seed-note", hidden: true });
   host.append(seedNote);
@@ -399,12 +489,24 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     fo.append(box);
     const g = svg(
       "g",
-      { class: `node ${status}`, "data-id": id, tabindex: 0, role: "button" },
+      {
+        class: `node ${status}`,
+        "data-id": id,
+        tabindex: 0,
+        role: "button",
+        "aria-label": n.title,
+      },
       svg("circle", { r: 18, class: "halo" }),
       svg("circle", { r: 8, class: "orb" }),
       svg("circle", { r: 8, fill: "url(#orb-shade)", class: "shade" }),
       svg("circle", { r: 8, fill: "url(#orb-light)", class: "shine" }),
-      fo,
+      // Counter-scaled with the zoom: a 36 px target and a readable name.
+      svg(
+        "g",
+        { class: "fixed", transform: `scale(${String(1 / view.k)})` },
+        svg("circle", { r: 18, class: "hit" }),
+        fo,
+      ),
     );
     g.addEventListener("click", () => {
       onSelect(id);
@@ -490,6 +592,8 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
       parentOf = new Map(all.map((a) => [a.id, a.parent]));
       labels();
       if (autoFit) fit();
+      scaleLabels(true);
+      wake();
     },
     mark(ids) {
       const lit = new Set(ids);
@@ -506,12 +610,13 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
       const p = goals.get(id);
       if (!p) return;
       // Only move when the node is out of view, and keep the zoom.
-      const r = canvas.getBoundingClientRect();
+      const r = box;
       const sx = r.width / 2 + target.x + p.x * target.k;
       const sy = r.height * 0.42 + target.y + p.y * target.k;
       if (sx > r.width * 0.1 && sx < r.width * 0.9 && sy > r.height * 0.1 && sy < r.height * 0.9)
         return;
       target = { ...target, x: -p.x * target.k, y: -p.y * target.k + 40 };
+      wake();
     },
     seed(text) {
       const on = text !== undefined;
@@ -521,15 +626,17 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
         seedNote.replaceChildren(el("b", {}, "Muse is working on the seed"), el("span", {}, text));
         if (autoFit) target = { x: 0, y: 40, k: 1.3 };
       } else if (autoFit) fit();
+      wake();
     },
     refit() {
       autoFit = true;
       fit();
+      wake();
     },
     dispose() {
       alive = false;
       cancelAnimationFrame(frame);
-      window.removeEventListener("resize", onResize);
+      sizer.disconnect();
     },
     busy(id) {
       working = id;

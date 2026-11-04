@@ -77,6 +77,14 @@ let recorded = false;
 
 const usd = (x: number) => (x < 0.01 ? `$${x.toFixed(4)}` : `$${x.toFixed(3)}`);
 
+// A project's name in the header: its first sentence, cut at a word. The
+// whole question stays in the tooltip and on the goal root.
+function shortTitle(goal: string): string {
+  const first = (goal.split(/[.?!\n]/)[0] ?? goal).trim();
+  if (first.length <= 44) return first;
+  return `${first.slice(0, 42).replace(/\s+\S*$/, "")}...`;
+}
+
 function goalOf(events: IdeaEvent[]): string {
   const b = events[0]?.body;
   return b?.type === "goal" ? b.text.slice(0, 60) : "your last tree";
@@ -354,7 +362,7 @@ function workspace(goal: string) {
           "header",
           { class: "top" },
           el("span", { class: "brand small" }, "VIBloom"),
-          el("span", { class: "goal-title" }, goal),
+          el("span", { class: "goal-title", title: goal }, shortTitle(goal)),
           hud,
           processButton,
           save,
@@ -495,10 +503,15 @@ function refresh() {
     view.mark([]);
     monitor.render(tree, selectedId);
   }
-  chat.render(tree, asking, (i) => {
-    const u = chatUsage[i];
-    return u ? usd(u.cost) : "";
-  });
+  chat.render(
+    tree,
+    asking,
+    (i) => {
+      const u = chatUsage[i];
+      return u ? usd(u.cost) : "";
+    },
+    selectedId ?? "goal",
+  );
   // A recording shows what it cost when it was made; it calls nobody now.
   // Otherwise the meter is this tab's real spend against its budget.
   const calls = recorded
@@ -564,9 +577,8 @@ async function grow(under: string, kind: "decompose" | "expand") {
       usage: r.usage,
     });
     for (const n of nodes) await check(n);
+    // The camera follows new roots only while the person has not framed it.
     refresh();
-    // Show the whole tree again with its new roots.
-    view.refit();
     monitor.status(r.summary);
     await repair();
   } catch (e) {

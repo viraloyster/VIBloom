@@ -34,7 +34,7 @@ export {
   type GrowRequest,
   type MuseConfig,
 } from "./muse";
-export { IdeaTree, type Status } from "./tree";
+export { IdeaTree, outputKey, type Status } from "./tree";
 export {
   recipeDerived,
   RECIPE_PARAMS,
