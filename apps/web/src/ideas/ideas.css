@@ -1594,3 +1594,112 @@ h1 {
   margin: 8px 0;
   border-radius: 8px;
 }
+
+.tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.tab-row {
+  display: flex;
+  gap: 6px;
+}
+
+.tab {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgb(255 255 255 / 14%);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tab.on {
+  color: var(--text);
+  border-color: rgb(255 255 255 / 40%);
+  background: rgb(255 255 255 / 6%);
+}
+
+.clock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.clock-head {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.clock-period {
+  margin: 2px 0;
+  font-size: 40px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.clock-live {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.clock-beaker {
+  width: 92px;
+  height: auto;
+}
+
+.clock-beaker .liquid {
+  transition: fill 120ms linear;
+}
+
+.clock-time {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.speed.on {
+  color: var(--text);
+  border-color: rgb(255 255 255 / 45%);
+}
+
+.traces {
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
+  background: rgb(255 255 255 / 3%);
+}
+
+.traces .trace {
+  fill: none;
+  stroke-width: 1.6;
+}
+
+.traces .trace.full {
+  stroke: #ff6b6b;
+}
+
+.traces .trace.reduced {
+  stroke: #7fb2ff;
+  stroke-dasharray: 5 4;
+}
+
+.traces .cursor {
+  stroke: rgb(255 255 255 / 55%);
+  stroke-width: 1;
+}
+
+.traces .tick {
+  fill: var(--muted);
+  font-size: 11px;
+}

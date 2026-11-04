@@ -1,8 +1,9 @@
 // The idea tree as a hash-chained log. State is derived by replaying events;
 // what the model returns is validated here before it becomes a node.
 
+import { RECIPE_RELATIONS } from "@vibloom/chem";
 import { canonical, sha256 } from "@vibloom/engine";
-import { runCheck, SIM_PARAMS, thresholds } from "./check";
+import { recipeDerived, runCheck, SIM_PARAMS, thresholds } from "./check";
 import { numbersOf, unsupportedNumbers } from "./numbers";
 import { bare, MAX_EXPR, names, OPS, rename, tokens, type Op } from "./expr";
 import { AXES, type GrownNode } from "./protocol";
@@ -62,6 +63,7 @@ export class IdeaTree {
   }[] = [];
   goal = "";
   mode: Mode = "standard";
+  sketch: string | undefined;
 
   get head() {
     return this.events.at(-1)?.hash ?? GENESIS;
@@ -132,6 +134,9 @@ export class IdeaTree {
         if (this.events.length > 0) throw new Error("the goal is set once");
         this.goal = b.text;
         this.mode = b.mode;
+        if (b.sketch?.startsWith("data:image/jpeg;base64,") && b.sketch.length < 400_000) {
+          this.sketch = b.sketch;
+        }
         this.nodes.set("goal", {
           id: "goal",
           parent: null,
@@ -419,7 +424,14 @@ export class IdeaTree {
   scope(): Record<string, number> {
     const out: Record<string, number> = {};
     for (const n of this.nodes.values()) for (const p of n.params) out[p.name] = p.value;
-    return { ...out, ...this.outputs() };
+    return { ...out, ...recipeDerived(out), ...this.outputs() };
+  }
+
+  // What the tree's recipe sets without any node owning it.
+  derived(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const n of this.nodes.values()) for (const p of n.params) out[p.name] = p.value;
+    return recipeDerived(out);
   }
 
   // What confirmed experiments measured, readable by formulas as
@@ -434,6 +446,12 @@ export class IdeaTree {
       const key = outputKey(id);
       if (r.sim.periods.full !== undefined) out[`${key}_period_full`] = r.sim.periods.full;
       if (r.sim.periods.reduced !== undefined) out[`${key}_period_reduced`] = r.sim.periods.reduced;
+      const ts = r.inputs.time_scale_s;
+      if (ts !== undefined) {
+        if (r.sim.periods.full !== undefined) out[`${key}_period_full_s`] = r.sim.periods.full * ts;
+        if (r.sim.periods.reduced !== undefined)
+          out[`${key}_period_reduced_s`] = r.sim.periods.reduced * ts;
+      }
     }
     return out;
   }
@@ -473,8 +491,10 @@ export class IdeaTree {
     const out = new Set<string>();
     for (const id of this.unconfirmed) {
       const key = outputKey(id);
-      out.add(`${key}_period_full`);
-      out.add(`${key}_period_reduced`);
+      for (const m of ["full", "reduced"]) {
+        out.add(`${key}_period_${m}`);
+        out.add(`${key}_period_${m}_s`);
+      }
     }
     return out;
   }
@@ -700,7 +720,7 @@ export class IdeaTree {
       const c = n.check;
       if (!c || c.kind === "oregonator") continue;
       for (const name of [...safeNames(c.value), ...safeNames(c.limit)]) {
-        const m = /^(.+)_period_(full|reduced)$/.exec(name);
+        const m = /^(.+)_period_(full|reduced)(_s)?$/.exec(name);
         const target = m ? byKey.get(m[1] ?? "") : undefined;
         if (target && target !== n.id && !n.basis.includes(target)) n.basis.push(target);
       }
@@ -835,6 +855,7 @@ export class IdeaTree {
       this.lessonsForModel(focus),
       [...this.nodes.values()].map((x) => [x.title, x.statement, x.rationale, x.check]),
       this.chat.slice(-4).map((c) => c.answer),
+      Object.keys(this.derived()).length ? RECIPE_RELATIONS : "",
       question,
     ]);
   }

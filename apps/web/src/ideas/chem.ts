@@ -1,14 +1,15 @@
 // The chemistry bench inside the idea tree: the experiment's own run, shown
 // as twin beakers and spiral-wave dishes computed from its exact values.
 
+import type { Trace } from "@vibloom/chem";
 import type { ClaimNode, ModelNode, ResultRecord } from "@vibloom/contracts";
 import type { CheckResult, CheckSpec } from "@vibloom/ideas";
 import { twinBeakers } from "../beakers";
 
 const worker = new Worker(new URL("./sim.worker.ts", import.meta.url), { type: "module" });
-const pending = new Map<number, (r: CheckResult | { error: string }) => void>();
+const pending = new Map<number, (r: never) => void>();
 let next = 0;
-worker.onmessage = (e: MessageEvent<{ id: number; result: CheckResult | { error: string } }>) => {
+worker.onmessage = (e: MessageEvent<{ id: number; result: never }>) => {
   pending.get(e.data.id)?.(e.data.result);
   pending.delete(e.data.id);
 };
@@ -21,6 +22,19 @@ export function simulate(
   return new Promise((resolve) => {
     pending.set(id, resolve);
     worker.postMessage({ id, spec, scope });
+  });
+}
+
+// The run's concentrations over three periods of each model, for drawing.
+export function traces(r: CheckResult): Promise<{ full?: Trace; reduced?: Trace }> {
+  const { s = NaN, q = NaN, eps = NaN, eps_prime = NaN } = r.inputs;
+  const id = ++next;
+  return new Promise((resolve) => {
+    pending.set(id, resolve);
+    worker.postMessage({
+      id,
+      trace: { params: { s, q, eps, eps_prime }, periods: { ...r.sim?.periods } },
+    });
   });
 }
 

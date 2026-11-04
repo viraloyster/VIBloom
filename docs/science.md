@@ -50,6 +50,32 @@ its own normalization as `(eps, eps_prime) = (d, d e)`.
 
 With the values of [2], `eps = 9.9e-3` and `eps_prime = 1.98e-5`.
 
+## From a real recipe
+
+A tree that names a recipe (`bromate`, `malonic_acid`, `acid`, in M) gets `q`,
+`eps`, `eps_prime` and `time_scale_s` from it
+(`packages/chem/src/recipe.ts`), with the FKN Oregonator steps of [2]:
+
+```
+eps       = k5 [MA] / (k3 [BrO3-])
+eps_prime = 2 k4 k5 [MA] / (k2 k3 [BrO3-])
+q         = 2 k1 k4 / (k2 k3)
+tau       = k5 [MA] t,  so  time_scale_s = 1 / (k5 [MA])
+```
+
+The effective rate constants (k1 1.28, k2 3e6, k3 33.6, k4 3000, k5 1, in M
+and s) reproduce the scaled values [2] gives for 0.06 M bromate, 0.02 M
+malonic acid and 0.8 M acid (the `FIELD_2007` set) to within 0.2%; a test
+checks it. Their dependence on acidity is an assumption: proton orders 2, 1
+and 1 for k1, k2 and k3. `s` (the stoichiometric factor f) is not set by the
+recipe and stays an assumption of the tree.
+
+A period in seconds is the model period times `time_scale_s`. The Oregonator
+is semi-quantitative: these seconds are the model's, and a real beaker can
+differ. For the cited recipe the full model gives about 6.5 minutes; with 0.2
+M malonic acid, about 67 seconds, where the two-variable reduction is already
+42% off.
+
 ## Initial conditions
 
 Initial conditions are assumptions of every claim. The reduced model has no `y`

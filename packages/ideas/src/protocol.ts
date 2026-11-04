@@ -58,13 +58,21 @@ Protocol (follow it exactly; it keeps trees comparable between people):
   sure parameters named exactly s, q, eps and eps_prime exist (typical: q
   7.62e-5, eps 0.0099, eps_prime 1e-4 to 0.02, s 0.5 to 2). The engine runs the
   stiff solver and decides. Otherwise check.kind is "arithmetic" (or "none").
-  Periods from the Oregonator are in dimensionless time, not seconds. A claim
-  about seconds needs an explicit external time-scale parameter with a source
-  (for example tau_seconds) and a formula that reads the measured period:
-  after an experiment node with key K runs, formulas can read K_period_full
-  and K_period_reduced (for example "abs(K_period_full * tau_seconds -
-  target_s)" <= "tolerance_s"). Never put a "measured" or "achieved" number in
-  params: what an experiment or a formula should establish is never assumed.
+  Periods from the Oregonator are in dimensionless time. After an experiment
+  node with key K runs, formulas can read K_period_full and K_period_reduced.
+- A real recipe: when the goal gives (or implies) concentrations, give
+  parameters named exactly bromate, malonic_acid and acid (unit "M", kind
+  "design", origin "reference" with the source when the recipe is published)
+  and s (the stoichiometric factor f, dimensionless, typically 0.5 to 2.4,
+  kind "external", assumed unless sourced). Do NOT give q, eps or eps_prime
+  then: VIBloom derives them, and time_scale_s (seconds per model time unit),
+  from the recipe with cited rate constants. With a recipe, formulas can also
+  read the period in seconds as K_period_full_s and K_period_reduced_s (for
+  example value "abs(K_period_full_s - target_period_s)", op "<=", limit
+  "period_tolerance_s"). Without a recipe, a claim about seconds needs an
+  external time-scale parameter with a source. Never put a "measured" or
+  "achieved" number in params: what an experiment or a formula should
+  establish is never assumed.
 - A check must compute something. Never compare a number you assumed for the
   outcome with its target; never test stability by subtracting two assumed
   values. If it cannot be computed, use kind "none" and argue it.

@@ -10,7 +10,9 @@ import {
   type Param,
   type Status,
 } from "@vibloom/ideas";
+import { RECIPE_SOURCE } from "@vibloom/chem";
 import { el } from "../dom";
+import { clockPanel } from "./clock";
 import { bench } from "./chem";
 import { statusLabel } from "./view";
 
@@ -150,7 +152,13 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
         if (key !== benchKey || !benchEl) {
           benchKey = key;
           const restsOn = tree.ancestors(id).map((a) => a.title);
-          benchEl = bench(id, res, restsOn);
+          benchEl = tabs(
+            [
+              ["The clock", () => clockPanel(res)],
+              ["Spiral waves", () => bench(id, res, restsOn)],
+            ],
+            res.inputs.time_scale_s !== undefined ? 0 : 1,
+          );
         }
         shown = "";
         stage.replaceChildren(el("div", { class: "bench-stage" }, benchEl));
@@ -235,6 +243,14 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
         { class: "stage-empty" },
         el("p", { class: "eyebrow" }, "Goal"),
         el("h2", {}, tree.goal),
+        tree.sketch
+          ? el(
+              "figure",
+              { class: "sketch-figure" },
+              el("img", { class: "handwriting", src: tree.sketch, alt: "The handwritten goal" }),
+              el("figcaption", { class: "fine" }, "Written by hand; Muse read the goal from this."),
+            )
+          : null,
         el(
           "div",
           { class: "tally" },
@@ -353,6 +369,40 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
         el("p", { class: "eyebrow" }, "Values"),
         el("table", { class: "params" }, el("tbody", {}, ...rows)),
       );
+    const derived = tree.derived();
+    if (n.check?.kind === "oregonator" && Object.keys(derived).length) {
+      const label: Record<string, string> = {
+        q: "q",
+        eps: "eps",
+        eps_prime: "eps prime",
+        time_scale_s: "seconds per model time unit",
+      };
+      out.push(
+        el("p", { class: "eyebrow" }, "Computed from the recipe"),
+        el(
+          "table",
+          { class: "params derived" },
+          el(
+            "tbody",
+            {},
+            ...Object.entries(derived).map(([k, v]) =>
+              el(
+                "tr",
+                {},
+                el("td", {}, label[k] ?? k),
+                el("td", { class: "num" }, fmt(v)),
+                el("td", {}, el("span", { class: "badge" }, "derived")),
+              ),
+            ),
+          ),
+        ),
+        el(
+          "p",
+          { class: "fine" },
+          `From bromate, malonic acid and acid with ${RECIPE_SOURCE}. Edit the recipe, not these.`,
+        ),
+      );
+    }
     for (const sg of n.suggestions) {
       const b = el("button", {}, "Adopt");
       b.addEventListener("click", () => {
@@ -625,6 +675,32 @@ function measured(tree: IdeaTree, seq: number | undefined): string {
   if (!run || "error" in run.result || spec?.kind !== "oregonator") return "";
   if (spec.question !== "reduction_keeps_period") return "";
   return ` (period difference ${fmt(run.result.value * 100)}%, tolerance ${fmt(spec.tolerance * 100)}%)`;
+}
+
+// Views of one run, built when first opened.
+function tabs(views: [string, () => HTMLElement][], first: number): HTMLElement {
+  const body = el("div", { class: "tab-body" });
+  const built = new Map<number, HTMLElement>();
+  const buttons = views.map(([label], i) => {
+    const b = el("button", { class: "tab" }, label);
+    b.addEventListener("click", () => {
+      open(i);
+    });
+    return b;
+  });
+  const open = (i: number) => {
+    const make = views[i]?.[1];
+    if (!make) return;
+    let v = built.get(i);
+    if (!v) {
+      v = make();
+      built.set(i, v);
+    }
+    body.replaceChildren(v);
+    buttons.forEach((b, k) => b.classList.toggle("on", k === i));
+  };
+  open(first);
+  return el("div", { class: "tabs" }, el("div", { class: "tab-row" }, ...buttons), body);
 }
 
 // What Muse said after looking at a picture of its own drawing.

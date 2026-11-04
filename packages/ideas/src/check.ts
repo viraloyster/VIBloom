@@ -1,7 +1,7 @@
 // Evaluating a check: the model's expressions are parsed by the engine's own
 // arithmetic language, and the engine, not the model, decides pass or fail.
 
-import { evaluatePoint } from "@vibloom/chem";
+import { evaluatePoint, fromRecipe } from "@vibloom/chem";
 import type { Claim } from "@vibloom/contracts";
 import { compare, evaluate } from "./expr";
 import type { ArithmeticSpec, CheckError, CheckResult, CheckSpec, SimulationSpec } from "./types";
@@ -22,6 +22,9 @@ function simulate(spec: SimulationSpec, scope: Record<string, number>): CheckRes
     if (v === undefined || !Number.isFinite(v) || v <= 0)
       return { error: `the experiment needs a positive ${k}`, inputs };
   }
+  // A recipe's time scale travels with the run, so its period in seconds is
+  // part of what was recorded.
+  if (scope.time_scale_s !== undefined) inputs.time_scale_s = scope.time_scale_s;
   const point = { s: inputs.s ?? NaN, eps_prime: inputs.eps_prime ?? NaN };
   const claim: Claim =
     spec.question === "reduction_keeps_period"
@@ -161,4 +164,19 @@ export function thresholds(
     out.single = beyond.every((v) => holds(name, v) === !here);
     return out;
   });
+}
+
+export const RECIPE_PARAMS = ["bromate", "malonic_acid", "acid"] as const;
+
+// q, eps, eps_prime and time_scale_s from a recipe in the tree, for those of
+// them no node sets itself. Nothing if the recipe is absent or impossible.
+export function recipeDerived(values: Record<string, number>): Record<string, number> {
+  const [bromate, malonic_acid, acid] = RECIPE_PARAMS.map((k) => values[k]);
+  if (bromate === undefined || malonic_acid === undefined || acid === undefined) return {};
+  try {
+    const all = fromRecipe({ bromate, malonic_acid, acid }) as unknown as Record<string, number>;
+    return Object.fromEntries(Object.entries(all).filter(([k]) => values[k] === undefined));
+  } catch {
+    return {};
+  }
 }

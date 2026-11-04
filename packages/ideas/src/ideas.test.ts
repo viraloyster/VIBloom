@@ -938,3 +938,63 @@ describe("what Muse sees", () => {
     expect(t.reviews.get("beam")).toMatchObject({ ok: true, redrawn: true });
   });
 });
+
+describe("a real recipe in the tree", () => {
+  it("derives the model from the recipe and gives the period in seconds", () => {
+    const t = new IdeaTree();
+    t.append("person", { type: "goal", text: "A BZ clock from a recipe", mode: "standard" });
+    const nodes = t.admit("goal", [
+      grown("clock", {
+        params: [
+          { ...p("bromate", 0.06, "reference", "M"), kind: "design" },
+          { ...p("malonic_acid", 0.02, "reference", "M"), kind: "design" },
+          { ...p("acid", 0.8, "reference", "M"), kind: "design" },
+          { ...p("s", 1, "assumed", ""), kind: "external" },
+        ],
+        check: {
+          kind: "oregonator",
+          question: "oscillates",
+          tolerance: 0.05,
+          description: "",
+          value: "",
+          op: "none",
+          limit: "",
+          unit: "",
+        },
+      }),
+      grown("minute", {
+        params: [{ ...p("target_period_s", 60, "assumed", "s"), kind: "requirement" }],
+        check: {
+          kind: "arithmetic",
+          description: "",
+          value: "abs(clock_period_full_s - target_period_s)",
+          op: "<=",
+          limit: "10",
+          unit: "s",
+        },
+      }),
+    ]);
+    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    expect(t.nodes.get("minute")?.basis).toEqual(["clock"]);
+    expect(t.derived().time_scale_s).toBeCloseTo(50);
+    expect(t.scope().eps_prime).toBeCloseTo(1.98e-5, 7);
+    const spec = t.nodes.get("clock")?.check;
+    if (!spec) throw new Error("missing");
+    const r = runCheck(spec, t.scope());
+    t.append("engine", { type: "check", node: "clock", result: r });
+    t.confirm(seqOf(t, "clock"), runCheck(spec, t.scope()));
+    if ("error" in r) throw new Error(r.error);
+    const seconds = t.scope().clock_period_full_s ?? NaN;
+    expect(seconds).toBeCloseTo((r.sim?.periods.full ?? NaN) * 50, 6);
+    run(t, "minute");
+    expect(t.status("minute")).not.toBe("unverified");
+    // Changing the recipe changes the model it implies: the run is stale.
+    t.append("person", { type: "set_param", name: "malonic_acid", value: 0.04, source: "edit" });
+    expect(t.scope().time_scale_s).toBeCloseTo(25);
+    expect(t.status("clock")).toBe("stale");
+    // A derived value is not anyone's to set by hand.
+    expect(() =>
+      t.append("person", { type: "set_param", name: "eps", value: 0.01, source: "edit" }),
+    ).toThrow(/no parameter/);
+  }, 60000);
+});

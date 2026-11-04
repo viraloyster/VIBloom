@@ -48,7 +48,7 @@ export function mountChat(host: HTMLElement, actions: ChatActions) {
           const b = el(
             "button",
             { class: `cite ${tree.status(id)}`, title: statusLabel(tree.status(id)) },
-            n?.title ?? id,
+            short(n?.title ?? id),
           );
           b.addEventListener("click", () => {
             actions.select(id);
@@ -116,3 +116,5 @@ export function mountChat(host: HTMLElement, actions: ChatActions) {
     },
   };
 }
+
+const short = (t: string) => (t.length > 48 ? `${t.slice(0, 46).trimEnd()}...` : t);

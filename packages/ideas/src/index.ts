@@ -35,5 +35,12 @@ export {
   type MuseConfig,
 } from "./muse";
 export { IdeaTree, type Status } from "./tree";
-export { runCheck, SIM_PARAMS, thresholds, type Threshold } from "./check";
+export {
+  recipeDerived,
+  RECIPE_PARAMS,
+  runCheck,
+  SIM_PARAMS,
+  thresholds,
+  type Threshold,
+} from "./check";
 export { compare, evaluate, MAX_EXPR, names, OPS, type Op } from "./expr";

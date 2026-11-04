@@ -35,6 +35,7 @@ import {
   type Mode,
   type Usage,
 } from "@vibloom/ideas";
+import { RECIPE_RELATIONS, RECIPE_SOURCE } from "@vibloom/chem";
 import { el } from "../dom";
 import { mountChat } from "./chat";
 import { simulate } from "./chem";
@@ -116,6 +117,8 @@ function landing() {
     "Write it by hand",
   );
   const note = el("p", { class: "note" });
+  // The handwriting the goal was read from, kept with it in the record.
+  let sketched: string | undefined;
   const chips = el(
     "div",
     { class: "examples" },
@@ -133,7 +136,7 @@ function landing() {
   const replayChem = el(
     "button",
     { class: "ghost-btn" },
-    "Recorded: chemical clock (real experiments)",
+    "Recorded: a handwritten BZ recipe, tested in seconds",
   );
   replayChem.addEventListener("click", () => void playRecorded("chemical-clock"));
   const replayLesson = el(
@@ -195,7 +198,7 @@ function landing() {
       // Not remembered; fine.
     }
     ledger.cap = Math.max(0.05, Number(cap.value) || 0.5);
-    void start(text, mode.value as Mode);
+    void start(text, mode.value as Mode, sketched);
   });
   goal.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) grow.click();
@@ -237,6 +240,7 @@ function landing() {
         ]
           .join("\n")
           .slice(0, 1200);
+        sketched = image;
         note.textContent = `Muse read your handwriting (${usd(usage.cost)})${v.unclear ? `; unclear: ${v.unclear}` : ""}. Check it, then grow the roots.`;
         goal.focus();
       },
@@ -263,9 +267,9 @@ function landing() {
           "div",
           { class: "watch" },
           el("span", { class: "fine" }, "Watch Muse work, no key needed:"),
-          replay,
           replayChem,
           replayLesson,
+          replay,
         ),
         el(
           "div",
@@ -713,6 +717,7 @@ async function ask(question: string) {
           branch: tree.context(focus),
           tree: [...tree.nodes.values()].map((n) => `${n.id} | ${n.title} | ${tree.status(n.id)}`),
           recent: tree.chat.slice(-4).map((c) => ({ q: c.question, a: c.answer })),
+          ...recipeContext(),
           ...(image ? { image: "what the monitor shows the person right now" } : {}),
         }),
         ...(image ? { images: [image] } : {}),
@@ -745,6 +750,15 @@ async function ask(question: string) {
     asking = undefined;
     refresh();
   }
+}
+
+// When the tree holds a recipe, what the engine knows about how it sets the
+// model, so Muse can reason about which change does what.
+function recipeContext() {
+  const derived = tree.derived();
+  return Object.keys(derived).length
+    ? { recipe_model: { derived, relations: RECIPE_RELATIONS, source: RECIPE_SOURCE } }
+    : {};
 }
 
 function explain(e: unknown): string {
@@ -844,6 +858,7 @@ async function investigate(id: string) {
             relative_difference: result.value,
             definition: "|full - reduced| / reduced",
           },
+          ...recipeContext(),
           lessons: tree.lessonsForModel(id),
         }),
         mode: tree.mode,
@@ -949,11 +964,11 @@ async function confirmExperiments() {
   recheck();
 }
 
-async function start(goal: string, mode: Mode) {
+async function start(goal: string, mode: Mode, sketch?: string) {
   recorded = false;
   tree = new IdeaTree();
   chatUsage.length = 0;
-  tree.append("person", { type: "goal", text: goal, mode });
+  tree.append("person", { type: "goal", text: goal, mode, ...(sketch ? { sketch } : {}) });
   selectedId = undefined;
   workspace(goal);
   await grow("goal", "decompose");

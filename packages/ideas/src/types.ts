@@ -111,7 +111,8 @@ export interface Usage {
 }
 
 export type EventBody =
-  | { type: "goal"; text: string; mode: Mode }
+  // sketch: the handwriting Muse read the goal from, if it was written by hand.
+  | { type: "goal"; text: string; mode: Mode; sketch?: string }
   | { type: "grow"; under: string; nodes: IdeaNode[]; summary: string; usage: Usage }
   | { type: "check"; node: string; result: CheckResult | CheckError }
   | { type: "repair"; fixes: { node: string; value: string; limit: string }[]; usage: Usage }

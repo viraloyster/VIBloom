@@ -61,6 +61,29 @@ The examples on the first screen are deliberately absurd and taken seriously
 (a commercial airliner made of cardboard, a tree that grows gold): the engine
 must show exactly which root breaks and why, not dismiss the idea.
 
+## A real case: a chemical clock for a class demo
+
+A teacher writes a Belousov-Zhabotinsky recipe in a notebook (0.06 M bromate,
+0.02 M malonic acid, 0.8 M acid, cerium catalyst) and wants the colour to flip
+every 60 s, asking whether the simpler two-variable model can be trusted. In
+the recorded session:
+
+1. Muse reads the handwritten recipe and grows the tree: does the recipe
+   oscillate, does the period hit 60 s +/- 10, can the reduction be trusted.
+2. VIBloom turns the recipe into the model's parameters with cited rate
+   constants and runs it: it oscillates, but every 6.5 minutes, so the
+   60-second root is red with the real number.
+3. With malonic acid raised to 0.2 M the clock ticks every 67 s and that root
+   turns green, but the two-variable model is now 42% off: speeding the clock
+   up breaks the simplification.
+4. Muse had predicted the reduction would hold (78%). It proposes two
+   explanations; the engine's test contradicts one and is consistent with the
+   other (eliminating bromide removes the delay that times the cycle).
+
+The monitor shows the period in seconds, a beaker changing colour at that
+rhythm (real time or a stated speed-up) and both models' concentrations side
+by side.
+
 ## Why chemistry first
 
 The engine is general; the first specialisation is chemistry because it has
@@ -106,7 +129,7 @@ the budget. A recorded session costs about $0.03 to $0.12.
 - **Record**: a hash-chained log; replay recomputes every formula, refuses a
   result that does not reproduce, and re-runs experiments in the browser.
   Unknown event types are refused.
-- **Tests**: 207, including regressions for every issue found in review
+- **Tests**: 211, including regressions for every issue found in review
   (circular checks, inverted repairs, lessons without history, lost
   prediction history, confirmations that changed the record).
 
@@ -140,9 +163,9 @@ research. The tree is refined by that loop, not written once.
 ## Try it
 
 - **Without a key:** open the [app](https://viraloyster.github.io/VIBloom/)
-  and choose a recorded session: the cardboard airliner (decomposition, a
-  handwritten formula, Muse checking its own drawing), the chemical clock
-  (real experiments), or Muse surprised by an experiment and learning from it.
+  and choose a recorded session: the handwritten BZ recipe (the real case
+  above), Muse surprised by an experiment and learning from it, or the
+  cardboard airliner (a handwritten formula, Muse checking its own drawing).
 - **With your own Meta Model API key:** grow any idea, or write it by hand.
   The key stays in the tab (or on the device, if you ask) and is sent only to
   api.meta.ai. The session budget is a limit for the tab, not for your

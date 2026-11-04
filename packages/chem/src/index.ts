@@ -15,3 +15,7 @@ export type { Classification, ModelPoint, Reading, Run } from "./classify";
 export { DETECTION, PROTOCOL, classify, peaks, read, runOnce } from "./classify";
 export type { PointEvaluation } from "./evaluate";
 export { evaluatePoint } from "./evaluate";
+export type { Recipe, RecipeParams } from "./recipe";
+export { fromRecipe, RATE_CONSTANTS, RECIPE_RELATIONS, RECIPE_SOURCE } from "./recipe";
+export type { Trace } from "./trace";
+export { trace } from "./trace";
