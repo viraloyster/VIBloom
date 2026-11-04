@@ -1,0 +1,266 @@
+{
+  "formulas": [
+    {
+      "id": "f1",
+      "text": "P &middot; r / t &le; &sigma;",
+      "params": ["pressure", "radius", "thickness", "strength"],
+      "value": "pressure * radius / thickness",
+      "op": "<=",
+      "limit": "strength"
+    },
+    {
+      "id": "f2",
+      "text": "M / S &lt; f<sub>y</sub> / 1.5",
+      "params": ["moment", "section_modulus", "yield_strength"],
+      "value": "moment / section_modulus",
+      "op": "<",
+      "limit": "yield_strength / 1.5"
+    },
+    {
+      "id": "f3",
+      "text": "cost per seat &le; budget / seats",
+      "params": ["cost_per_seat", "budget", "seats"],
+      "value": "cost_per_seat",
+      "op": "<=",
+      "limit": "budget / seats"
+    },
+    {
+      "id": "f4",
+      "text": "| T - 60 | &le; 10",
+      "params": ["period_s", "target_period_s", "period_tolerance_s"],
+      "value": "abs(period_s - target_period_s)",
+      "op": "<=",
+      "limit": "period_tolerance_s"
+    },
+    {
+      "id": "f5",
+      "text": "E<sub>a</sub> / (R T) &gt; 20",
+      "params": ["activation_energy", "gas_constant", "temperature"],
+      "value": "activation_energy / (gas_constant * temperature)",
+      "op": ">",
+      "limit": "20"
+    },
+    {
+      "id": "f6",
+      "text": "v<sup>2</sup> / (2 g) &le; h",
+      "params": ["speed", "gravity", "height"],
+      "value": "speed ^ 2 / (2 * gravity)",
+      "op": "<=",
+      "limit": "height"
+    },
+    {
+      "id": "f7",
+      "text": "&epsilon;' / &epsilon; &lt; 0.01",
+      "params": ["eps_prime", "eps"],
+      "value": "eps_prime / eps",
+      "op": "<",
+      "limit": "0.01"
+    },
+    {
+      "id": "f8",
+      "text": "n &middot; m &middot; g &le; F<sub>max</sub>",
+      "params": ["count", "mass", "gravity", "max_force"],
+      "value": "count * mass * gravity",
+      "op": "<=",
+      "limit": "max_force"
+    },
+    {
+      "id": "f9",
+      "text": "k &middot; L &ge; W",
+      "params": ["stiffness", "deflection", "weight"],
+      "value": "stiffness * deflection",
+      "op": ">=",
+      "limit": "weight"
+    },
+    {
+      "id": "f10",
+      "text": "Q / A &le; 2.5",
+      "params": ["flow", "area"],
+      "value": "flow / area",
+      "op": "<=",
+      "limit": "2.5"
+    },
+    {
+      "id": "f11",
+      "text": "&rho; V &le; m<sub>max</sub>",
+      "params": ["density", "volume", "max_mass"],
+      "value": "density * volume",
+      "op": "<=",
+      "limit": "max_mass"
+    },
+    {
+      "id": "f12",
+      "text": "t<sub>1/2</sub> &gt; 3 &middot; t<sub>run</sub>",
+      "params": ["half_life", "run_time"],
+      "value": "half_life",
+      "op": ">",
+      "limit": "3 * run_time"
+    },
+    {
+      "id": "u1",
+      "text": "P &middot; r / t &le; &sigma; &middot; &eta;",
+      "params": ["pressure", "radius", "thickness", "strength"],
+      "unmatched": true
+    },
+    {
+      "id": "u2",
+      "text": "M / S &lt; f<sub>u</sub> &middot; &phi;",
+      "params": ["moment", "section_modulus", "yield_strength"],
+      "unmatched": true
+    },
+    {
+      "id": "u3",
+      "text": "&Delta;G &lt; 0",
+      "params": ["enthalpy", "temperature"],
+      "unmatched": true
+    },
+    {
+      "id": "u4",
+      "text": "Re &lt; 2300",
+      "params": ["velocity", "length", "viscosity"],
+      "unmatched": true
+    }
+  ],
+  "recipes": [
+    {
+      "id": "r1",
+      "bromate": 0.06,
+      "malonic_acid": 0.02,
+      "acid": 0.8
+    },
+    {
+      "id": "r2",
+      "bromate": 0.1,
+      "malonic_acid": 0.05,
+      "acid": 0.5
+    },
+    {
+      "id": "r3",
+      "bromate": 0.23,
+      "malonic_acid": 0.16,
+      "acid": 1.2
+    },
+    {
+      "id": "r4",
+      "bromate": 0.045,
+      "malonic_acid": 0.3,
+      "acid": 0.35
+    },
+    {
+      "id": "r5",
+      "bromate": 0.12,
+      "malonic_acid": 0.08,
+      "acid": 0.65
+    },
+    {
+      "id": "r6",
+      "bromate": 0.33,
+      "malonic_acid": 0.025,
+      "acid": 0.9
+    },
+    {
+      "id": "r7",
+      "bromate": 0.075,
+      "malonic_acid": 0.11,
+      "acid": 1.5
+    },
+    {
+      "id": "r8",
+      "bromate": 0.2,
+      "malonic_acid": 0.4,
+      "acid": 0.25
+    }
+  ],
+  "panels": [
+    {
+      "id": "m1",
+      "drawn": {
+        "period": "67 s",
+        "gap": "42%",
+        "verdict": "fails"
+      },
+      "data": {
+        "period_s": 67,
+        "gap": 0.42,
+        "tolerance": 0.15,
+        "verdict": "fails"
+      },
+      "ok": true
+    },
+    {
+      "id": "m2",
+      "drawn": {
+        "period": "67 s",
+        "gap": "4%",
+        "verdict": "holds"
+      },
+      "data": {
+        "period_s": 67,
+        "gap": 0.42,
+        "tolerance": 0.15,
+        "verdict": "fails"
+      },
+      "ok": false
+    },
+    {
+      "id": "m3",
+      "drawn": {
+        "period": "55 s",
+        "gap": "2.3%",
+        "verdict": "holds"
+      },
+      "data": {
+        "period_s": 55,
+        "gap": 0.023,
+        "tolerance": 0.1,
+        "verdict": "holds"
+      },
+      "ok": true
+    },
+    {
+      "id": "m4",
+      "drawn": {
+        "period": "5.5 s",
+        "gap": "2.3%",
+        "verdict": "holds"
+      },
+      "data": {
+        "period_s": 55,
+        "gap": 0.023,
+        "tolerance": 0.1,
+        "verdict": "holds"
+      },
+      "ok": false
+    },
+    {
+      "id": "m5",
+      "drawn": {
+        "period": "6.4 min",
+        "gap": "3.9%",
+        "verdict": "holds"
+      },
+      "data": {
+        "period_s": 387,
+        "gap": 0.039,
+        "tolerance": 0.1,
+        "verdict": "holds"
+      },
+      "ok": true
+    },
+    {
+      "id": "m6",
+      "drawn": {
+        "period": "6.4 min",
+        "gap": "3.9%",
+        "verdict": "fails"
+      },
+      "data": {
+        "period_s": 387,
+        "gap": 0.039,
+        "tolerance": 0.1,
+        "verdict": "holds"
+      },
+      "ok": false
+    }
+  ]
+}

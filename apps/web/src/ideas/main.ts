@@ -63,7 +63,8 @@ const MAX_OUT = {
   decompose: 8000,
   expand: 5000,
   view: 9000,
-  chat: 1500,
+  // Muse reasons before it answers; 1500 left a third of answers unfinished.
+  chat: 4000,
   review: 3000,
   read: 4000,
 };

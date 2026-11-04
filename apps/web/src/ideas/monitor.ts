@@ -84,6 +84,29 @@ export function viewData(tree: IdeaTree, n: IdeaNode) {
             thresholds: thresholds(n.check, scope, Object.keys(result.inputs)),
           }
         : null,
+    // An experiment's run, with its periods already in seconds when the tree
+    // has a recipe: the model's own units are not seconds.
+    experiment:
+      result && n.check?.kind === "oregonator"
+        ? {
+            question: n.check.question,
+            tolerance: n.check.tolerance,
+            outcome: result.pass ? "holds" : "fails",
+            relative_difference: result.value,
+            periods_model_units: result.sim?.periods,
+            ...(result.inputs.time_scale_s !== undefined
+              ? {
+                  time_scale_s: result.inputs.time_scale_s,
+                  periods_seconds: Object.fromEntries(
+                    Object.entries(result.sim?.periods ?? {}).map(([k, v]) => [
+                      k,
+                      v * (result.inputs.time_scale_s ?? NaN),
+                    ]),
+                  ),
+                }
+              : {}),
+          }
+        : null,
     children: tree.children(n.id).map((c) => ({ title: c.title, status: tree.status(c.id) })),
   };
 }
