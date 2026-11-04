@@ -292,7 +292,6 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     declutter();
   };
 
-  // The selected root's line of support, from it up to the goal, is lit.
   // Two lines for a selected root, drawn apart. Its foundations: everything
   // its status rests on, its sub-roots and the roots it cites as basis, all
   // the way down. Its place: the roots above it, up to the goal.

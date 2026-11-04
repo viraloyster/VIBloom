@@ -23,18 +23,18 @@ Built during the Meta Global AI Developer Hackathon, from November 2, 2026
   again (about 6 s)
 - **Evaluation:** [docs/evaluation.md](docs/evaluation.md)
 
-![A recorded session: the experiment's outcome first, the clock in seconds, both models' traces, and the selected root's line of support lit in the tree](docs/img/experiment.jpg)
+![A recorded session: the experiment's outcome first, the clock in seconds, both models' traces, and the selected root's foundations lit in the tree](docs/img/experiment.jpg)
 
 ## Results
 
 | What                                         | Result                                                                                                                                                                                                                                 | Where to check                                                                         |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| A handwritten BZ recipe, tested              | Period 6.5 min against a 60 s target; at 0.2 M malonic acid 67 s, but the two-variable model is then 42% off                                                                                                                           | [recorded session](apps/web/public/examples/chemical-clock.json), `npm run verify`     |
-| Muse proven wrong, then a discriminating run | Muse predicted the reduction would hold (85%, blind); it failed. Its test (ten times the bromate) contradicts one explanation and is consistent with the other                                                                         | Same session, Process view                                                             |
+| Handwritten BZ lab notes, tested             | Period 6.5 min against a 60 s target; at 0.2 M malonic acid 67 s, but the two-variable model is then 42% off (tolerance 15%)                                                                                                           | [recorded session](apps/web/public/examples/chemical-clock.json), `npm run verify`     |
+| Muse proven wrong, then a discriminating run | Muse predicted the reduction would hold (82%, blind); it failed. Its test (five times the bromate, gap 6.4%) contradicts one explanation and is consistent with the other                                                              | Same session, Process view                                                             |
 | Do lessons change Muse's predictions?        | On 36 new points varying every model parameter, frozen before the run: Muse 56% right without a lesson, 83% with the lesson's measured numbers. A model-free interpolation of the lesson gets 78%: the lesson carries most of the gain | [evaluation](docs/evaluation.md)                                                       |
 | Solver against an independent reference      | Oregonator periods agree with SciPy (Radau) to a relative 5e-4                                                                                                                                                                         | [validation](docs/validation.md)                                                       |
 | Every recorded run reproduces                | Re-run in the browser and by `npm run verify`, to a relative 1e-4                                                                                                                                                                      | [`packages/ideas/eval/verify.ts`](packages/ideas/eval/verify.ts)                       |
-| Tests                                        | 218, including a regression for every issue found in review                                                                                                                                                                            | [`packages/ideas/src/ideas.test.ts`](packages/ideas/src/ideas.test.ts) and per package |
+| Tests                                        | 219, including a regression for every issue found in review                                                                                                                                                                            | [`packages/ideas/src/ideas.test.ts`](packages/ideas/src/ideas.test.ts) and per package |
 
 ## The problem
 
@@ -45,14 +45,16 @@ it answers fluently and confidently, and nothing shows which premises were
 computed, which were asserted, or whether the model learns anything when it
 turns out to be wrong.
 
-The BZ clock makes this concrete. A teacher wants a colour change every 60 s
-and wants to know whether the simpler two-variable Oregonator can be trusted
-for planning. Speeding the clock up to meet the target is exactly what breaks
-the simplification, and Muse, asked before the run, expected the opposite.
+The recorded case makes this concrete. Lab notes for a cerium-catalysed BZ
+oscillator set a 60 s period and ask whether the two-variable Oregonator
+keeps the full model's period there. Changing the recipe to reach the target
+is exactly what breaks the simplification, and Muse, asked before the run,
+expected the opposite. VIBloom is built for this kind of work: finding the
+assumption that breaks, in the open, so research can move past it.
 
 ## What happens in a session
 
-1. **The question becomes a tree.** Muse reads the handwritten recipe (vision)
+1. **The question becomes a tree.** Muse reads the handwritten lab notes (vision)
    and grows the assumptions: does the recipe oscillate, does its period hit
    60 s +/- 10, does the reduced model keep the full model's period.
 2. **The recipe becomes the model.** The engine converts concentrations into
@@ -60,7 +62,8 @@ the simplification, and Muse, asked before the run, expected the opposite.
    seconds. Muse cannot set those parameters itself; the engine refuses it.
 3. **Muse predicts before every run.** It is shown the assumption, the
    question, the tolerance and the values, never a result. The engine marks
-   whether the prediction was blind and scores only blind ones (Brier).
+   it blind only if the project holds no result of the same experiment, on any
+   node, and scores only blind ones (Brier).
 4. **The engine runs the experiment.** A stiff solver integrates both models;
    a classification protocol decides oscillation and the period gap.
 5. **A contradiction must be explained before anything is learned.** Muse
@@ -79,13 +82,13 @@ the simplification, and Muse, asked before the run, expected the opposite.
 
 ## What is new in the design
 
-| Idea                                              | How it is enforced                                                                                                                                                                                                                        |
-| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The model proposes; code decides                  | Muse's output is never a result. Every check is parsed by the engine's own arithmetic language or run by the solver; pass and fail are computed ([`tree.ts`](packages/ideas/src/tree.ts), [`expr.ts`](packages/ideas/src/expr.ts)).       |
-| Pre-registration as a protocol rule, not a prompt | A prediction is blind only if no run of its values exists; explanations are accepted only after a contradicted prediction and before their test; the test that runs is the one registered. Anything else is refused and logged.           |
-| A record anyone can re-execute                    | A hash-chained log. Replay re-verifies every hash, recomputes every formula, refuses a result that does not reproduce, and re-runs each experiment in the browser or with `npm run verify`. A recording replays with its original hashes. |
-| Lessons as data with an identity                  | A lesson carries what it depended on; a change invalidates it. Muse receives it with the measured contrast, and the evaluation measures whether that changes its predictions.                                                             |
-| The process is visible                            | The Process view reads the log: each step's actor (Muse, engine, person), inputs, cost and log entry; recorded, reproduced and current shown separately; refused attempts listed in place.                                                |
+| Idea                                              | How it is enforced                                                                                                                                                                                                                                                                        |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The model proposes; code decides                  | Muse's output is never a result. Every check is parsed by the engine's own arithmetic language or run by the solver; pass and fail are computed ([`tree.ts`](packages/ideas/src/tree.ts), [`expr.ts`](packages/ideas/src/expr.ts)).                                                       |
+| Pre-registration as a protocol rule, not a prompt | A prediction is blind only if the project holds no result of the same experiment (question and values, on any node); explanations are accepted only after a contradicted prediction and before their test; the test that runs is the one registered. Anything else is refused and logged. |
+| A record anyone can re-execute                    | A hash-chained log. Replay re-verifies every hash, recomputes every formula, refuses a result that does not reproduce, and re-runs each experiment in the browser or with `npm run verify`. A recording replays with its original hashes.                                                 |
+| Lessons as data with an identity                  | A lesson carries what it depended on; a change invalidates it. Muse receives it with the measured contrast, and the evaluation measures whether that changes its predictions.                                                                                                             |
+| The process is visible                            | Selecting a root lights its foundations (sub-roots and cited roots, transitively). The Process view reads the log: each step's actor (Muse, engine, person), inputs, cost and log entry; recorded, reproduced and current shown separately; refused attempts listed in place.             |
 
 ## Where Muse is indispensable
 
@@ -174,7 +177,7 @@ that domain has instruments that can settle its questions.
 ## Run it
 
 - **No key:** open the [app](https://viraloyster.github.io/VIBloom/) and
-  choose a recorded session (the handwritten BZ recipe; Muse surprised and
+  choose a recorded session (handwritten BZ lab notes; Muse surprised and
   learning; the cardboard airliner, a deliberately absurd goal outside
   chemistry). Playback can be paused and stepped; experiments are re-run in
   your browser.

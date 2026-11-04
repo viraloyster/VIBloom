@@ -150,7 +150,7 @@ function landing() {
   const replayChem = el(
     "button",
     { class: "ghost-btn" },
-    "Recorded: a handwritten BZ recipe, tested in seconds",
+    "Recorded: handwritten BZ lab notes, tested in seconds",
   );
   replayChem.addEventListener("click", () => void playRecorded("chemical-clock"));
   const replayLesson = el(

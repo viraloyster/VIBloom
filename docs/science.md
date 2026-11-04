@@ -77,7 +77,8 @@ A period in seconds is the model period times `time_scale_s`. The Oregonator
 is semi-quantitative: these seconds are the model's, and a real beaker can
 differ. For the cited recipe the full model gives about 6.5 minutes; with 0.2
 M malonic acid, about 67 seconds, where the two-variable reduction is already
-42% off.
+42% off. With 0.3 M bromate at that malonic acid concentration the gap falls
+to 6.4% (the recorded session's discriminating test).
 
 ## Initial conditions
 

@@ -128,6 +128,24 @@ changed the explanation.
   shapes what is tried next. Whether a lesson improves later predictions is
   measured by comparing equivalent investigations with and without it.
 
+In the idea tree (`packages/ideas`, the public app) the same loop runs on
+every experiment while Muse is connected, with these rules in
+`packages/ideas/src/tree.ts`:
+
+- A prediction is blind only if the project holds no result of the same
+  experiment: the same question (and tolerance) at the same values, on any
+  node, from a check or a test. Muse's input never contains a result; a
+  prediction made after one is kept but not scored.
+- Explanations are accepted only after a contradicted prediction, with
+  different expected outcomes and a test that changes one parameter or one
+  recipe concentration; the engine runs exactly that test.
+- A lesson records its identity: values, question, tolerance, recipe
+  conversion version and solver version. If any of them changes, the lesson
+  stays readable as history and is no longer offered to Muse as current.
+- Selecting a root lights its foundations: the transitive closure of its
+  sub-roots and the roots it cites as basis, which is what its status is
+  derived from.
+
 ## Claim versions
 
 - A claim version and its evidence never change. A new version is a separate
