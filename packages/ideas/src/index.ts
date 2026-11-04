@@ -39,6 +39,7 @@ export {
   axis,
   cellScope,
   mapSetup,
+  recenter,
   runCell,
   verdict,
   type MapSetup,

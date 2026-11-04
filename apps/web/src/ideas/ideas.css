@@ -2226,3 +2226,20 @@ h1 {
   margin: 0;
   overflow-wrap: anywhere;
 }
+
+.map-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* Another comparison in the tree fails at this recipe. */
+.map-cell.constrained {
+  opacity: 0.45;
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 5px,
+    rgb(255 255 255 / 6%) 5px 6px
+  );
+}

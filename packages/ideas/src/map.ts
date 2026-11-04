@@ -17,6 +17,8 @@ export interface MapSetup {
   target?: IdeaNode;
   recipe: Recipe;
   axes: { malonic_acid: number[]; bromate: number[] };
+  // How far the axes reach either way, as a factor of their centre.
+  span: number;
   // What stays as the tree has it.
   held: Record<string, number>;
 }
@@ -26,13 +28,29 @@ export interface MapVerdict {
   concordant?: boolean;
   meetsTarget?: boolean;
   target?: CheckResult | CheckError;
+  // The tree's other comparisons that change with the recipe, at this cell.
+  others: { node: string; title: string; result: CheckResult | CheckError }[];
 }
 
 // Log-spaced values from value / span to value * span, the tree's value in
 // the middle, so the current recipe is always a cell.
-export function axis(value: number, n = 7, span = 4): number[] {
+export function axis(value: number, n = 7, span = 10): number[] {
   const half = (n - 1) / 2;
   return Array.from({ length: n }, (_, i) => +(value * span ** ((i - half) / half)).toPrecision(3));
+}
+
+// The same map, centred on another recipe and closer in: each step takes the
+// square root of the reach, so a narrow target band falls between fewer cells.
+export function recenter(setup: MapSetup, center: Recipe): MapSetup {
+  const span = Math.max(1.2, Math.sqrt(setup.span));
+  return {
+    ...setup,
+    span,
+    axes: {
+      malonic_acid: axis(center.malonic_acid, 7, span),
+      bromate: axis(center.bromate, 7, span),
+    },
+  };
 }
 
 // What a map needs from the tree, or why it cannot be drawn.
@@ -65,6 +83,7 @@ export function mapSetup(tree: IdeaTree): MapSetup | string {
     ...(target ? { target } : {}),
     recipe,
     axes: { malonic_acid: axis(recipe.malonic_acid), bromate: axis(recipe.bromate) },
+    span: 10,
     held: kept,
   };
 }
@@ -91,30 +110,49 @@ export function verdict(
   recipe: Recipe,
   run: CheckResult | CheckError,
 ): MapVerdict {
-  if ("error" in run) return {};
+  if ("error" in run) return { others: [] };
   const ts = run.inputs.time_scale_s;
   const full = run.sim?.periods.full;
   const reduced = run.sim?.periods.reduced;
+  const scope: Record<string, number> = cellScope(tree, recipe);
+  // Every period name the tree's comparisons read, filled from this run.
+  const moving = new Set<string>([...RECIPE_PARAMS, ...Object.keys(tree.derived())]);
+  for (const n of tree.nodes.values()) {
+    const c = n.check;
+    if (!c || c.kind === "oregonator") continue;
+    for (const name of periodNames(`${c.value} ${c.limit}`)) {
+      const model = name.includes("_period_full") ? full : reduced;
+      if (model === undefined) continue;
+      scope[name] = name.endsWith("_s") ? model * (ts ?? NaN) : model;
+      moving.add(name);
+    }
+  }
+  const evaluate = (n: IdeaNode) => (n.check ? runCheck(n.check, scope) : undefined);
+  const others = [...tree.nodes.values()].flatMap((n) => {
+    const c = n.check;
+    if (!c || c.kind === "oregonator" || n.id === setup.target?.id) return [];
+    if (!safeNames(`${c.value} ${c.limit}`).some((x) => moving.has(x))) return [];
+    const result = evaluate(n);
+    return result ? [{ node: n.id, title: n.title, result }] : [];
+  });
   const out: MapVerdict = {
     concordant: run.pass,
+    others,
     ...(full !== undefined && ts !== undefined ? { periodS: full * ts } : {}),
   };
-  const spec = setup.target?.check;
-  if (!spec || spec.kind === "oregonator" || full === undefined) return out;
-  const scope: Record<string, number> = cellScope(tree, recipe);
-  for (const name of periodNames(`${spec.value} ${spec.limit}`)) {
-    const model = name.includes("_period_full") ? full : reduced;
-    if (model === undefined) return out;
-    scope[name] = name.endsWith("_s") ? model * (ts ?? NaN) : model;
-  }
-  const target = runCheck(spec, scope);
+  const target = setup.target ? evaluate(setup.target) : undefined;
+  if (!target) return out;
   return { ...out, target, ...("error" in target ? {} : { meetsTarget: target.pass }) };
 }
 
-function periodNames(src: string): string[] {
+function safeNames(src: string): string[] {
   try {
-    return names(src).filter((n) => /_period_(full|reduced)(_s)?$/.test(n));
+    return names(src);
   } catch {
     return [];
   }
+}
+
+function periodNames(src: string): string[] {
+  return safeNames(src).filter((n) => /_period_(full|reduced)(_s)?$/.test(n));
 }

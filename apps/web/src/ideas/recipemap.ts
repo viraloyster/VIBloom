@@ -6,6 +6,7 @@
 import { RECIPE_VERSION, SOLVER_VERSION } from "@vibloom/chem";
 import {
   cellScope,
+  recenter,
   verdict,
   type CheckError,
   type CheckResult,
@@ -32,6 +33,9 @@ const pct = (x: number) => `${(100 * x).toFixed(1)}%`;
 const num = (x: number) => String(+x.toPrecision(3));
 const short = (sec: number) => (sec < 100 ? `${sec.toFixed(0)} s` : `${(sec / 60).toFixed(1)} min`);
 
+// A cell where another comparison of the tree fails at that recipe.
+const broken = (c: Cell) => (c.v?.others ?? []).some((o) => "error" in o.result || !o.result.pass);
+
 function state(c: Cell): { cls: string; label: string } {
   if (!c.run) return { cls: "pending", label: "computing" };
   if ("error" in c.run) return { cls: "none", label: "no conclusion" };
@@ -43,15 +47,33 @@ function state(c: Cell): { cls: string; label: string } {
   return { cls: "neither", label: "period off target; reduction off" };
 }
 
+// The map can be re-centred on any cell to explore further from the tree's
+// recipe; the tree's recipe stays marked wherever it falls.
 export function mapPanel(
   tree: IdeaTree,
   setup: MapSetup,
   use: (recipe: Recipe, run: CheckResult | CheckError) => void,
   busy: () => boolean,
 ): HTMLElement {
+  const host = el("div", { class: "recipe-map-host" });
+  const go = (s: MapSetup) => {
+    host.replaceChildren(mapBody(tree, s, use, busy, go, setup));
+  };
+  go(setup);
+  return host;
+}
+
+function mapBody(
+  tree: IdeaTree,
+  setup: MapSetup,
+  use: (recipe: Recipe, run: CheckResult | CheckError) => void,
+  busy: () => boolean,
+  go: (s: MapSetup) => void,
+  home: MapSetup,
+): HTMLElement {
   const spec = setup.node.check;
   const tolerance = spec?.kind === "oregonator" ? spec.tolerance : NaN;
-  const key = JSON.stringify([setup.recipe, setup.held, spec, setup.target?.check]);
+  const key = JSON.stringify([setup.recipe, setup.axes, setup.held, spec, setup.target?.check]);
   let cells = cache.get(key);
   if (!cells) {
     cells = setup.axes.bromate
@@ -70,7 +92,7 @@ export function mapPanel(
   // tree (temperature, the target itself) are shown apart, as not modelled.
   const unit = (k: string) => {
     const u = tree.param(k)?.unit ?? "";
-    return u && u !== "dimensionless" ? ` ${u}` : "";
+    return u && !["1", "-", "dimensionless", "none"].includes(u) ? ` ${u}` : "";
   };
   const shown = Object.entries(setup.held).filter(([k]) => !/_period_(full|reduced)(_s)?$/.test(k));
   const modelled = new Set(["acid", "s"]);
@@ -81,7 +103,7 @@ export function mapPanel(
   const fixed = el(
     "p",
     { class: "fine map-fixed" },
-    `Fixed, as in the tree, and used by the model: ${list(used) || "none"}. Recipe conversion v${String(RECIPE_VERSION)}, solver v${String(SOLVER_VERSION)}, reduction tolerance ${pct(tolerance)}${target && target.kind !== "oregonator" ? `, target ${target.value} ${target.op} ${target.limit} ${target.unit}` : ", no period target in the tree"}.${unused.length ? ` In the tree but not in the model: ${list(unused)}.` : ""}`,
+    `Fixed, as in the tree, and used by the model: ${list(used) || "none"}. Recipe conversion v${String(RECIPE_VERSION)}, solver v${String(SOLVER_VERSION)}, reduction tolerance ${pct(tolerance)}${target && target.kind !== "oregonator" ? `, target ${target.value} ${target.op} ${target.limit} ${target.unit}` : ", no period target in the tree"}.${unused.length ? ` Other values in the tree, not model inputs: ${list(unused)}.` : ""}`,
   );
   const grid = el("div", {
     class: "map-grid",
@@ -128,6 +150,13 @@ export function mapPanel(
         "Reduction",
         `models differ by ${pct(c.run.value)}, tolerance ${pct(tolerance)}: ${c.run.pass ? "agree" : "off"}`,
       ]);
+      for (const o of c.v?.others ?? [])
+        rows.push([
+          o.title,
+          "error" in o.result
+            ? `could not evaluate: ${o.result.error}`
+            : `${num(o.result.value)} ${o.result.op} ${num(o.result.limit)} ${o.result.unit}: ${o.result.pass ? "holds" : "fails"}`,
+        ]);
       const t = c.v?.target;
       if (t)
         rows.push([
@@ -145,10 +174,21 @@ export function mapPanel(
     pickBtn.addEventListener("click", () => {
       if (c.run) use(c.recipe, c.run);
     });
+    const centred =
+      c.recipe.bromate === setup.axes.bromate[3] &&
+      c.recipe.malonic_acid === setup.axes.malonic_acid[3];
+    const around = el(
+      "button",
+      { class: "ghost-btn", disabled: centred },
+      centred ? "Map centred here" : "Explore around this recipe",
+    );
+    around.addEventListener("click", () => {
+      go(recenter(setup, c.recipe));
+    });
     evidence.replaceChildren(
       el("p", { class: `map-state ${s.cls}` }, s.label),
       el("dl", {}, ...rows.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)])),
-      el("div", { class: "row" }, pickBtn),
+      el("div", { class: "row" }, pickBtn, around),
       el(
         "p",
         { class: "fine" },
@@ -180,7 +220,7 @@ export function mapPanel(
           const btn = el(
             "button",
             {
-              class: `map-cell ${s.cls}${here ? " here" : ""}${i === chosen ? " picked" : ""}`,
+              class: `map-cell ${s.cls}${here ? " here" : ""}${i === chosen ? " picked" : ""}${broken(c) ? " constrained" : ""}`,
               title: s.label,
               "aria-label": `bromate ${num(c.recipe.bromate)}, malonic acid ${num(c.recipe.malonic_acid)}: ${s.label}`,
             },
@@ -200,10 +240,19 @@ export function mapPanel(
         : `${String(all.length)} recipes run by the engine in this browser. Each cell: full-model period, and how far the two-variable model is off.`;
   };
 
+  const back = el("button", { class: "ghost-btn" }, "Back to the tree's recipe");
+  back.addEventListener("click", () => {
+    go(home);
+  });
   const panel = el(
     "div",
     { class: "recipe-map" },
-    el("p", { class: "eyebrow" }, "Recipe map - nearby recipes, run by the engine"),
+    el(
+      "div",
+      { class: "map-head" },
+      el("p", { class: "eyebrow" }, "Recipe map - nearby recipes, run by the engine"),
+      setup === home ? null : back,
+    ),
     fixed,
     el(
       "p",
@@ -214,6 +263,7 @@ export function mapPanel(
         ["agree", "models agree, off target"],
         ["neither", "neither"],
       ].map(([cls, t]) => el("span", { class: `key ${cls ?? ""}` }, t ?? "")),
+      el("span", { class: "key hatched" }, "faded: another check in the tree fails there"),
     ),
     grid,
     progress,

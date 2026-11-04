@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { runCheck } from "./check";
-import { axis, cellScope, mapSetup, runCell, verdict } from "./map";
+import { axis, cellScope, mapSetup, recenter, runCell, verdict } from "./map";
 import { IdeaTree } from "./tree";
 import type { IdeaEvent } from "./types";
+import type { GrownNode } from "./protocol";
 
 const session = async () => {
   const url = new URL("../../../apps/web/public/examples/chemical-clock.json", import.meta.url);
@@ -16,8 +17,8 @@ describe("the recipe map", () => {
     const a = axis(0.2);
     expect(a).toHaveLength(7);
     expect(a[3]).toBe(0.2);
-    expect(a[0]).toBeCloseTo(0.05);
-    expect(a[6]).toBeCloseTo(0.8);
+    expect(a[0]).toBeCloseTo(0.02);
+    expect(a[6]).toBeCloseTo(2);
   });
 
   it("reproduces the recorded run at the tree's own recipe", async () => {
@@ -48,6 +49,42 @@ describe("the recipe map", () => {
     expect(more.eps).toBeCloseTo((here.eps ?? NaN) / 2);
     expect(more.q).toBeCloseTo(here.q ?? NaN);
   });
+
+  it("zooms in when re-centred and checks the tree's other recipe limits per cell", async () => {
+    const t = await session();
+    const setup = mapSetup(t);
+    if (typeof setup === "string") throw new Error(setup);
+    const closer = recenter(setup, { ...setup.recipe, bromate: 0.24 });
+    expect(closer.span).toBeCloseTo(Math.sqrt(10));
+    expect(closer.axes.bromate[3]).toBe(0.24);
+    // A limit Muse could write: stay within 0.1 M bromate.
+    const limit: GrownNode = {
+      key: "bromate-limit",
+      title: "Bromate stays low",
+      statement: "",
+      axis: "requirements",
+      role: "assumption",
+      criticality: "major",
+      risk: "low",
+      rationale: "",
+      params: [],
+      check: { description: "", value: "bromate", op: "<=", limit: "0.1", unit: "M" },
+      basis: [],
+    };
+    const nodes = t.admit("goal", [limit]);
+    t.append("muse", {
+      type: "grow",
+      under: "goal",
+      nodes,
+      summary: "",
+      usage: { model: "m", input: 0, cached: 0, output: 0, reasoning: 0, cost: 0 },
+    });
+    const s2 = mapSetup(t);
+    if (typeof s2 === "string") throw new Error(s2);
+    const high = { ...s2.recipe, bromate: 0.24 };
+    const v = verdict(t, s2, high, runCell(t, s2, high));
+    expect(v.others.find((o) => o.node === "bromate-limit")?.result).toMatchObject({ pass: false });
+  }, 60000);
 
   it("treats a recipe chosen from the map as already computed", async () => {
     const t = await session();
