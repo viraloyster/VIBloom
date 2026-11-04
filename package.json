@@ -18,7 +18,8 @@
     "check:text": "node scripts/check-text.mjs",
     "test": "vitest run",
     "build": "npm run build -w @vibloom/web",
-    "dev": "npm run dev -w @vibloom/web"
+    "dev": "npm run dev -w @vibloom/web",
+    "verify": "vite-node packages/ideas/eval/verify.ts"
   },
   "prettier": {
     "printWidth": 100
