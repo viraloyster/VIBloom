@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { recipeEffects, runCheck } from "./check";
+import { recipeEffects, runCheck, SIM_PARAMS } from "./check";
 import { axis, cellScope, mapRecord, mapSetup, recenter, replayMap, runCell, verdict } from "./map";
 import { EXPERIMENT_TOLERANCE } from "./tree";
 import { IdeaTree } from "./tree";
@@ -157,4 +157,39 @@ describe("the recipe map", () => {
     if (off.cells[0]) off.cells[0].bromate = 123;
     expect(() => t.append("engine", off)).toThrow(/off its axes/);
   }, 60000);
+});
+
+describe("the runs a routed answer is given", () => {
+  it("keeps the first run a question names when there are more than fit", async () => {
+    const t = await session();
+    const node = [...t.nodes.values()].find((n) => n.check?.kind === "oregonator");
+    const base = node ? t.latestRun(node.id)?.result : undefined;
+    if (!node || !base || "error" in base) throw new Error("no run");
+    // Thirty runs at thirty bromate values; the result is a recorded one
+    // with its inputs set to each value, enough for the index.
+    for (let i = 1; i <= 30; i++) {
+      t.append("person", {
+        type: "set_param",
+        name: "bromate",
+        value: 0.1 + i / 1000,
+        source: "test",
+      });
+      const inputs = {
+        ...base.inputs,
+        ...Object.fromEntries(SIM_PARAMS.map((k) => [k, t.scope()[k] ?? NaN])),
+        bromate: t.scope().bromate ?? NaN,
+      };
+      t.append("engine", { type: "check", node: node.id, result: { ...base, inputs } });
+    }
+    const asked = t.runIndex(["goal"], "What did the run at bromate 0.101 M give?", 24);
+    expect(asked.runs).toHaveLength(24);
+    expect(asked.omitted).toBe(t.runs.length - 24);
+    expect(asked.runs.some((r) => r.values?.bromate === 0.101)).toBe(true);
+    const first = asked.runs.find((r) => r.values?.bromate === 0.101);
+    expect(first?.current).toBe("superseded by a later run");
+    expect(first?.reproduced_here).toBe("unconfirmed");
+    // Without the value in the question, the oldest run gives way to recent ones.
+    const plain = t.runIndex(["goal"], "What happened?", 24);
+    expect(plain.runs.some((r) => r.values?.bromate === 0.101)).toBe(false);
+  });
 });

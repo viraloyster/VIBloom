@@ -1002,7 +1002,9 @@ export class IdeaTree {
       [...this.results.values()],
       // A routed answer was given every run in the tree; an older one, the
       // focus node's runs only.
-      consulted ? this.runIndex() : this.runs.filter((r) => r.node === focus).map((r) => r.result),
+      consulted
+        ? this.runIndex([focus, ...consulted], question).runs
+        : this.runs.filter((r) => r.node === focus).map((r) => r.result),
       flips,
       [focus, ...(consulted ?? [])].map((id) => this.lessonsForModel(id)),
       consulted ? consulted.map((id) => this.written.get(id)) : [],
@@ -1016,17 +1018,39 @@ export class IdeaTree {
     ]);
   }
 
-  // Every run in the tree, newest last, as Muse is given them: which root,
-  // what for, at which values, and what the engine found.
-  runIndex(limit = RUN_INDEX) {
-    return this.runs.slice(-limit).map((r) => ({
+  // The runs a routed answer is given, oldest first, at most limit: first
+  // every run on the roots it is about and every run at a recipe value the
+  // question names, then the most recent others. Each says whether it was
+  // reproduced here, whether it is still the root's current run, and the
+  // versions it ran with; omitted counts what did not fit.
+  runIndex(about: string[], question: string, limit = RUN_INDEX) {
+    const said = numbersIn(question).map((x) => x.value);
+    const near = (v: number | undefined) =>
+      v !== undefined && said.some((x) => Math.abs(x - v) <= 1e-9 * Math.abs(v));
+    const wanted = (r: Run) =>
+      about.includes(r.node) || RECIPE_PARAMS.some((k) => near(r.result.inputs?.[k]));
+    const first = this.runs.filter(wanted).slice(-limit);
+    const room = limit - first.length;
+    const rest = room > 0 ? this.runs.filter((r) => !wanted(r)).slice(-room) : [];
+    const picked = [...first, ...rest].sort((x, y) => x.seq - y.seq);
+    const runs = picked.map((r) => ({
       seq: r.seq,
       node: r.node,
       purpose: r.purpose,
       values: r.result.inputs,
+      reproduced_here: r.state,
+      current:
+        r.purpose === "test"
+          ? "a lesson's test"
+          : this.latestRun(r.node)?.seq !== r.seq
+            ? "superseded by a later run"
+            : this.status(r.node) === "stale"
+              ? "premises changed since"
+              : "current",
       ...("error" in r.result
         ? { error: r.result.error }
         : {
+            engine: r.result.engine ?? 1,
             outcome: r.result.pass ? "holds" : "fails",
             gap: r.result.value,
             ...(r.result.inputs.time_scale_s !== undefined && r.result.sim
@@ -1041,6 +1065,7 @@ export class IdeaTree {
               : {}),
           }),
     }));
+    return { runs, omitted: this.runs.length - runs.length };
   }
 
   // The values a root's own text may quote that have changed since Muse

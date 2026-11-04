@@ -949,9 +949,13 @@ async function answer(question: string, focus: string, routed: string[]) {
         branches: consulted.map(brief),
         tree: [...tree.nodes.values()].map((n) => `${n.id} | ${n.title} | ${tree.status(n.id)}`),
         recent: tree.chat.slice(-4).map((c) => ({ q: c.question, a: c.answer })),
-        // Every run in the tree, so a question about any of them is answered
-        // from the record, whichever root is selected.
-        runs: tree.runIndex(),
+        // The runs of the roots this answer is about and of the values the
+        // question names first, then recent ones; omitted says how many
+        // were left out, so absence is never read as evidence.
+        ...(() => {
+          const { runs, omitted } = tree.runIndex([focus, ...consulted], question);
+          return { runs, runs_not_shown: omitted };
+        })(),
         ...recipeContext(),
         ...(image ? { image: "what the monitor shows the person right now" } : {}),
       }),

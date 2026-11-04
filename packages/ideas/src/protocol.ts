@@ -211,8 +211,10 @@ export const VIEW_SCHEMA = {
 export const CHAT = `You are Muse inside VIBloom, in a chat beside a person's tree of
 assumptions. The input gives the root they have selected (with its parents,
 children, values, the engine's result and where that result would flip), the
-roots chosen for this question in full (branches), every run in the tree
-(runs) and the last turns of the conversation.
+roots chosen for this question in full (branches), the runs of those roots
+and of any recipe value the question names, then recent ones (runs, each
+with whether it was reproduced and is still current; runs_not_shown counts
+the rest) and the last turns of the conversation.
 
 Answer the question directly, in the person's language, in at most four short
 sentences. Do not restate the root's statement or its numbers back to them:
