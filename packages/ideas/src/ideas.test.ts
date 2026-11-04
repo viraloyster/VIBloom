@@ -31,10 +31,10 @@ const usage: Usage = {
   reasoning: 0,
   cost: 0,
 };
-const p = (name: string, value: number, origin = "assumed") => ({
+const p = (name: string, value: number, origin = "assumed", unit = "MPa") => ({
   name,
   value,
-  unit: "MPa",
+  unit,
   origin,
   source: origin === "reference" ? "Roark" : "ignored",
 });
@@ -108,6 +108,21 @@ describe("thresholds", () => {
     expect(area?.holdsWhen).toBe("above");
     expect(strength?.at).toBeCloseTo(120, 4);
     expect(strength?.holdsWhen).toBe("above");
+  });
+
+  it("says when no single threshold exists, and stops at singularities", () => {
+    const band = {
+      description: "",
+      value: "(x - 1) * (x - 3)",
+      op: "<=" as const,
+      limit: "0",
+      unit: "",
+    };
+    const [x] = thresholds(band, { x: 4 }, ["x"]);
+    expect(x?.at).toBeCloseTo(3, 5);
+    expect(x?.single).toBe(false);
+    const pole = { description: "", value: "1 / (x - 2)", op: "<=" as const, limit: "0", unit: "" };
+    expect(thresholds(pole, { x: 3 }, ["x"])[0]?.at).toBeUndefined();
   });
 
   it("reports no flip when none exists within four orders of magnitude", () => {
@@ -207,13 +222,87 @@ describe("idea tree", () => {
     run(t, "skin");
     expect(t.broken().map((b) => b.id)).toEqual(["skin"]);
     const fixes = t.admitFixes([
-      { id: "skin", value: "stress_need", limit: "strength * 10" },
+      { id: "skin", value: "stress_need", limit: "strength" },
       { id: "cost", value: "1", limit: "2" },
     ]);
     expect(fixes.map((f) => f.node)).toEqual(["skin"]);
     t.append("muse", { type: "repair", fixes, usage });
     run(t, "skin");
-    expect(t.status("skin")).toBe("holds");
+    expect(t.status("skin")).toBe("broken");
+  });
+
+  it("refuses repairs that change the question", () => {
+    const t = planted();
+    const skin = t.nodes.get("skin");
+    if (!skin?.check) throw new Error("missing");
+    skin.check.limit = "strenght";
+    run(t, "skin");
+    const tries = [
+      { id: "skin", value: "0", limit: "1" },
+      { id: "skin", value: "stress_need", limit: "strength * 10" },
+      { id: "skin", value: "strength", limit: "strength" },
+    ];
+    for (const f of tries) expect(t.admitFixes([f])).toEqual([]);
+  });
+
+  it("keeps a check green only while what it rests on is confirmed", () => {
+    const t = planted();
+    const under = t.admit("cost", [
+      grown("child", {
+        params: [p("child_need", 1)],
+        check: { description: "", value: "child_need", op: "<=", limit: "2", unit: "" },
+      }),
+    ]);
+    t.append("muse", { type: "grow", under: "cost", nodes: under, summary: "", usage });
+    const cost = t.nodes.get("cost");
+    if (!cost) throw new Error("missing");
+    cost.check = { description: "", value: "1", op: "<=", limit: "2", unit: "" };
+    run(t, "cost");
+    run(t, "cost.child");
+    expect(t.status("cost")).toBe("holds");
+    t.append("person", { type: "set_param", name: "child_need", value: 1.5, source: "edit" });
+    expect(t.status("cost.child")).toBe("stale");
+    expect(t.status("cost")).toBe("unverified");
+  });
+
+  it("does not share a name used with another unit", () => {
+    const t = planted();
+    const under = t.admit("skin", [grown("pa", { params: [p("strength", 12, "assumed", "Pa")] })]);
+    expect(under[0]?.params.map((x) => x.name)).toEqual(["strength_pa"]);
+    expect(under[0]?.uses).toEqual([]);
+  });
+
+  it("rejects a recorded result the engine does not reproduce", () => {
+    const t = planted();
+    expect(() =>
+      t.append("engine", {
+        type: "check",
+        node: "skin",
+        result: { pass: true, value: 55, limit: 12, op: "<=", unit: "MPa", inputs: {} },
+      }),
+    ).toThrow(/reproduce/);
+    expect(t.results.has("skin")).toBe(false);
+  });
+
+  it("leaves the tree unchanged when an event fails half way", () => {
+    const t = planted();
+    const before = t.nodes.size;
+    const ok = t.admit("skin", [grown("first")]);
+    const bad = {
+      ...ok[0],
+      id: "skin.second",
+      params: [{ ...p("strength", 1), kind: "external" as const }],
+    };
+    expect(() =>
+      t.append("muse", {
+        type: "grow",
+        under: "skin",
+        nodes: [...ok, bad as (typeof ok)[number]],
+        summary: "",
+        usage,
+      }),
+    ).toThrow(/already exists/);
+    expect(t.nodes.size).toBe(before);
   });
 });
 

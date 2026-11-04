@@ -9,8 +9,14 @@ export type Risk = "low" | "medium" | "high";
 // did not verify; only a person can mark a value as checked.
 export type Origin = "reference" | "assumed";
 
+// What editing a value means: a requirement changes the goal, a design
+// variable changes the plan, an external property is how the world is, so
+// changing it only builds a hypothetical scenario.
+export type ParamKind = "requirement" | "design" | "external";
+
 export interface Param {
   name: string;
+  kind: ParamKind;
   value: number;
   unit: string;
   origin: Origin;
@@ -77,7 +83,17 @@ export type EventBody =
   | { type: "repair"; fixes: { node: string; value: string; limit: string }[]; usage: Usage }
   | { type: "set_param"; name: string; value: number; source: string }
   | { type: "view"; node: string; title: string; html: string; usage: Usage }
-  | { type: "chat"; focus: string; question: string; answer: string; cites: string[]; usage: Usage }
+  | {
+      type: "chat";
+      focus: string;
+      question: string;
+      answer: string;
+      cites: string[];
+      // Every value as it was when Muse answered, so a later edit marks the
+      // answer as about other numbers.
+      asked: Record<string, number>;
+      usage: Usage;
+    }
   | { type: "accept"; node: string }
   | { type: "reject"; node: string };
 

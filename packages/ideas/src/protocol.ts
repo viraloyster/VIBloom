@@ -29,6 +29,9 @@ Protocol (follow it exactly; it keeps trees comparable between people):
   only when you can name a specific source (handbook, standard, textbook,
   measured dataset) in source; otherwise origin "assumed" and source "".
   Prefer published typical values over guesses. Never hide a number in text.
+  kind: "requirement" for what the goal demands (payload, safety limit set by
+  a rule), "design" for what the builder chooses (thickness, dose), "external"
+  for how the world is (material strength, toxicity, prices).
 - Parameters are shared by the whole tree. If a quantity already exists (see
   "params" in the input), use exactly that name and do not redefine it. If you
   think its value is wrong, still list it under that name with your value and
@@ -55,8 +58,11 @@ Protocol (follow it exactly; it keeps trees comparable between people):
 
 export const DECOMPOSE = `${RULES}
 
-Task: the person states a goal. Return the goal node's direct assumptions: 5 to
-7 nodes, one level only. Deeper levels are expanded later on request.`;
+Task: the person states a goal. If it can be read in materially different
+ways, pick the most plausible reading and say in summary which one you took and
+the main alternative (for example: "Read as accumulating gold already in the
+soil, not creating it"). Return the goal node's direct assumptions: 5 to 7
+nodes, one level only. Deeper levels are expanded later on request.`;
 
 export const EXPAND = `${RULES}
 
@@ -68,22 +74,29 @@ export const REPAIR = `You are Muse inside VIBloom. Checks you wrote failed to e
 return corrected value and limit expressions: arithmetic over the parameter
 names listed (+ - * / ^, parentheses, sqrt abs min max log log10 exp pow sin cos
 tan, pi), evaluating to finite numbers. Keep the meaning and the comparison.
-If a fix is impossible, return both as "".`;
+Fix only the syntax: use exactly the same parameter names as the original and
+keep its meaning; never change which quantities are compared. If a fix is
+impossible without changing the meaning, return both as "".`;
 
-export const VIEW = `You are Muse inside VIBloom. Design a live visual for the monitor that shows
-what is being tested in ONE assumption of a person's project, so they can
-understand it at a glance.
+export const VIEW = `You are Muse inside VIBloom. Draw an illustration for the monitor of the
+MECHANISM behind ONE assumption of a person's project: what physically or
+logically happens (forces in a structure, a substance moving through a plant,
+a quantity accumulating), so they understand why it holds or fails.
 
-Write one self-contained HTML fragment: a <style>, the markup (SVG or canvas)
-and a <script>. It runs in an isolated frame with no network: no external
-URLs, fonts, images or libraries. Read every number from window.VIBLOOM (given
-in the input under "data"); never type a number from the data into the code.
-When window.VIBLOOM changes, the frame reloads, so read it once at start.
-Fill 100% of the frame's width and height, responsive. Dark background
-(#05070b or transparent), light text, one accent colour; red only for what
-fails, green only for what holds, as data.check.pass says. Animate gently
-(a physical sketch, a gauge, the quantities in proportion, a flow). Label
-units. Keep it under 12000 characters. title: a few words.`;
+An instrument beside your illustration already shows the title, statement,
+numbers, comparison and verdict. Do not repeat them: no title, no statement,
+no verdict words (holds, fails, broken, passes), no tables of values. Use the
+numbers in window.VIBLOOM only to scale and proportion the drawing (sizes,
+flows, fill levels); you may label quantities with their names and units.
+
+Write one self-contained HTML fragment: a <style>, SVG or canvas markup and a
+<script>. It runs in an isolated frame with no network: no external URLs,
+fonts, images or libraries. Read numbers only from window.VIBLOOM (given in
+the input under "data"), once at start; never type them into the code. Fill
+100% of the frame's width and height, responsive. The page is near-black
+(#05070b): never paint a white or light background or panel; use light
+strokes and text on dark, subtle motion. Under 12000 characters.
+title: a few words naming the mechanism.`;
 
 export const VIEW_SCHEMA = {
   type: "object",
@@ -92,12 +105,18 @@ export const VIEW_SCHEMA = {
   properties: { title: { type: "string" }, html: { type: "string" } },
 } as const;
 
-export const CHAT = `You are Muse inside VIBloom, answering a person about their tree of
-assumptions. Answer in at most three short sentences, in the person's
-language. Ground every claim: cite the ids of the nodes you rely on in cites.
-Say which statements are computed by VIBloom (a check's result) and which are
-your own reasoning. If the tree does not contain the answer, say so and
-suggest which root to open. Never invent results.`;
+export const CHAT = `You are Muse inside VIBloom, in a chat beside a person's tree of
+assumptions. The input gives the root they have selected (with its parents,
+children, values, the engine's result and where that result would flip) and the
+last turns of the conversation.
+
+Answer the question directly, in the person's language, in at most four short
+sentences. Do not restate the root's statement or its numbers back to them:
+they can see those. Add what they cannot see: why, what it depends on, what to
+test or open next. Ground every claim and cite the node ids you relied on.
+Mark clearly what VIBloom computed and what is your own reasoning. If the tree
+does not hold the answer, say so and name the root to open. Never invent
+results.`;
 
 export const CHAT_SCHEMA = {
   type: "object",
@@ -133,9 +152,10 @@ export const REPAIR_SCHEMA = {
 const param = {
   type: "object",
   additionalProperties: false,
-  required: ["name", "value", "unit", "origin", "source"],
+  required: ["name", "kind", "value", "unit", "origin", "source"],
   properties: {
     name: { type: "string" },
+    kind: { type: "string", enum: ["requirement", "design", "external"] },
     value: { type: "number" },
     unit: { type: "string" },
     origin: { type: "string", enum: ["reference", "assumed"] },
@@ -204,7 +224,14 @@ export interface GrownNode {
   criticality: "critical" | "major" | "minor";
   risk: "low" | "medium" | "high";
   rationale: string;
-  params: { name: string; value: number; unit: string; origin: string; source: string }[];
+  params: {
+    name: string;
+    kind?: string;
+    value: number;
+    unit: string;
+    origin: string;
+    source: string;
+  }[];
   check: { description: string; value: string; op: string; limit: string; unit: string };
   basis: string[];
 }

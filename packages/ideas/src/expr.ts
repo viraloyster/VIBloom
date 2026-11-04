@@ -141,3 +141,12 @@ export function compare(a: number, op: Op, b: number): boolean {
       return a >= b;
   }
 }
+
+// The parameter names an expression refers to, without evaluating it.
+export function names(src: string): string[] {
+  const out = new Set<string>();
+  for (const t of lex(src)) {
+    if (t.k === "id" && !Object.hasOwn(FUNCS, t.v) && !Object.hasOwn(CONSTS, t.v)) out.add(t.v);
+  }
+  return [...out].sort();
+}

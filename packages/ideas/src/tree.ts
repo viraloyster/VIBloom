@@ -2,7 +2,8 @@
 // what the model returns is validated here before it becomes a node.
 
 import { canonical, sha256 } from "@vibloom/engine";
-import { MAX_EXPR, OPS, type Op } from "./expr";
+import { runCheck } from "./check";
+import { MAX_EXPR, names, OPS, type Op } from "./expr";
 import { AXES, type GrownNode } from "./protocol";
 import type { CheckResult, EventBody, IdeaEvent, IdeaNode, Mode, Param, Usage } from "./types";
 
@@ -17,7 +18,8 @@ export type Status =
   | "at_risk"
   | "argued"
   | "bedrock"
-  | "proposed";
+  | "proposed"
+  | "unverified";
 
 export class IdeaTree {
   readonly events: IdeaEvent[] = [];
@@ -25,7 +27,13 @@ export class IdeaTree {
   readonly results = new Map<string, CheckResult | { error: string }>();
   // Visuals Muse designed for a node, latest last.
   readonly views = new Map<string, { title: string; html: string }>();
-  readonly chat: { focus: string; question: string; answer: string; cites: string[] }[] = [];
+  readonly chat: {
+    focus: string;
+    question: string;
+    answer: string;
+    cites: string[];
+    asked: Record<string, number>;
+  }[] = [];
   goal = "";
   mode: Mode = "standard";
 
@@ -46,8 +54,30 @@ export class IdeaTree {
     return t;
   }
 
+  // All or nothing: a body that fails half way leaves the tree as it was.
   append(actor: string, body: EventBody): IdeaEvent {
-    this.apply(body);
+    const before = {
+      nodes: structuredClone(this.nodes),
+      results: structuredClone(this.results),
+      views: structuredClone(this.views),
+      chat: this.chat.length,
+      goal: this.goal,
+      mode: this.mode,
+    };
+    try {
+      this.apply(body);
+    } catch (e) {
+      this.nodes.clear();
+      for (const [k, v] of before.nodes) this.nodes.set(k, v);
+      this.results.clear();
+      for (const [k, v] of before.results) this.results.set(k, v);
+      this.views.clear();
+      for (const [k, v] of before.views) this.views.set(k, v);
+      this.chat.length = before.chat;
+      this.goal = before.goal;
+      this.mode = before.mode;
+      throw e;
+    }
     const seq = this.events.length;
     const prev = this.head;
     const e = { seq, prev, actor, body, hash: hashOf(seq, prev, actor, body) };
@@ -92,10 +122,23 @@ export class IdeaTree {
         under.expanded = true;
         break;
       }
-      case "check":
-        if (!this.nodes.has(b.node)) throw new Error(`unknown node ${b.node}`);
-        this.results.set(b.node, b.result);
+      case "check": {
+        const spec = this.nodes.get(b.node)?.check;
+        if (!spec) throw new Error(`no check on ${b.node}`);
+        // A recorded result is accepted only if the engine reaches the same
+        // one now, from the same formula and values.
+        const again = runCheck(spec, this.scope());
+        const same =
+          "error" in again
+            ? "error" in b.result
+            : !("error" in b.result) &&
+              again.pass === b.result.pass &&
+              again.value === b.result.value &&
+              again.limit === b.result.limit;
+        if (!same) throw new Error(`check on ${b.node} does not reproduce`);
+        this.results.set(b.node, again);
         break;
+      }
       case "repair":
         for (const f of b.fixes) {
           const n = this.nodes.get(f.node);
@@ -117,7 +160,14 @@ export class IdeaTree {
         this.views.set(b.node, { title: b.title, html: b.html });
         break;
       case "chat":
-        this.chat.push({ focus: b.focus, question: b.question, answer: b.answer, cites: b.cites });
+        this.chat.push({
+          focus: b.focus,
+          question: b.question,
+          answer: b.answer,
+          cites: b.cites.filter((c) => this.nodes.has(c)),
+          // Spread, so logs recorded before this field existed still replay.
+          asked: { ...b.asked },
+        });
         break;
       case "accept":
       case "reject": {
@@ -180,31 +230,37 @@ export class IdeaTree {
   status(id: string, seen = new Set<string>()): Status {
     const n = this.nodes.get(id);
     if (!n) return "argued";
-    if (n.role === "goal") return this.premisesBroken(id, seen) ? "affected" : "goal";
+    const ground = this.premises(id, seen);
+    if (n.role === "goal")
+      return ground === "broken" ? "affected" : ground === "unknown" ? "unverified" : "goal";
     if (n.proposed) return "proposed";
     const r = this.results.get(id);
-    if (r && !("error" in r)) {
+    if (r && "error" in r) return "unverified";
+    if (r) {
       const scope = this.scope();
       if (Object.entries(r.inputs).some(([k, v]) => scope[k] !== v)) return "stale";
       if (!r.pass) return "broken";
     }
-    if (this.premisesBroken(id, seen)) return "affected";
-    if (r && !("error" in r)) return "holds";
+    if (ground === "broken") return "affected";
+    // A green check is only as good as what it rests on.
+    if (r) return ground === "unknown" ? "unverified" : "holds";
     if (n.role === "bedrock") return "bedrock";
     return n.risk === "high" ? "at_risk" : "argued";
   }
 
-  // A node rests on its children and its basis; if any of them is broken, so
-  // is the ground under it.
-  private premisesBroken(id: string, seen: Set<string>): boolean {
-    if (seen.has(id)) return false;
+  // What a node rests on (its children and basis): broken if any premise is
+  // broken, unknown if any could not be confirmed with current values.
+  private premises(id: string, seen: Set<string>): "ok" | "unknown" | "broken" {
+    if (seen.has(id)) return "ok";
     seen.add(id);
     const n = this.nodes.get(id);
-    const under = [...this.children(id).map((c) => c.id), ...(n?.basis ?? [])];
-    return under.some((c) => {
-      const s = this.status(c, seen);
-      return s === "broken" || s === "affected";
-    });
+    let out: "ok" | "unknown" | "broken" = "ok";
+    for (const c of [...this.children(id).map((x) => x.id), ...(n?.basis ?? [])]) {
+      const s = this.status(c, new Set(seen));
+      if (s === "broken" || s === "affected") return "broken";
+      if (s === "stale" || s === "unverified") out = "unknown";
+    }
+    return out;
   }
 
   // How much rests on a node: everything above it and everything that cites it.
@@ -240,11 +296,20 @@ export class IdeaTree {
         if (!raw.name || !Number.isFinite(raw.value)) continue;
         const p: Param = {
           name: raw.name.replace(/\W+/g, "_").slice(0, 64),
+          kind: raw.kind === "requirement" || raw.kind === "design" ? raw.kind : "external",
           value: raw.value,
           unit: raw.unit.slice(0, 24),
           origin: raw.origin === "reference" ? "reference" : "assumed",
           source: raw.origin === "reference" ? raw.source.slice(0, 200) : "",
         };
+        // The same name in another unit is a different quantity, not a share.
+        const existing =
+          this.param(p.name) ?? out.flatMap((o) => o.params).find((x) => x.name === p.name);
+        if (existing && existing.unit.trim().toLowerCase() !== p.unit.trim().toLowerCase()) {
+          let alt = `${p.name}_${p.unit.replace(/\W+/g, "_").toLowerCase()}`.slice(0, 64);
+          while (taken.has(alt)) alt += "_";
+          p.name = alt;
+        }
         if (!taken.has(p.name)) {
           taken.add(p.name);
           params.push(p);
@@ -307,6 +372,14 @@ export class IdeaTree {
     return out;
   }
 
+  // Whether values an answer relied on have changed since it was given.
+  outdated(i: number): boolean {
+    const c = this.chat[i];
+    if (!c) return false;
+    const now = this.scope();
+    return Object.entries(c.asked).some(([k, v]) => k in now && now[k] !== v);
+  }
+
   // Checks that failed to evaluate, with what a repair needs to see.
   broken(): { id: string; value: string; limit: string; error: string; params: string[] }[] {
     const out = [];
@@ -324,16 +397,39 @@ export class IdeaTree {
   admitFixes(
     fixes: { id: string; value: string; limit: string }[],
   ): { node: string; value: string; limit: string }[] {
-    const failing = new Set(this.broken().map((b) => b.id));
+    const failing = new Map(this.broken().map((b) => [b.id, b]));
+    // A repair fixes syntax only: every known quantity the original read is
+    // still read, nothing new is added except in place of a misspelled name,
+    // and every constant stays the same. Anything else is a different question.
+    const known = new Set(Object.keys(this.scope()));
+    const ids = (src: string) => src.replace(/\bp\./g, "").match(/[A-Za-z_]\w*/g) ?? [];
+    const nums = (src: string) => (src.match(/\d+\.?\d*(e[+-]?\d+)?/gi) ?? []).sort().join();
+    const parses = (src: string) => {
+      try {
+        names(src);
+        return true;
+      } catch {
+        return false;
+      }
+    };
     return fixes
-      .filter(
-        (f) =>
-          failing.has(f.id) &&
-          f.value.trim() &&
-          f.limit.trim() &&
-          f.value.length <= MAX_EXPR &&
-          f.limit.length <= MAX_EXPR,
-      )
+      .filter((f) => {
+        const b = failing.get(f.id);
+        if (!b || f.value.length > MAX_EXPR || f.limit.length > MAX_EXPR) return false;
+        if (!parses(f.value) || !parses(f.limit)) return false;
+        const before = [...ids(b.value), ...ids(b.limit)];
+        const after = [...names(f.value), ...names(f.limit)];
+        const kept = before.filter((x) => known.has(x));
+        const unknownBefore = new Set(before.filter((x) => !known.has(x))).size;
+        const added = after.filter((x) => !kept.includes(x));
+        return (
+          after.length > 0 &&
+          after.every((x) => known.has(x)) &&
+          kept.every((x) => after.includes(x)) &&
+          new Set(added).size <= unknownBefore &&
+          nums(b.value + " " + b.limit) === nums(f.value + " " + f.limit)
+        );
+      })
       .map((f) => ({ node: f.id, value: f.value, limit: f.limit }));
   }
 

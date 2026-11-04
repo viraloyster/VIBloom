@@ -25,4 +25,4 @@ export {
 } from "./muse";
 export { IdeaTree, type Status } from "./tree";
 export { runCheck, thresholds, type Threshold } from "./check";
-export { compare, evaluate, MAX_EXPR, OPS, type Op } from "./expr";
+export { compare, evaluate, MAX_EXPR, names, OPS, type Op } from "./expr";
