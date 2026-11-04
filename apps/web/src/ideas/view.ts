@@ -7,7 +7,7 @@ import { rng } from "../canopy";
 import { hash } from "../layout";
 
 const DX = 112;
-const DY = 205;
+const DY = 165;
 const CROWN_W = 600;
 const CROWN_H = 316;
 
@@ -78,12 +78,13 @@ function mesh(): string {
     if (depth === 0) return;
     for (let i = 0; i < 2 + Math.floor(r() * 2); i++) {
       const t = 0.5 + r() * 0.5;
-      fork(x + (ex - x) * t, y + (ey - y) * t, ang + (r() - 0.5) * 1.1, len * 0.6, depth - 1);
+      fork(x + (ex - x) * t, y + (ey - y) * t, ang + (r() - 0.5) * 1.4, len * 0.62, depth - 1);
     }
   };
-  for (let i = 0; i < 14; i++) {
-    const ang = Math.PI * (0.12 + 0.76 * (i / 13)) + (r() - 0.5) * 0.2;
-    fork((r() - 0.5) * 40, -10, ang, 150 + r() * 120, 4);
+  // Short strands that fork often read as rootlets, not wires.
+  for (let i = 0; i < 22; i++) {
+    const ang = Math.PI * (0.1 + 0.8 * (i / 21)) + (r() - 0.5) * 0.25;
+    fork((r() - 0.5) * 60, -10, ang, 70 + r() * 60, 4);
   }
   return out.join(" ");
 }
@@ -114,7 +115,20 @@ function rootShape(
     const k = [u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t];
     return [0, 1].map((i) => c.reduce((s, p, j) => s + (k[j] ?? 0) * (p[i] ?? 0), 0)) as Pt;
   };
-  const pts = Array.from({ length: 19 }, (_, i) => at(i / 18));
+  // A root meanders; the wander fades at both ends so it still meets its
+  // parent and its node.
+  const amp = 5 + r() * 7;
+  const phase = r() * Math.PI * 2;
+  const waves = 1.5 + r() * 1.5;
+  const len = Math.hypot(bx - ax, by - ay) || 1;
+  const nx = -(by - ay) / len;
+  const ny = (bx - ax) / len;
+  const pts = Array.from({ length: 19 }, (_, i): Pt => {
+    const t = i / 18;
+    const [x, y] = at(t);
+    const off = amp * Math.sin(phase + t * Math.PI * waves) * 4 * t * (1 - t);
+    return [x + nx * off, y + ny * off];
+  });
   const left: Pt[] = [];
   const right: Pt[] = [];
   pts.forEach((p, i) => {
@@ -203,10 +217,26 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     class: "crown",
   });
   const ground = svg("ellipse", { cx: 0, cy: -16, rx: 900, ry: 9, class: "ground" });
-  const trunk = svg("path", {
-    d: "M-24,-118 C-20,-70 -24,-40 -64,-14 L64,-14 C24,-40 20,-70 24,-118 Z",
-    class: "trunk",
-  });
+  // A trunk with bark: shaded across like a cylinder, flaring into
+  // buttresses at the ground, with furrows along it.
+  const trunk = svg(
+    "g",
+    { class: "trunk", mask: "url(#trunk-fade)" },
+    svg("path", {
+      d: "M-22,-150 C-20,-110 -18,-70 -26,-46 C-34,-28 -58,-20 -92,-14 L92,-14 C58,-20 34,-28 26,-46 C18,-70 20,-110 22,-150 Z",
+      fill: "url(#bark)",
+    }),
+    ...[
+      "M-12,-148 C-10,-110 -14,-70 -22,-38 C-28,-26 -40,-20 -52,-16",
+      "M-3,-150 C-1,-112 -4,-72 -6,-40 C-7,-28 -10,-20 -14,-15",
+      "M6,-149 C8,-110 5,-74 7,-44 C9,-30 14,-21 22,-15",
+      "M14,-146 C13,-108 15,-70 21,-42 C27,-28 42,-20 58,-16",
+    ].map((d) => svg("path", { d, class: "furrow" })),
+    svg("path", {
+      d: "M-16,-148 C-14,-110 -13,-74 -18,-46",
+      class: "bark-light",
+    }),
+  );
   // Shared shading for the orbs: one light from the upper left.
   const defs = svg(
     "defs",
@@ -223,6 +253,40 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
       { id: "orb-shade", cx: "65%", cy: "75%", r: "70%" },
       svg("stop", { offset: "40%", "stop-color": "#000", "stop-opacity": "0" }),
       svg("stop", { offset: "100%", "stop-color": "#000", "stop-opacity": "0.6" }),
+    ),
+    // The trunk's top fades into the crown instead of ending in an edge.
+    svg(
+      "linearGradient",
+      { id: "trunk-fade-g", x1: "0", y1: "0", x2: "0", y2: "1" },
+      svg("stop", { offset: "0%", "stop-color": "#000" }),
+      svg("stop", { offset: "35%", "stop-color": "#fff" }),
+    ),
+    svg(
+      "mask",
+      {
+        id: "trunk-fade",
+        maskUnits: "userSpaceOnUse",
+        x: "-120",
+        y: "-160",
+        width: "240",
+        height: "160",
+      },
+      svg("rect", {
+        x: "-120",
+        y: "-160",
+        width: "240",
+        height: "160",
+        fill: "url(#trunk-fade-g)",
+      }),
+    ),
+    svg(
+      "linearGradient",
+      { id: "bark", x1: "0", y1: "0", x2: "1", y2: "0" },
+      svg("stop", { offset: "0%", "stop-color": "#140f0b" }),
+      svg("stop", { offset: "32%", "stop-color": "#4a3828" }),
+      svg("stop", { offset: "48%", "stop-color": "#5d4733" }),
+      svg("stop", { offset: "70%", "stop-color": "#32261b" }),
+      svg("stop", { offset: "100%", "stop-color": "#0f0b08" }),
     ),
     svg(
       "filter",
@@ -264,7 +328,7 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
   // soil empty: depth is stretched to the column's shape.
   let placed = new Map<string, Pos>();
   const stretched = () => {
-    const k = box.width ? Math.min(2.2, Math.max(1, (box.height / box.width) * 1.15)) : 1;
+    const k = box.width ? Math.min(1.45, Math.max(1, (box.height / box.width) * 0.9)) : 1;
     return new Map([...placed].map(([id, p]) => [id, { x: p.x, y: p.y * k }]));
   };
   // Drawn positions glide toward the layout, so a reflow never jumps.

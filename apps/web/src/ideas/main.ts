@@ -93,7 +93,8 @@ const usd = (x: number) => (x < 0.01 ? `$${x.toFixed(4)}` : `$${x.toFixed(3)}`);
 // A project's name in the header: its first sentence, cut at a word. The
 // whole question stays in the tooltip and on the goal root.
 function shortTitle(goal: string): string {
-  const first = (goal.split(/[.?!\n]/)[0] ?? goal).trim();
+  // A sentence ends at a stop followed by a space or the end, not at 0.06.
+  const first = (goal.split(/[.?!](?=\s|$)|\n/)[0] ?? goal).trim();
   if (first.length <= 44) return first;
   return `${first.slice(0, 42).replace(/\s+\S*$/, "")}...`;
 }

@@ -648,9 +648,9 @@ h1 {
 .mesh {
   fill: none;
   stroke: #7d63ff;
-  stroke-width: 0.8;
+  stroke-width: 0.7;
   stroke-linecap: round;
-  opacity: 0.22;
+  opacity: 0.18;
 }
 
 .ground {
@@ -660,8 +660,18 @@ h1 {
   filter: drop-shadow(0 2px 6px rgb(155 130 255 / 30%));
 }
 
-.trunk {
-  fill: #1d1712;
+.trunk .furrow {
+  fill: none;
+  stroke: rgb(8 5 3 / 55%);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.trunk .bark-light {
+  fill: none;
+  stroke: rgb(255 214 170 / 14%);
+  stroke-width: 2.4;
+  stroke-linecap: round;
 }
 
 /* A root glows violet; colour marks only what matters: a broken or weak
