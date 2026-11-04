@@ -1091,6 +1091,12 @@ async function playRecorded(name: string) {
     tree.lessons.at(-1)?.node ??
     [...tree.nodes.values()].find((n) => n.check?.kind === "oregonator")?.id;
   if (exp && !tree.views.size) select(exp);
+  // The story's last step is the lesson: bring it into view.
+  if (tree.lessons.length) {
+    setTimeout(() => {
+      document.querySelector(".lesson")?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }, 600);
+  }
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
