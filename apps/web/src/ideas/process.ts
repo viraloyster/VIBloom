@@ -140,7 +140,9 @@ export function steps(tree: IdeaTree): Step[] {
             seq: e.seq,
             actor: "engine",
             stage: settles ? "Experiment, after the prediction" : "Experiment",
-            title: `Ran the Oregonator for "${title(b.node)}"`,
+            title: b.via
+              ? `Kept the recipe map's run for "${title(b.node)}", for the recipe the person chose`
+              : `Ran the Oregonator for "${title(b.node)}"`,
             result:
               "error" in r
                 ? r.error

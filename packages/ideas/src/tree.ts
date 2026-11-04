@@ -296,18 +296,17 @@ export class IdeaTree {
         if (!sameRun(b.inputs, this.scope())) {
           throw new Error("a prediction is made for the current values");
         }
-        // Blind means the project held no result of the same experiment yet:
-        // the same question (and tolerance) at the same values, on any node,
-        // from a check or a test, under any solver version.
+        // Blind means the project held no result that settles this one yet:
+        // a run at the same values, on any node, from a check or a test,
+        // under any solver version, of the same question or of the
+        // reduction question, which settles all three.
         const spec = n.check;
         const prior = this.runs.find((r) => {
           const c = this.nodes.get(r.node)?.check;
-          return (
-            c?.kind === "oregonator" &&
-            c.question === spec.question &&
-            (c.question !== "reduction_keeps_period" || c.tolerance === spec.tolerance) &&
-            sameRun(r.result.inputs ?? {}, b.inputs)
-          );
+          if (c?.kind !== "oregonator" || !sameRun(r.result.inputs ?? {}, b.inputs)) return false;
+          // A run of the reduction question integrates both models and
+          // measures their gap, so it reveals every question at its values.
+          return c.question === "reduction_keeps_period" || c.question === spec.question;
         });
         this.predictions.push({
           id: b.id,

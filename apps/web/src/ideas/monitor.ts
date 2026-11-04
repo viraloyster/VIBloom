@@ -10,10 +10,14 @@ import {
   type Lesson,
   type Param,
   type Status,
+  mapSetup,
+  type CheckError,
+  type Recipe,
 } from "@vibloom/ideas";
 import { RECIPE_SOURCE } from "@vibloom/chem";
 import { el } from "../dom";
 import { clockPanel, duration } from "./clock";
+import { mapPanel } from "./recipemap";
 import type { Step } from "./process";
 
 export interface Playback {
@@ -33,6 +37,7 @@ export interface MonitorActions {
   investigate(id: string): void;
   expand(id: string): void;
   setParam(name: string, value: number, source: string): void;
+  useRecipe(recipe: Recipe, run: CheckResult | CheckError): void;
   accept(id: string): void;
   reject(id: string): void;
   estimate(kind: "view" | "expand", id: string): number;
@@ -311,10 +316,27 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
         if (key !== benchKey || !benchEl) {
           benchKey = key;
           const restsOn = tree.ancestors(id).map((a) => a.title);
+          const setup = mapSetup(tree);
           benchEl = tabs(
             [
               ["The clock", () => clockPanel(res)],
               ["Spiral waves", () => bench(id, res, restsOn)],
+              ...(typeof setup === "string"
+                ? []
+                : ([
+                    [
+                      "Recipe map",
+                      () =>
+                        mapPanel(
+                          tree,
+                          setup,
+                          (r, run) => {
+                            actions.useRecipe(r, run);
+                          },
+                          () => actions.busy(),
+                        ),
+                    ],
+                  ] as [string, () => HTMLElement][])),
             ],
             res.inputs.time_scale_s !== undefined ? 0 : 1,
           );

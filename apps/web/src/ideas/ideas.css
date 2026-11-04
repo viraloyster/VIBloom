@@ -2096,3 +2096,133 @@ h1 {
   color: #4fe3ff;
   font-weight: 600;
 }
+
+/* Recipe map: nearby recipes, each run by the engine. */
+.recipe-map {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 2px 12px;
+}
+
+.recipe-map .eyebrow,
+.recipe-map p {
+  margin: 0;
+}
+
+.map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.map-legend .key::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 5px;
+  border-radius: 3px;
+  vertical-align: -1px;
+  background: var(--cell);
+}
+
+.map-grid {
+  display: grid;
+  gap: 3px;
+  align-items: stretch;
+}
+
+.map-axis,
+.map-corner {
+  font-size: 10.5px;
+  color: var(--muted);
+  text-align: center;
+  align-self: center;
+  padding: 0 4px;
+}
+
+.map-cell {
+  --cell: rgb(255 255 255 / 6%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 3px 2px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--cell) 22%, transparent);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.map-cell b {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.map-cell small {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.map-cell.here {
+  border-color: rgb(255 255 255 / 70%);
+}
+
+.map-cell.picked {
+  outline: 2px solid #4fe3ff;
+  outline-offset: 1px;
+}
+
+.map-cell:focus-visible {
+  outline: 2px solid #4fe3ff;
+}
+
+.recipe-map .both {
+  --cell: #34e3a0;
+}
+
+.recipe-map .target {
+  --cell: #ffd84a;
+}
+
+.recipe-map .agree {
+  --cell: #9b82ff;
+}
+
+.recipe-map .neither,
+.map-cell.none {
+  --cell: #5b6576;
+}
+
+.map-cell.pending {
+  --cell: transparent;
+  color: var(--muted);
+}
+
+.map-state {
+  font-weight: 600;
+  color: var(--cell);
+}
+
+.map-evidence dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 3px 10px;
+  margin: 6px 0;
+  font-size: 12.5px;
+}
+
+.map-evidence dt {
+  color: var(--muted);
+}
+
+.map-evidence dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

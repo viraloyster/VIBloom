@@ -29,6 +29,7 @@ import {
   READ_FORMULA_SCHEMA,
   SIM_PARAMS,
   estimate,
+  mapSetup,
   runCheck,
   type IdeaEvent,
   type Refusal,
@@ -397,6 +398,30 @@ function workspace(goal: string) {
     expand: (id) => void grow(id, "expand"),
     setParam: (name, value, source) => {
       tree.append("person", { type: "set_param", name, value, source });
+      recheck();
+    },
+    // A recipe chosen from the map: the person's change, then the engine's
+    // run that the map computed for it, kept as evidence.
+    useRecipe: (recipe, run) => {
+      if (busy) return;
+      for (const [name, value] of Object.entries(recipe)) {
+        if (tree.scope()[name] !== value)
+          tree.append("person", { type: "set_param", name, value, source: "recipe map" });
+      }
+      const setup = mapSetup(tree);
+      if (typeof setup !== "string") {
+        try {
+          const seq = tree.append("engine", {
+            type: "check",
+            node: setup.node.id,
+            result: run,
+            via: "map",
+          }).seq;
+          tree.confirm(seq, run);
+        } catch (e) {
+          monitor.status(`The map's run was not kept: ${explain(e)}`);
+        }
+      }
       recheck();
     },
     accept: (id) => {

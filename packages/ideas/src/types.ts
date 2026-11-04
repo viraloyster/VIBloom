@@ -118,7 +118,8 @@ export type EventBody =
   // sketch: the handwriting Muse read the goal from, if it was written by hand.
   | { type: "goal"; text: string; mode: Mode; sketch?: string }
   | { type: "grow"; under: string; nodes: IdeaNode[]; summary: string; usage: Usage }
-  | { type: "check"; node: string; result: CheckResult | CheckError }
+  // via "map": a run first computed in the recipe map and chosen by a person.
+  | { type: "check"; node: string; result: CheckResult | CheckError; via?: "map" }
   | { type: "repair"; fixes: { node: string; value: string; limit: string }[]; usage: Usage }
   | { type: "set_param"; name: string; value: number; source: string }
   | { type: "view"; node: string; title: string; html: string; usage: Usage }

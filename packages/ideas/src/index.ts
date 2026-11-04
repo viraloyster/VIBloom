@@ -36,6 +36,16 @@ export {
 } from "./muse";
 export { IdeaTree, outputKey, type Status } from "./tree";
 export {
+  axis,
+  cellScope,
+  mapSetup,
+  runCell,
+  verdict,
+  type MapSetup,
+  type MapVerdict,
+  type Recipe,
+} from "./map";
+export {
   recipeDerived,
   RECIPE_PARAMS,
   runCheck,
