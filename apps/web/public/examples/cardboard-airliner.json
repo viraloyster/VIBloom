@@ -622,7 +622,7 @@
         "type": "chat",
         "focus": "pressure-skin-strength",
         "question": "What would have to be true for this to hold, and which root should I open next?",
-        "answer": "VIBloom computed the check as failing, with a single-parameter flip available on each input. My reasoning is the hoop-stress law is bedrock, so physics won't save it — the leverage is the argued pressure load and at-risk cardboard strength. Open Cardboard hoop strength next to test whether the allowable can be defended, then Thickness and margin suffice.",
+        "answer": "VIBloom computed the check as failing, with a single-parameter flip available on each input. My reasoning is the hoop-stress law is bedrock, so physics won't save it \u2014 the leverage is the argued pressure load and at-risk cardboard strength. Open Cardboard hoop strength next to test whether the allowable can be defended, then Thickness and margin suffice.",
         "cites": [
           "pressure-skin-strength",
           "pressure-skin-strength.hoop-stress-law",
