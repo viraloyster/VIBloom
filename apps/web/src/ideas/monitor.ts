@@ -16,6 +16,7 @@ import { statusLabel } from "./view";
 
 export interface MonitorActions {
   visualize(id: string): void;
+  investigate(id: string): void;
   expand(id: string): void;
   setParam(name: string, value: number, source: string): void;
   accept(id: string): void;
@@ -203,6 +204,13 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
             el("span", { class: `pill ${s}` }, `${String(c)} ${statusLabel(s)}`),
           ),
         ),
+        tree.calibration().made
+          ? el(
+              "p",
+              { class: "fine" },
+              `Muse's predictions: ${String(tree.calibration().right)} of ${String(tree.calibration().made)} right; ${String(tree.lessons.length)} lesson(s) learned.`,
+            )
+          : null,
         el("p", { class: "fine" }, "Select a root in the tree to test it here."),
       ),
     );
@@ -322,6 +330,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
         ),
       );
     }
+    if (n.check?.kind === "oregonator") out.push(...investigation(tree, n));
     if (n.check && n.check.kind !== "oregonator") {
       out.push(
         el(
@@ -362,6 +371,77 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
       );
     }
     return out.filter((x): x is Node => x !== null);
+  }
+
+  // Predictions against runs, and the lessons the surprises left.
+  function investigation(tree: IdeaTree, n: IdeaNode): Node[] {
+    const out: Node[] = [el("p", { class: "eyebrow" }, "Investigation")];
+    const go = el(
+      "button",
+      { class: "primary", disabled: actions.busy() },
+      "Investigate with Muse",
+    );
+    go.addEventListener("click", () => {
+      actions.investigate(n.id);
+    });
+    out.push(
+      el("div", { class: "row" }, go),
+      el(
+        "p",
+        { class: "fine" },
+        "Muse predicts first; the engine runs; a surprise makes Muse propose two explanations and one more run decides between them.",
+      ),
+    );
+    for (const p of tree.predictions.filter((x) => x.node === n.id)) {
+      const r = tree.results.get(n.id);
+      const settled = r && !("error" in r) && JSON.stringify(r.inputs) === JSON.stringify(p.inputs);
+      const right = settled && (r.pass ? "holds" : "fails") === p.expect;
+      out.push(
+        el(
+          "p",
+          { class: `predict ${settled ? (right ? "right" : "wrong") : ""}` },
+          `Predicted ${p.expect} (${String(Math.round(p.confidence * 100))}%)`,
+          settled ? (right ? " - right" : " - surprised") : " - for other values",
+          p.uses.length ? el("small", {}, ` using ${p.uses.join(", ")}`) : null,
+        ),
+      );
+    }
+    for (const l of tree.lessons.filter((x) => x.node === n.id)) {
+      const state = tree.lessonState(l);
+      out.push(
+        el(
+          "div",
+          { class: `lesson ${state}` },
+          el("p", { class: "eyebrow" }, `${l.id} - ${state}`),
+          ...l.candidates.map((c, i) =>
+            el(
+              "p",
+              { class: i === l.supported ? "supported" : "refuted" },
+              i === l.supported ? "Supported: " : "Refuted: ",
+              c.explanation,
+              c.scope ? el("small", {}, ` (scope: ${c.scope})`) : null,
+            ),
+          ),
+          el(
+            "p",
+            { class: "fine" },
+            `Decided by running ${words(l.test.param)} = ${fmt(l.test.value)}: it ${l.outcome}. Learned at ${Object.entries(
+              l.basis,
+            )
+              .map(([k, v]) => `${k} ${fmt(v)}`)
+              .join(", ")}.`,
+          ),
+          state === "invalidated"
+            ? el(
+                "p",
+                { class: "fine warn" },
+                "A premise it was learned under has changed: this lesson no longer applies as it stands.",
+              )
+            : null,
+        ),
+      );
+    }
+    return out;
   }
 
   function row(p: Param, shared: boolean, from?: string) {

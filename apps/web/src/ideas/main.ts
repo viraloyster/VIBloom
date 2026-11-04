@@ -17,6 +17,11 @@ import {
   VIEW_SCHEMA,
   CHAT,
   CHAT_SCHEMA,
+  PREDICT,
+  PREDICT_SCHEMA,
+  DIAGNOSE,
+  DIAGNOSE_SCHEMA,
+  SIM_PARAMS,
   estimate,
   runCheck,
   type IdeaEvent,
@@ -112,6 +117,12 @@ function landing() {
     "Recorded: chemical clock (real experiments)",
   );
   replayChem.addEventListener("click", () => void playRecorded("chemical-clock"));
+  const replayLesson = el(
+    "button",
+    { class: "ghost-btn" },
+    "Recorded: Muse surprised, then learns",
+  );
+  replayLesson.addEventListener("click", () => void playRecorded("period-reduction"));
   let saved: { events: IdeaEvent[] } | undefined;
   try {
     saved = JSON.parse(localStorage.getItem(PROJECT_STORE) ?? "null") as typeof saved;
@@ -213,7 +224,7 @@ function landing() {
         ),
         note,
         el("p", { class: "fine center" }, "No key needed to watch a recorded Muse session:"),
-        el("div", { class: "row center" }, replay, replayChem),
+        el("div", { class: "row center" }, replay, replayChem, replayLesson),
         el("div", { class: "row center" }, resume, open, file),
       ),
     ),
@@ -269,6 +280,7 @@ function workspace(goal: string) {
   view = mountTreeView(treeHost, select);
   monitor = mountMonitor(monitorHost, {
     visualize: (id) => void visualize(id),
+    investigate: (id) => void investigate(id),
     expand: (id) => void grow(id, "expand"),
     setParam: (name, value, source) => {
       tree.append("person", { type: "set_param", name, value, source });
@@ -340,7 +352,7 @@ function gear() {
 
 function nodeData(id: string) {
   const n = tree.nodes.get(id);
-  return n ? viewData(tree, n) : {};
+  return n ? { ...viewData(tree, n), lessons: lessonsFor(id) } : {};
 }
 
 // The project lives in this browser too, so a reload does not lose it. A
@@ -557,6 +569,139 @@ function explain(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+const lessonsFor = (id: string) =>
+  tree.lessons
+    .filter((l) => l.node === id)
+    .map((l) => ({
+      id: l.id,
+      state: tree.lessonState(l),
+      learned: l.candidates[l.supported]?.explanation ?? "inconclusive",
+      scope: l.candidates[l.supported]?.scope ?? "",
+      refuted: l.candidates.filter((_, i) => i !== l.supported).map((c) => c.explanation),
+      under: l.basis,
+    }));
+
+// The anticipation loop on one experiment: Muse commits to a prediction, the
+// engine runs, and a surprise makes Muse propose two explanations that one
+// more run tells apart. The engine decides which one the evidence supports.
+async function investigate(id: string) {
+  const n = tree.nodes.get(id);
+  const spec = n?.check;
+  if (!n || spec?.kind !== "oregonator" || busy) return;
+  busy = true;
+  refresh();
+  try {
+    const scope = tree.scope();
+    const inputs = Object.fromEntries(SIM_PARAMS.map((k) => [k, scope[k] ?? NaN]));
+    monitor.status("Muse is predicting before the run...", true);
+    const pr = await muse().ask(
+      {
+        instructions: PREDICT,
+        input: JSON.stringify({
+          assumption: n.statement,
+          question: spec.question,
+          tolerance: spec.tolerance,
+          values: inputs,
+          lessons: lessonsFor(id),
+        }),
+        mode: tree.mode,
+        effort: "low",
+        maxOutput: 1500,
+      },
+      "prediction",
+      PREDICT_SCHEMA,
+    );
+    const pv = pr.value as {
+      expect: "holds" | "fails";
+      confidence: number;
+      reason: string;
+      uses: string[];
+    };
+    tree.append(`muse:${pr.usage.model}`, {
+      type: "predict",
+      node: id,
+      inputs,
+      expect: pv.expect,
+      confidence: pv.confidence,
+      reason: pv.reason,
+      uses: pv.uses,
+      usage: pr.usage,
+    });
+    refresh();
+    monitor.status(
+      `Muse predicts it ${pv.expect} (${String(Math.round(pv.confidence * 100))}%). Running the experiment...`,
+      true,
+    );
+    const result = await simulate(spec, scope);
+    tree.append("engine", { type: "check", node: id, result });
+    tree.confirm(id, result);
+    refresh();
+    if ("error" in result) {
+      monitor.status(`The experiment could not conclude: ${result.error}`);
+      return;
+    }
+    const observed = result.pass ? "holds" : "fails";
+    if (observed === pv.expect) {
+      monitor.status(`As Muse predicted: it ${observed}. Nothing new to learn here.`);
+      return;
+    }
+    monitor.status(
+      `Surprise: Muse expected ${pv.expect}, the run ${observed}. Muse is proposing explanations...`,
+      true,
+    );
+    const dg = await muse().ask(
+      {
+        instructions: DIAGNOSE,
+        input: JSON.stringify({
+          assumption: n.statement,
+          question: spec.question,
+          tolerance: spec.tolerance,
+          values: inputs,
+          predicted: pv,
+          observed,
+          run: result.sim,
+          lessons: lessonsFor(id),
+        }),
+        mode: tree.mode,
+        effort: "medium",
+        maxOutput: 3000,
+      },
+      "diagnosis",
+      DIAGNOSE_SCHEMA,
+    );
+    const dv = dg.value as {
+      candidates: { explanation: string; scope: string; expect: "holds" | "fails" }[];
+      test: { param: string; value: number };
+    };
+    monitor.status(
+      `Testing ${dv.test.param} = ${String(dv.test.value)} to tell the explanations apart...`,
+      true,
+    );
+    const t = await simulate(spec, { ...scope, [dv.test.param]: dv.test.value });
+    if ("error" in t) {
+      monitor.status(`The discriminating run could not conclude (${t.error}); no lesson recorded.`);
+      return;
+    }
+    tree.append(`muse:${dg.usage.model}`, {
+      type: "lesson",
+      id: `lesson-${String(tree.lessons.length + 1)}`,
+      node: id,
+      basis: inputs,
+      observed,
+      candidates: dv.candidates.slice(0, 2),
+      test: dv.test,
+      outcome: t.pass ? "holds" : "fails",
+      usage: dg.usage,
+    });
+    monitor.status("Lesson recorded: the run decided which explanation the evidence supports.");
+  } catch (e) {
+    monitor.status(`Stopped: ${explain(e)}`);
+  } finally {
+    busy = false;
+    refresh();
+  }
+}
+
 // Muse fixes its own formulas that failed to evaluate: one request for all of
 // them, once per growth, never in a loop.
 async function repair() {
@@ -699,6 +844,11 @@ async function playRecorded(name: string) {
       ledger.entries.push(b.usage);
       select(b.node);
       await sleep(1500);
+    } else if (b.type === "predict" || b.type === "lesson") {
+      tree.append(e.actor, b);
+      ledger.entries.push(b.usage);
+      select(b.node);
+      await sleep(1200);
     } else if (b.type === "chat") {
       tree.append(e.actor, b);
       ledger.entries.push(b.usage);
@@ -711,8 +861,11 @@ async function playRecorded(name: string) {
   }
   refresh();
   // Land on a real experiment when the session has one, so its bench shows.
-  const exp = [...tree.nodes.values()].find((n) => n.check?.kind === "oregonator");
-  if (exp && !tree.views.size) select(exp.id);
+  // Land where the session's story is: a lesson first, then an experiment.
+  const exp =
+    tree.lessons.at(-1)?.node ??
+    [...tree.nodes.values()].find((n) => n.check?.kind === "oregonator")?.id;
+  if (exp && !tree.views.size) select(exp);
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

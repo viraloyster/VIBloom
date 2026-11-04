@@ -96,6 +96,21 @@ question. The monitor then shows that run as twin beakers and spiral-wave
 dishes computed from its exact values. A recorded experiment counts only once
 it has been re-run in the viewer's browser and reproduced.
 
+**Anticipation and lessons.** On an experiment root, "Investigate with Muse"
+runs the loop that makes Muse more than a generator: Muse commits to a
+prediction (with its confidence) before the engine runs; if the run
+contradicts it, Muse proposes exactly two explanations that expect different
+outcomes in one discriminating run (the same values with one parameter
+changed); the engine runs it and code decides which explanation the evidence
+supports. The lesson keeps the values it was learned under and its scope; if
+any of those premises changes, it is shown as invalidated, not erased. Later
+predictions see the current lessons and say which ones they used, and the
+tree reports how often Muse's predictions were right. In the recorded
+session, Muse expected the two-variable reduction to keep the period at
+eps_prime 2e-4 (85%); the full model's period was 11.55 against 7.4, and the
+discriminating run at eps_prime 2e-5 supported the explanation that the
+error comes from the time-scale ratio, refuting a structural one.
+
 **Chemistry, in depth.** The first specialised domain, chosen for its
 mathematical depth and because it can be seen: oscillating reactions
 (Belousov-Zhabotinsky, Oregonator models) with a stiff solver checked against
@@ -119,7 +134,8 @@ and tested with scripted and recorded runs. It still runs behind the API in
 ## Try it
 
 - Without a key: open the app and choose a recorded session (a cardboard
-  airliner, or a chemical clock with real experiments). It replays a real
+  airliner, a chemical clock with real experiments, or Muse being surprised
+  by an experiment and learning from it). It replays a real
   Muse session; every calculation and experiment is re-run in your browser.
 - With your own Meta Model API key: grow any idea. The key stays in the tab
   (or on the device, if you ask) and is sent only to api.meta.ai. Before each
@@ -139,8 +155,8 @@ These are directions, not features:
 - Specialists that review a discrepancy from different angles, and a final
   review of broad conclusions.
 - Branches of a tree to experiment without touching the main one.
-- The full chemistry investigation loop (region claims, counterexample
-  search, lessons) in the static app; today it runs behind the API.
+- Region claims and counterexample search in the static app; today they run
+  behind the API.
 
 Status: under active development during the Meta Global AI Developer Hackathon
 (October 27 - November 4, 2026). See [HACKATHON.md](HACKATHON.md).
