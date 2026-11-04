@@ -633,7 +633,7 @@ export class IdeaTree {
       const suggestions: Param[] = [];
       given.set(
         id,
-        g.params.map((x) => String(x.name)),
+        g.params.map((x) => x.name),
       );
       for (const raw of g.params.slice(0, 12)) {
         if (!raw.name || !Number.isFinite(raw.value)) continue;
