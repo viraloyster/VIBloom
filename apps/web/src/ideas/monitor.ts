@@ -11,6 +11,7 @@ import {
   type Status,
 } from "@vibloom/ideas";
 import { el } from "../dom";
+import { bench } from "./chem";
 import { statusLabel } from "./view";
 
 export interface MonitorActions {
@@ -32,6 +33,11 @@ const usd = (x: number) => (x < 0.01 ? `$${x.toFixed(4)}` : `$${x.toFixed(3)}`);
 const words = (name: string) => name.replace(/_/g, " ");
 
 // Everything the view may show, taken from the engine, never from the model.
+// The bench for an experiment is built once per run and kept, so its
+// animation does not restart on every refresh.
+let benchKey = "";
+let benchEl: HTMLElement | undefined;
+
 export function viewData(tree: IdeaTree, n: IdeaNode) {
   const r = tree.results.get(n.id);
   const result = r && !("error" in r) ? r : undefined;
@@ -47,7 +53,7 @@ export function viewData(tree: IdeaTree, n: IdeaNode) {
         : [];
     }),
     check:
-      result && n.check
+      result && n.check && n.check.kind !== "oregonator"
         ? {
             value: result.value,
             limit: result.limit,
@@ -101,6 +107,21 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
       if (!n) return;
       const v = tree.views.get(id);
       const data = viewData(tree, n);
+      const res = tree.results.get(id);
+      // An experiment shows its own run: beakers and spiral dishes computed
+      // from its exact values, not an illustration.
+      if (n.check?.kind === "oregonator" && res && !("error" in res) && !tree.unconfirmed.has(id)) {
+        const key = `${id}|${JSON.stringify(res.inputs)}|${String(res.value)}`;
+        if (key !== benchKey || !benchEl) {
+          benchKey = key;
+          const restsOn = tree.ancestors(id).map((a) => a.title);
+          benchEl = bench(id, res, restsOn);
+        }
+        shown = "";
+        stage.replaceChildren(el("div", { class: "bench-stage" }, benchEl));
+        side.replaceChildren(...instrument(tree, n, []));
+        return;
+      }
       const key = `${id}|${String(v?.html.length ?? 0)}|${JSON.stringify(data)}`;
       if (v) {
         if (key !== shown) {
@@ -198,6 +219,8 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
     ];
     if (r && "error" in r)
       out.push(el("div", { class: "result error" }, `Check could not run: ${r.error}`));
+    else if (r && n.check?.kind === "oregonator")
+      out.push(experiment(n.check.question, n.check.tolerance, r, tree.unconfirmed.has(n.id)));
     else if (r) {
       const backing = Object.keys(r.inputs).flatMap((k) => {
         const p = tree.param(k);
@@ -278,7 +301,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
         ),
       );
     }
-    if (n.check) {
+    if (n.check && n.check.kind !== "oregonator") {
       out.push(
         el(
           "details",
@@ -373,6 +396,54 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
       ),
     );
   }
+}
+
+const QUESTIONS: Record<string, string> = {
+  oscillates: "Does the full Oregonator oscillate here?",
+  reduced_oscillates: "Does the two-variable reduction oscillate here?",
+  reduction_keeps_period: "Does the reduction keep the full model's period?",
+};
+
+function experiment(question: string, tolerance: number, r: CheckResult, unconfirmed: boolean) {
+  const p = r.sim?.periods ?? {};
+  const o = r.sim?.observations ?? {};
+  const line = (m: "full" | "reduced") =>
+    o[m]
+      ? el(
+          "p",
+          { class: "nums" },
+          `${m}: ${o[m]}${p[m] !== undefined ? `, period ${fmt(p[m])}` : ""}`,
+        )
+      : null;
+  return el(
+    "div",
+    { class: `result ${unconfirmed ? "" : r.pass ? "pass" : "fail"}` },
+    el("p", { class: "eyebrow" }, "Experiment - Oregonator, stiff solver, robust protocol"),
+    el("p", {}, QUESTIONS[question] ?? question),
+    el(
+      "p",
+      { class: "verdict" },
+      unconfirmed
+        ? "Recorded; re-running in your browser..."
+        : r.pass
+          ? "Holds in this experiment"
+          : "Fails in this experiment",
+    ),
+    line("full"),
+    line("reduced"),
+    question === "reduction_keeps_period"
+      ? el(
+          "p",
+          { class: "nums" },
+          `period difference ${fmt(r.value * 100)}% vs tolerance ${fmt(tolerance * 100)}%`,
+        )
+      : null,
+    el(
+      "p",
+      { class: "fine" },
+      `At s ${fmt(r.inputs.s ?? NaN)}, q ${fmt(r.inputs.q ?? NaN)}, eps ${fmt(r.inputs.eps ?? NaN)}, eps_prime ${fmt(r.inputs.eps_prime ?? NaN)}. Computed by VIBloom's chemistry engine, checked against SciPy; the question was chosen by Muse.`,
+    ),
+  );
 }
 
 const KIND_HELP: Record<Param["kind"], string> = {

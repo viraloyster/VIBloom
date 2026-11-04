@@ -217,7 +217,7 @@ describe("idea tree", () => {
   it("accepts repairs only for checks that failed to evaluate", () => {
     const t = planted();
     const skin = t.nodes.get("skin");
-    if (!skin?.check) throw new Error("missing");
+    if (!skin?.check || skin.check.kind === "oregonator") throw new Error("missing");
     skin.check.limit = "strenght";
     run(t, "skin");
     expect(t.broken().map((b) => b.id)).toEqual(["skin"]);
@@ -234,7 +234,7 @@ describe("idea tree", () => {
   it("refuses repairs that change the question", () => {
     const t = planted();
     const skin = t.nodes.get("skin");
-    if (!skin?.check) throw new Error("missing");
+    if (!skin?.check || skin.check.kind === "oregonator") throw new Error("missing");
     skin.check.limit = "strenght";
     run(t, "skin");
     const tries = [
@@ -303,6 +303,64 @@ describe("idea tree", () => {
       }),
     ).toThrow(/already exists/);
     expect(t.nodes.size).toBe(before);
+  });
+});
+
+describe("chemistry experiments", () => {
+  const chem = () => {
+    const t = new IdeaTree();
+    t.append("person", { type: "goal", text: "A chemical clock", mode: "standard" });
+    const nodes = t.admit("goal", [
+      grown("kinetics", {
+        params: [
+          { ...p("s", 1, "reference", ""), kind: "design" },
+          { ...p("q", 7.62e-5, "reference", ""), kind: "external" },
+          { ...p("eps", 0.0099, "reference", ""), kind: "external" },
+          { ...p("eps_prime", 1e-4, "reference", ""), kind: "external" },
+        ],
+        check: {
+          kind: "oregonator",
+          question: "reduction_keeps_period",
+          tolerance: 0.05,
+          description: "the two-variable model keeps the period",
+          value: "",
+          op: "none",
+          limit: "",
+          unit: "",
+        },
+      }),
+    ]);
+    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    return t;
+  };
+
+  it("runs the Oregonator through the chemistry engine and decides from its protocol", () => {
+    const t = chem();
+    const spec = t.nodes.get("kinetics")?.check;
+    expect(spec?.kind).toBe("oregonator");
+    if (!spec) throw new Error("missing");
+    const r = runCheck(spec, t.scope());
+    if ("error" in r) throw new Error(r.error);
+    // At s = 1 the reduction is about 19% off, outside a 5% tolerance.
+    expect(r.pass).toBe(false);
+    expect(r.value).toBeGreaterThan(0.1);
+    expect(r.sim?.periods.full).toBeGreaterThan(r.sim?.periods.reduced ?? Infinity);
+  });
+
+  it("counts a recorded experiment only after it reproduces in this browser", () => {
+    const t = chem();
+    const spec = t.nodes.get("kinetics")?.check;
+    if (!spec) throw new Error("missing");
+    const r = runCheck(spec, t.scope());
+    t.append("engine", { type: "check", node: "kinetics", result: r });
+    const copy = IdeaTree.replay(structuredClone(t.events));
+    expect(copy.status("kinetics")).toBe("unverified");
+    copy.confirm("kinetics", runCheck(spec, copy.scope()));
+    expect(copy.status("kinetics")).toBe("broken");
+    const forged = IdeaTree.replay(structuredClone(t.events));
+    if ("error" in r) throw new Error(r.error);
+    forged.confirm("kinetics", { ...r, pass: true });
+    expect(forged.status("kinetics")).toBe("unverified");
   });
 });
 

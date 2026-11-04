@@ -1344,3 +1344,106 @@ h1 {
 .row.center {
   justify-content: center;
 }
+
+/* The chemistry bench inside the monitor. */
+.bench-stage {
+  overflow: auto;
+  padding: 12px 14px;
+}
+
+.bench-stage .provenance {
+  border: 0;
+  padding: 6px 0 0;
+}
+
+/* Bench pieces shared with the chemistry bench. */
+.beakers .pair {
+  display: flex;
+  gap: 18px;
+  justify-content: center;
+}
+.beaker-box {
+  margin: 0;
+  width: 46%;
+  text-align: center;
+}
+.beaker {
+  width: 100%;
+  max-width: 150px;
+}
+.beaker .glass {
+  fill: none;
+  stroke: #cfd8e6;
+  stroke-width: 3;
+  opacity: 0.8;
+}
+.beaker .shine {
+  stroke: rgb(255 255 255 / 25%);
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+.beaker .liquid {
+  fill: #4a5563;
+  filter: drop-shadow(0 0 10px rgb(80 100 200 / 35%));
+}
+.beaker-box figcaption {
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.beaker-box figcaption b {
+  color: var(--text);
+}
+.phase {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.dishes {
+  margin-bottom: 6px;
+}
+.dish-box {
+  margin: 0;
+  width: 48%;
+  max-width: 320px;
+  text-align: center;
+}
+.dish-box canvas {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  box-shadow: 0 0 28px rgb(70 110 230 / 35%);
+}
+.dish-box figcaption {
+  font-size: 12px;
+  color: var(--text);
+}
+
+/* Nothing inside the left column may widen it past its track. */
+.left > *,
+.monitor-body > *,
+.bench-stage,
+.bench-stage .beakers {
+  min-width: 0;
+}
+
+.stage-area {
+  overflow: hidden;
+}
+
+.bench-stage .pair {
+  flex-wrap: wrap;
+}
+
+.bench-stage .dish-box {
+  width: min(46%, 260px);
+}
+
+.bench-stage .beaker {
+  max-width: 110px;
+}
+
+.fine.center {
+  text-align: center;
+  margin-top: 18px;
+}

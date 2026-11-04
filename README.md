@@ -86,6 +86,16 @@ on, and says which statements are computed and which are its own reasoning.
 An answer is tied to the values it was given; if they change, it is marked as
 outdated. The tree is saved in the browser and can be exported and reopened.
 
+**Chemistry inside the same tree.** When a goal involves the
+Belousov-Zhabotinsky reaction, Muse can attach a real experiment to a root
+instead of a formula: does the Oregonator oscillate at the tree's values of s,
+q, eps and eps_prime, and does the two-variable reduction keep the full
+model's period within a tolerance. The chemistry engine runs it (stiff solver,
+robust classification) in a worker and decides; Muse only chooses the
+question. The monitor then shows that run as twin beakers and spiral-wave
+dishes computed from its exact values. A recorded experiment counts only once
+it has been re-run in the viewer's browser and reproduced.
+
 **Chemistry, in depth.** The first specialised domain, chosen for its
 mathematical depth and because it can be seen: oscillating reactions
 (Belousov-Zhabotinsky, Oregonator models) with a stiff solver checked against
@@ -108,8 +118,9 @@ and tested with scripted and recorded runs. It still runs behind the API in
 
 ## Try it
 
-- Without a key: open the app and choose "Watch a recorded example". It
-  replays a real Muse session; the calculations are re-run in your browser.
+- Without a key: open the app and choose a recorded session (a cardboard
+  airliner, or a chemical clock with real experiments). It replays a real
+  Muse session; every calculation and experiment is re-run in your browser.
 - With your own Meta Model API key: grow any idea. The key stays in the tab
   (or on the device, if you ask) and is sent only to api.meta.ai. Before each
   request the API counts its input tokens, and the session reserves that
@@ -128,7 +139,8 @@ These are directions, not features:
 - Specialists that review a discrepancy from different angles, and a final
   review of broad conclusions.
 - Branches of a tree to experiment without touching the main one.
-- The chemistry loop and the idea tree in one static app.
+- The full chemistry investigation loop (region claims, counterexample
+  search, lessons) in the static app; today it runs behind the API.
 
 Status: under active development during the Meta Global AI Developer Hackathon
 (October 27 - November 4, 2026). See [HACKATHON.md](HACKATHON.md).

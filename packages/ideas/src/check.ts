@@ -1,11 +1,89 @@
 // Evaluating a check: the model's expressions are parsed by the engine's own
 // arithmetic language, and the engine, not the model, decides pass or fail.
 
+import { evaluatePoint } from "@vibloom/chem";
+import type { Claim } from "@vibloom/contracts";
 import { compare, evaluate } from "./expr";
-import type { CheckResult, CheckSpec } from "./types";
+import type { ArithmeticSpec, CheckResult, CheckSpec, SimulationSpec } from "./types";
+
+export const SIM_PARAMS = ["s", "q", "eps", "eps_prime"] as const;
 
 export function runCheck(
   spec: CheckSpec,
+  scope: Record<string, number>,
+): CheckResult | { error: string } {
+  return spec.kind === "oregonator" ? simulate(spec, scope) : arithmetic(spec, scope);
+}
+
+// The chemistry engine's own protocol (stiff solver, robust classification)
+// decides; the model chose only which question to ask.
+function simulate(
+  spec: SimulationSpec,
+  scope: Record<string, number>,
+): CheckResult | { error: string } {
+  const inputs: Record<string, number> = {};
+  for (const k of SIM_PARAMS) {
+    const v = scope[k];
+    if (v === undefined || !Number.isFinite(v) || v <= 0)
+      return { error: `the experiment needs a positive ${k}` };
+    inputs[k] = v;
+  }
+  const point = { s: inputs.s ?? NaN, eps_prime: inputs.eps_prime ?? NaN };
+  const claim: Claim =
+    spec.question === "reduction_keeps_period"
+      ? {
+          kind: "PERIOD_WITHIN",
+          reference: "full",
+          reduced: "reduced",
+          point,
+          ic: "far",
+          tolerance: spec.tolerance,
+        }
+      : {
+          kind: "OSCILLATES",
+          model: spec.question === "oscillates" ? "full" : "reduced",
+          point,
+          ic: "far",
+        };
+  try {
+    const e = evaluatePoint(claim, { q: inputs.q ?? NaN, eps: inputs.eps ?? NaN }, point, "far");
+    if (e.execution.status !== "completed")
+      return { error: `the solver stopped: ${e.execution.status}` };
+    if (e.outcome !== "holds" && e.outcome !== "fails") {
+      return { error: `the experiment was ${e.outcome ?? "inconclusive"}; nothing is concluded` };
+    }
+    const full = e.runs.full;
+    const reduced = e.runs.reduced;
+    const rel =
+      full?.period !== undefined && reduced?.period !== undefined
+        ? Math.abs(full.period - reduced.period) / reduced.period
+        : 0;
+    return {
+      pass: e.outcome === "holds",
+      value: rel,
+      limit: spec.question === "reduction_keeps_period" ? spec.tolerance : 0,
+      op: "<=",
+      unit: "",
+      inputs,
+      sim: {
+        outcome: e.outcome,
+        periods: {
+          ...(full?.period !== undefined ? { full: full.period } : {}),
+          ...(reduced?.period !== undefined ? { reduced: reduced.period } : {}),
+        },
+        observations: {
+          ...(full ? { full: full.observation } : {}),
+          ...(reduced ? { reduced: reduced.observation } : {}),
+        },
+      },
+    };
+  } catch (err) {
+    return { error: (err instanceof Error ? err.message : String(err)).slice(0, 200) };
+  }
+}
+
+function arithmetic(
+  spec: ArithmeticSpec,
   scope: Record<string, number>,
 ): CheckResult | { error: string } {
   const inputs: Record<string, number> = {};
@@ -43,7 +121,7 @@ export interface Threshold {
 }
 
 export function thresholds(
-  spec: CheckSpec,
+  spec: ArithmeticSpec,
   scope: Record<string, number>,
   names: string[],
 ): Threshold[] {

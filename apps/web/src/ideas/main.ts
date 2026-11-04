@@ -26,6 +26,7 @@ import {
 } from "@vibloom/ideas";
 import { el } from "../dom";
 import { mountChat } from "./chat";
+import { simulate } from "./chem";
 import { mountMonitor, viewData } from "./monitor";
 import { mountTreeView, type Ghost } from "./view";
 
@@ -103,8 +104,14 @@ function landing() {
       return b;
     }),
   );
-  const replay = el("button", { class: "ghost-btn" }, "Watch a recorded example - no key needed");
-  replay.addEventListener("click", () => void playRecorded());
+  const replay = el("button", { class: "ghost-btn" }, "Recorded: cardboard airliner");
+  replay.addEventListener("click", () => void playRecorded("cardboard-airliner"));
+  const replayChem = el(
+    "button",
+    { class: "ghost-btn" },
+    "Recorded: chemical clock (real experiments)",
+  );
+  replayChem.addEventListener("click", () => void playRecorded("chemical-clock"));
   let saved: { events: IdeaEvent[] } | undefined;
   try {
     saved = JSON.parse(localStorage.getItem(PROJECT_STORE) ?? "null") as typeof saved;
@@ -205,7 +212,9 @@ function landing() {
           ),
         ),
         note,
-        el("div", { class: "row center" }, replay, resume, open, file),
+        el("p", { class: "fine center" }, "No key needed to watch a recorded Muse session:"),
+        el("div", { class: "row center" }, replay, replayChem),
+        el("div", { class: "row center" }, resume, open, file),
       ),
     ),
   );
@@ -356,6 +365,7 @@ function load(events: IdeaEvent[]) {
   selectedId = undefined;
   for (const e of events) if ("usage" in e.body) ledger.entries.push(e.body.usage);
   workspace(tree.goal);
+  void confirmExperiments();
 }
 
 function refresh() {
@@ -429,7 +439,7 @@ async function grow(under: string, kind: "decompose" | "expand") {
       summary: r.summary,
       usage: r.usage,
     });
-    for (const n of nodes) check(n);
+    for (const n of nodes) await check(n);
     refresh();
     // Show the whole tree again with its new roots.
     view.refit();
@@ -570,14 +580,37 @@ async function repair() {
   tree.append(`muse:${usage.model}`, { type: "repair", fixes, usage });
   for (const f of fixes) {
     const n = tree.nodes.get(f.node);
-    if (n) check(n);
+    if (n) await check(n);
   }
   monitor.status(`Muse repaired ${String(fixes.length)} of ${String(failing.length)} formula(s).`);
 }
 
-function check(n: IdeaNode) {
+// Formulas are evaluated on the spot; experiments run in a worker, and the
+// result is recorded as the engine's and confirmed as re-run here.
+async function check(n: IdeaNode) {
   if (!n.check) return;
+  if (n.check.kind === "oregonator") {
+    monitor.status(`Running the Oregonator experiment for ${n.title}...`, true);
+    const result = await simulate(n.check, tree.scope());
+    tree.append("engine", { type: "check", node: n.id, result });
+    tree.confirm(n.id, result);
+    monitor.status(`Experiment done for ${n.title}.`);
+    refresh();
+    return;
+  }
   tree.append("engine", { type: "check", node: n.id, result: runCheck(n.check, tree.scope()) });
+}
+
+// Experiments read from a log count only once they reproduce in this browser.
+async function confirmExperiments() {
+  for (const id of [...tree.unconfirmed]) {
+    const spec = tree.nodes.get(id)?.check;
+    if (!spec) continue;
+    monitor.status("Re-running a recorded experiment in your browser...", true);
+    tree.confirm(id, await simulate(spec, tree.scope()));
+    refresh();
+  }
+  monitor.status("");
 }
 
 async function start(goal: string, mode: Mode) {
@@ -598,8 +631,10 @@ function select(id: string | undefined) {
 
 // After a person edits a number, every check that read it runs again.
 function recheck() {
-  for (const n of tree.nodes.values()) if (tree.status(n.id) === "stale") check(n);
-  refresh();
+  void (async () => {
+    for (const n of [...tree.nodes.values()]) if (tree.status(n.id) === "stale") await check(n);
+    refresh();
+  })();
 }
 
 function exportTree() {
@@ -613,8 +648,8 @@ function exportTree() {
 
 // A recorded session replays event by event; checks are re-run here, in this
 // browser, so the reds are computed now rather than shown from the recording.
-async function playRecorded() {
-  const res = await fetch("examples/cardboard-airliner.json");
+async function playRecorded(name: string) {
+  const res = await fetch(`examples/${name}.json`);
   const data = (await res.json()) as { events: IdeaEvent[] };
   const full = IdeaTree.replay(data.events);
   recorded = true;
@@ -638,7 +673,7 @@ async function playRecorded() {
       ghosts = [];
       tree.append(e.actor, b);
       ledger.entries.push(b.usage);
-      for (const n of b.nodes) check(n);
+      for (const n of b.nodes) await check(n);
       refresh();
       await sleep(900);
     } else if (b.type === "repair") {
@@ -646,7 +681,7 @@ async function playRecorded() {
       ledger.entries.push(b.usage);
       for (const f of b.fixes) {
         const n = tree.nodes.get(f.node);
-        if (n) check(n);
+        if (n) await check(n);
       }
       refresh();
     } else if (b.type === "view") {
@@ -665,6 +700,11 @@ async function playRecorded() {
     }
   }
   refresh();
+  // Land on a real experiment when the session has one, so its bench shows.
+  if (!selectedId) {
+    const exp = [...tree.nodes.values()].find((n) => n.check?.kind === "oregonator");
+    if (exp) select(exp.id);
+  }
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

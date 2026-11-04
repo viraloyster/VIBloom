@@ -10,16 +10,16 @@
 
 ## Packages
 
-| Package     | Responsibility                                                                 | May import            |
-| ----------- | ------------------------------------------------------------------------------ | --------------------- |
-| `contracts` | Shared types and boundary validation                                           | nothing               |
-| `engine`    | Event log, write gate, derived status, dependency propagation, layered context | `contracts`           |
-| `chem`      | Stiff solver, Oregonator models, oscillation classifier, claim evaluation      | `contracts`           |
-| `search`    | Halton sampling, transition refinement, counterexample reduction               | `contracts`           |
-| `agent`     | Orchestrator, tools, model providers (scripted, recorded, live)                | `contracts`, `engine` |
-| `ideas`     | Idea trees for any goal: protocol, Muse client, cost ledger, arithmetic checks | `engine`              |
-| `apps/api`  | Cloudflare Worker, Durable Objects, persistence                                | all packages          |
-| `apps/web`  | Roots map, monitor, chat, local preview                                        | all packages          |
+| Package     | Responsibility                                                                 | May import                    |
+| ----------- | ------------------------------------------------------------------------------ | ----------------------------- |
+| `contracts` | Shared types and boundary validation                                           | nothing                       |
+| `engine`    | Event log, write gate, derived status, dependency propagation, layered context | `contracts`                   |
+| `chem`      | Stiff solver, Oregonator models, oscillation classifier, claim evaluation      | `contracts`                   |
+| `search`    | Halton sampling, transition refinement, counterexample reduction               | `contracts`                   |
+| `agent`     | Orchestrator, tools, model providers (scripted, recorded, live)                | `contracts`, `engine`         |
+| `ideas`     | Idea trees for any goal: protocol, Muse client, cost ledger, checks            | `engine`, `chem`, `contracts` |
+| `apps/api`  | Cloudflare Worker, Durable Objects, persistence                                | all packages                  |
+| `apps/web`  | Roots map, monitor, chat, local preview                                        | all packages                  |
 
 Import boundaries are enforced by lint. Each package exposes one entry point.
 

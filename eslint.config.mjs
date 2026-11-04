@@ -9,7 +9,7 @@ const boundaries = {
   chem: ["contracts"],
   search: ["contracts"],
   agent: ["contracts", "engine"],
-  ideas: ["engine"],
+  ideas: ["engine", "chem", "contracts"],
 };
 const packages = Object.keys(boundaries);
 

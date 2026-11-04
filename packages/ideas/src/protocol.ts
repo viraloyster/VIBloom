@@ -44,6 +44,15 @@ Protocol (follow it exactly; it keeps trees comparable between people):
   op "<=", limit "skin_strength". You do not decide pass or fail; the engine
   computes it. Otherwise op is "none", value and limit are "", and description
   says why it cannot be computed.
+- Chemistry: VIBloom can run a real experiment on the Oregonator model of the
+  Belousov-Zhabotinsky oscillating reaction (Field's scaling: s, q, eps,
+  eps_prime). For an assumption about whether it oscillates, or whether the
+  two-variable reduction keeps the period of the full model, set check.kind to
+  "oregonator", check.question to "oscillates", "reduced_oscillates" or
+  "reduction_keeps_period" and check.tolerance (for example 0.05), and make
+  sure parameters named exactly s, q, eps and eps_prime exist (typical: q
+  7.62e-5, eps 0.0099, eps_prime 1e-4 to 0.02, s 0.5 to 2). The engine runs the
+  stiff solver and decides. Otherwise check.kind is "arithmetic" (or "none").
 - role "bedrock" only for laws of nature, axioms, definitions or measured
   constants. Bedrock can still be questioned later.
 - criticality: critical if the goal fails without it. risk: how likely it is to
@@ -192,8 +201,14 @@ const node = {
     check: {
       type: "object",
       additionalProperties: false,
-      required: ["description", "value", "op", "limit", "unit"],
+      required: ["kind", "description", "value", "op", "limit", "unit", "question", "tolerance"],
       properties: {
+        kind: { type: "string", enum: ["arithmetic", "oregonator", "none"] },
+        question: {
+          type: "string",
+          enum: ["oscillates", "reduced_oscillates", "reduction_keeps_period", "none"],
+        },
+        tolerance: { type: "number" },
         description: { type: "string" },
         value: { type: "string" },
         op: { type: "string", enum: ["<", "<=", ">", ">=", "none"] },
@@ -232,6 +247,15 @@ export interface GrownNode {
     origin: string;
     source: string;
   }[];
-  check: { description: string; value: string; op: string; limit: string; unit: string };
+  check: {
+    kind?: string;
+    question?: string;
+    tolerance?: number;
+    description: string;
+    value: string;
+    op: string;
+    limit: string;
+    unit: string;
+  };
   basis: string[];
 }

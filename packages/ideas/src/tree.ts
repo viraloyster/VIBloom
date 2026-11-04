@@ -5,7 +5,16 @@ import { canonical, sha256 } from "@vibloom/engine";
 import { runCheck } from "./check";
 import { MAX_EXPR, names, OPS, type Op } from "./expr";
 import { AXES, type GrownNode } from "./protocol";
-import type { CheckResult, EventBody, IdeaEvent, IdeaNode, Mode, Param, Usage } from "./types";
+import type {
+  CheckResult,
+  EventBody,
+  IdeaEvent,
+  IdeaNode,
+  Mode,
+  Param,
+  SimQuestion,
+  Usage,
+} from "./types";
 
 const GENESIS = "0".repeat(64);
 
@@ -25,6 +34,8 @@ export class IdeaTree {
   readonly events: IdeaEvent[] = [];
   readonly nodes = new Map<string, IdeaNode>();
   readonly results = new Map<string, CheckResult | { error: string }>();
+  // Experiment results read from a log and not yet re-run in this browser.
+  readonly unconfirmed = new Set<string>();
   // Visuals Muse designed for a node, latest last.
   readonly views = new Map<string, { title: string; html: string }>();
   readonly chat: {
@@ -125,6 +136,13 @@ export class IdeaTree {
       case "check": {
         const spec = this.nodes.get(b.node)?.check;
         if (!spec) throw new Error(`no check on ${b.node}`);
+        // An experiment takes seconds, so it is not re-run inside the log;
+        // its result counts only once the browser has run it again (confirm).
+        if (spec.kind === "oregonator") {
+          this.results.set(b.node, b.result);
+          this.unconfirmed.add(b.node);
+          break;
+        }
         // A recorded result is accepted only if the engine reaches the same
         // one now, from the same formula and values.
         const again = runCheck(spec, this.scope());
@@ -142,7 +160,8 @@ export class IdeaTree {
       case "repair":
         for (const f of b.fixes) {
           const n = this.nodes.get(f.node);
-          if (!n?.check) throw new Error(`no check on ${f.node}`);
+          if (!n?.check || n.check.kind === "oregonator")
+            throw new Error(`no formula on ${f.node}`);
           n.check = { ...n.check, value: f.value, limit: f.limit };
           this.results.delete(f.node);
         }
@@ -236,6 +255,7 @@ export class IdeaTree {
     if (n.proposed) return "proposed";
     const r = this.results.get(id);
     if (r && "error" in r) return "unverified";
+    if (this.unconfirmed.has(id)) return "unverified";
     if (r) {
       const scope = this.scope();
       if (Object.entries(r.inputs).some(([k, v]) => scope[k] !== v)) return "stale";
@@ -326,7 +346,15 @@ export class IdeaTree {
         }
       }
       const c = g.check;
+      const question = c.question ?? "";
+      const tolerance = c.tolerance ?? NaN;
+      const experiment =
+        c.kind === "oregonator" &&
+        ["oscillates", "reduced_oscillates", "reduction_keeps_period"].includes(question) &&
+        tolerance > 0 &&
+        tolerance < 1;
       const computable =
+        c.kind !== "oregonator" &&
         (OPS as readonly string[]).includes(c.op) &&
         c.value.trim() !== "" &&
         c.limit.trim() !== "" &&
@@ -345,17 +373,28 @@ export class IdeaTree {
         params,
         uses,
         suggestions,
-        ...(computable
+        ...(experiment
           ? {
               check: {
+                kind: "oregonator" as const,
                 description: c.description.slice(0, 400),
-                value: c.value,
-                op: c.op as Op,
-                limit: c.limit,
-                unit: c.unit.slice(0, 24),
+                question: question as SimQuestion,
+                tolerance,
+                op: "<=" as const,
+                unit: "" as const,
               },
             }
-          : {}),
+          : computable
+            ? {
+                check: {
+                  description: c.description.slice(0, 400),
+                  value: c.value,
+                  op: c.op as Op,
+                  limit: c.limit,
+                  unit: c.unit.slice(0, 24),
+                },
+              }
+            : {}),
         basis: g.basis,
         // Questioning a law of nature is always only a proposal.
         proposed: parent.role === "bedrock",
@@ -372,6 +411,26 @@ export class IdeaTree {
     return out;
   }
 
+  // The browser re-ran an experiment: it counts only if it reproduces.
+  confirm(id: string, again: CheckResult | { error: string }) {
+    const r = this.results.get(id);
+    if (!r || !this.unconfirmed.has(id)) return;
+    this.unconfirmed.delete(id);
+    const close = (a?: number, b?: number) =>
+      a === b || (a !== undefined && b !== undefined && Math.abs(a - b) <= 1e-6 * Math.abs(b));
+    const same =
+      "error" in again
+        ? "error" in r
+        : !("error" in r) &&
+          again.pass === r.pass &&
+          close(again.sim?.periods.full, r.sim?.periods.full) &&
+          close(again.sim?.periods.reduced, r.sim?.periods.reduced);
+    this.results.set(
+      id,
+      same ? again : { error: "the recorded experiment did not reproduce here" },
+    );
+  }
+
   // Whether values an answer relied on have changed since it was given.
   outdated(i: number): boolean {
     const c = this.chat[i];
@@ -386,7 +445,7 @@ export class IdeaTree {
     const names = Object.keys(this.scope());
     for (const [id, r] of this.results) {
       const n = this.nodes.get(id);
-      if (n?.check && "error" in r) {
+      if (n?.check && n.check.kind !== "oregonator" && "error" in r) {
         out.push({ id, value: n.check.value, limit: n.check.limit, error: r.error, params: names });
       }
     }

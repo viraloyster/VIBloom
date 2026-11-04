@@ -25,13 +25,31 @@ export interface Param {
 
 // The assumption holds when value op limit. The model writes the two
 // expressions and the comparison; the engine evaluates and decides.
-export interface CheckSpec {
+export interface ArithmeticSpec {
+  kind?: "arithmetic";
   description: string;
   value: string;
   op: "<" | "<=" | ">" | ">=";
   limit: string;
   unit: string;
 }
+
+// A real experiment: the Oregonator model of the Belousov-Zhabotinsky
+// reaction, run by the chemistry engine at the tree's values of s, q, eps and
+// eps_prime. The model only chooses the question.
+export type SimQuestion = "oscillates" | "reduced_oscillates" | "reduction_keeps_period";
+
+export interface SimulationSpec {
+  kind: "oregonator";
+  description: string;
+  question: SimQuestion;
+  // Largest relative period difference the reduction may show.
+  tolerance: number;
+  op: "<=";
+  unit: "";
+}
+
+export type CheckSpec = ArithmeticSpec | SimulationSpec;
 
 export interface CheckResult {
   pass: boolean;
@@ -41,6 +59,12 @@ export interface CheckResult {
   unit: string;
   // Parameters the check read, as they were when it ran.
   inputs: Record<string, number>;
+  // For an experiment: what each model did.
+  sim?: {
+    outcome: string;
+    periods: { full?: number; reduced?: number };
+    observations: { full?: string; reduced?: string };
+  };
 }
 
 export interface IdeaNode {
