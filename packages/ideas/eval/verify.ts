@@ -7,8 +7,8 @@
 
 import { readFile } from "node:fs/promises";
 import { runCheck } from "../src/check";
-import { replayMap } from "../src/map";
-import { EXPERIMENT_TOLERANCE, IdeaTree } from "../src/tree";
+import { MAP_TOLERANCE, replayMap } from "../src/map";
+import { IdeaTree } from "../src/tree";
 import type { IdeaEvent, Refusal } from "../src/types";
 
 const dir = new URL("../../../apps/web/public/examples/", import.meta.url);
@@ -63,7 +63,7 @@ for (const name of SESSIONS) {
   // A map ran on the tree as it was then: replay the log up to it.
   for (const m of t.maps) {
     const then = IdeaTree.replay(data.events.slice(0, m.seq));
-    const off = replayMap(then, m, EXPERIMENT_TOLERANCE);
+    const off = replayMap(then, m, MAP_TOLERANCE);
     const ran = m.cells.filter((c) => !c.excluded).length;
     if (off.length) failures += off.length;
     console.log(

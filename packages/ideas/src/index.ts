@@ -40,6 +40,7 @@ export { IdeaTree, outputKey, type Status } from "./tree";
 export {
   axis,
   cellScope,
+  MAP_TOLERANCE,
   mapRecord,
   mapSetup,
   recenter,

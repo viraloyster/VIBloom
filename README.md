@@ -41,16 +41,19 @@ Built during the Meta Global AI Developer Hackathon, from November 2, 2026
 Start from a working recipe and ask for something else: a different period,
 a model that can still be trusted there, a constraint on the chemicals. In
 the recorded search, lab notes give 6.4 min where 60 s +/- 10 is wanted, with
-the two-variable model required within 10% of the full one. VIBloom maps the
-recipes around it, narrows in once, and finds that 0.879 M bromate with
+the two-variable model required within 10% of the full one. The search is
+asked for in the chat; Muse reads the request as "open the recipe map", and
+the engine maps the recipes around it, narrows in once, and finds that 0.879 M bromate with
 0.136 M malonic acid gives 55 s with the models 2.3% apart. On the way it
 showed what the target costs. The period scales roughly with one over the
 malonic acid, so 60 s needs about six times as much, and the gap between the
 models depends only on the malonic acid to bromate ratio at fixed acid, so
-bromate has to rise with it. In another run of the same question Muse wrote
-"nearby" into the tree as a total relative change of at most 50%; the map
-marked every recipe that reaches the target as breaking that limit. The
-broken assumption is shown, not hidden.
+bromate has to rise with it. Muse had written "near" into the tree as a
+relative change of at most 50%; the map marked every recipe that reaches the
+target as breaking that limit. The broken assumption is shown, not hidden.
+Both maps are in the log, cell by cell, and `npm run verify` runs all 98
+cells again. A question asked afterwards from the period root is answered
+from the reduction root's run, which Muse chose to consult.
 
 What a researcher gets, for every recipe tried: the model's answer with the
 conditions it holds under, the tree's own checks evaluated there, which of
@@ -143,7 +146,7 @@ code does with it.
 
 Cost is controlled per request: the API counts input tokens first, the
 session reserves the most the request could cost and stops at its budget. The
-recorded chemistry sessions cost $0.04 and $0.07.
+recorded chemistry sessions cost $0.04 to $0.07.
 
 ## Map for reviewers
 

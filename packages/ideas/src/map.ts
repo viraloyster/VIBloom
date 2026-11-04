@@ -194,6 +194,12 @@ export function mapRecord(
   };
 }
 
+// A map cell's numbers may differ more between Node and Chromium than a
+// single run's: cells far from agreement (gaps of 40% to 150%) differed by up
+// to 9e-4 relative in the gap (docs/validation.md). Verdicts must match
+// exactly; numbers within 0.5%.
+export const MAP_TOLERANCE = 5e-3;
+
 // Runs every recorded cell again on the tree as it was when the map was
 // recorded; returns the cells whose verdicts or numbers differ.
 export function replayMap(

@@ -45,6 +45,12 @@ recipe of the current recorded session (eps about 0.1) the period gap
 differed by 1.5e-5 relative. The tolerance is set well above those and far
 below the 5% a claim typically allows. A result that does not reproduce is shown as such, never as holding.
 
+A recorded recipe map is checked by `npm run verify` cell by cell: every
+verdict must match exactly, and periods and gaps within 0.5% relative. In the
+recorded map session, 11 of 98 cells differed between Chromium and Node by
+more than 1e-4, all far from agreement (gaps of 9% to 153%), the largest by
+9e-4 relative in the gap; none changed a verdict.
+
 ## Twin beakers
 
 The monitor shows a selected run as two beakers, the full and the reduced
