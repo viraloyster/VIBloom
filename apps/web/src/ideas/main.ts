@@ -28,6 +28,7 @@ import {
   READ_FORMULA,
   READ_FORMULA_SCHEMA,
   SIM_PARAMS,
+  RECIPE_PARAMS,
   estimate,
   mapSetup,
   runCheck,
@@ -797,6 +798,19 @@ async function ask(question: string) {
           branch: tree.context(focus),
           tree: [...tree.nodes.values()].map((n) => `${n.id} | ${n.title} | ${tree.status(n.id)}`),
           recent: tree.chat.slice(-4).map((c) => ({ q: c.question, a: c.answer })),
+          // Earlier runs of the selected root, so a question about how it
+          // changed can be answered from the record.
+          runs: tree.runs
+            .filter((r) => r.node === focus)
+            .slice(-4)
+            .map((r) => ({
+              seq: r.seq,
+              purpose: r.purpose,
+              values: r.result.inputs,
+              ...("error" in r.result
+                ? { error: r.result.error }
+                : { outcome: r.result.pass ? "holds" : "fails", gap: r.result.value }),
+            })),
           ...recipeContext(),
           ...(image ? { image: "what the monitor shows the person right now" } : {}),
         }),
@@ -836,8 +850,17 @@ async function ask(question: string) {
 // model, so Muse can reason about which change does what.
 function recipeContext() {
   const derived = tree.derived();
+  const scope = tree.scope();
+  const recipe = Object.fromEntries(RECIPE_PARAMS.map((k) => [k, scope[k] ?? NaN]));
   return Object.keys(derived).length
-    ? { recipe_model: { derived, relations: RECIPE_RELATIONS, source: RECIPE_SOURCE } }
+    ? {
+        recipe_model: {
+          recipe_now: recipe,
+          derived,
+          relations: RECIPE_RELATIONS,
+          source: RECIPE_SOURCE,
+        },
+      }
     : {};
 }
 
@@ -864,7 +887,10 @@ async function experiment(n: IdeaNode) {
   const scope = t.scope();
   const inputs = Object.fromEntries(SIM_PARAMS.map((k) => [k, scope[k] ?? NaN]));
   let made: { id: string; expect: "holds" | "fails" } | undefined;
-  if (key && !recorded) {
+  // A question already settled at these values (by the recipe map, a test
+  // or another node) is run without asking Muse: it could not be blind.
+  const settled = t.settledBy(n.id, inputs);
+  if (key && !recorded && !settled) {
     try {
       made = await foresee(n, inputs);
     } catch (e) {
@@ -876,7 +902,9 @@ async function experiment(n: IdeaNode) {
   monitor.status(
     made
       ? `Muse predicts ${n.title} ${made.expect}. Running the experiment...`
-      : `Running the Oregonator experiment for ${n.title}...`,
+      : settled
+        ? `Running ${n.title}; its outcome is already settled by run #${String(settled.seq)}, so Muse is not asked to predict it.`
+        : `Running the Oregonator experiment for ${n.title}...`,
     true,
   );
   const result = await simulate(spec, scope);
@@ -919,6 +947,8 @@ async function foresee(n: IdeaNode, inputs: Record<string, number>) {
         tolerance: spec.tolerance,
         values: inputs,
         lessons: tree.lessonsForModel(n.id),
+        // The recipe these values come from, so the reasoning is about it.
+        ...recipeContext(),
       }),
       mode: tree.mode,
       effort: "low",

@@ -300,14 +300,7 @@ export class IdeaTree {
         // a run at the same values, on any node, from a check or a test,
         // under any solver version, of the same question or of the
         // reduction question, which settles all three.
-        const spec = n.check;
-        const prior = this.runs.find((r) => {
-          const c = this.nodes.get(r.node)?.check;
-          if (c?.kind !== "oregonator" || !sameRun(r.result.inputs ?? {}, b.inputs)) return false;
-          // A run of the reduction question integrates both models and
-          // measures their gap, so it reveals every question at its values.
-          return c.question === "reduction_keeps_period" || c.question === spec.question;
-        });
+        const prior = this.settledBy(b.node, b.inputs);
         this.predictions.push({
           id: b.id,
           node: b.node,
@@ -320,7 +313,16 @@ export class IdeaTree {
           uses: b.uses.filter((u) => this.lessons.some((l) => l.id === u && l.run !== undefined)),
           unsupported: unsupportedNumbers(
             b.reason,
-            numbersOf([b.inputs, n.statement, n.check.tolerance, this.lessonsForModel(b.node)]),
+            numbersOf([
+              b.inputs,
+              n.statement,
+              n.check.tolerance,
+              this.lessonsForModel(b.node),
+              // The recipe the values come from, which Muse is shown too.
+              Object.keys(this.derived()).length
+                ? [RECIPE_PARAMS.map((k) => this.scope()[k]), this.derived(), RECIPE_RELATIONS]
+                : [],
+            ]),
           ),
         });
         break;
@@ -496,6 +498,19 @@ export class IdeaTree {
       if (r && r.state !== "confirmed") out.add(id);
     }
     return out;
+  }
+
+  // A run already in the log that settles this node's question at these
+  // values: one of the same question, or of the reduction question, which
+  // integrates both models and so settles all three. Any node, check or test.
+  settledBy(node: string, inputs: Record<string, number>): Run | undefined {
+    const spec = this.nodes.get(node)?.check;
+    if (spec?.kind !== "oregonator") return undefined;
+    return this.runs.find((r) => {
+      const c = this.nodes.get(r.node)?.check;
+      if (c?.kind !== "oregonator" || !sameRun(r.result.inputs ?? {}, inputs)) return false;
+      return c.question === "reduction_keeps_period" || c.question === spec.question;
+    });
   }
 
   latestRun(node: string): Run | undefined {
@@ -955,6 +970,7 @@ export class IdeaTree {
     return numbersOf([
       this.scope(),
       [...this.results.values()],
+      this.runs.filter((r) => r.node === focus).map((r) => r.result),
       flips,
       this.lessonsForModel(focus),
       // Muse's own earlier prose is not a source: a figure it made up must
