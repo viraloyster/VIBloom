@@ -62,7 +62,7 @@ for (const name of SESSIONS) {
   const c = t.calibration();
   const cost = data.events.reduce((s, e) => s + ("usage" in e.body ? e.body.usage.cost : 0), 0);
   console.log(
-    `  scored predictions ${String(c.made)}, right ${String(c.right)}; refused attempts ${String(data.refused?.length ?? 0)}; Muse cost when recorded $${cost.toFixed(3)}; re-run in ${String(((Date.now() - started) / 1000).toFixed(1))} s`,
+    `  scored predictions ${String(c.made)}, right ${String(c.right)}; refused attempts ${String(data.refused?.length ?? 0)}; Muse cost when recorded $${cost.toFixed(3)}; re-run in ${((Date.now() - started) / 1000).toFixed(1)} s`,
   );
 }
 
