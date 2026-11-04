@@ -43,6 +43,10 @@ origin, reference or assumed), and the roots grow on screen as Muse writes
 them. Opening a root asks Muse for the assumptions under it, one level closer
 to first principles.
 
+Every number also says what changing it would mean: a requirement (changing
+it changes the goal), a design variable (the builder's choice) or an external
+property (how the world is; changing it only builds a hypothetical scenario).
+
 Where an assumption can be tested by arithmetic, Muse writes two expressions
 and how they must compare (for example `delta_p * radius / thickness <=
 strength`). VIBloom parses them with its own small arithmetic language,
@@ -59,14 +63,28 @@ marked. If a formula fails to evaluate, Muse repairs it once, in a single
 request. Everything is recorded in a hash-chained log that can be exported
 and replayed.
 
+A verdict says only what the arithmetic shows: "fails with these values". The
+monitor lists what backs it (how many values are assumed, which have a source
+Muse named, none checked by a person yet) and the conclusion it allows: this
+scenario conflicts with its limit, not that the idea is impossible. A green
+check whose premises are stale or could not be evaluated is shown as
+unverified, never as holding. Recorded results are re-computed when a log is
+replayed, and a log whose results do not reproduce is refused. A repair of a
+formula may fix its syntax only; it cannot change which quantities are
+compared or any constant in it.
+
 The workspace has three parts. The tree, on the right, grows as roots that
 thicken toward the trunk. The monitor shows the selected root: the
-comparison VIBloom computed, and for each value it read, where the verdict
-would flip (found by the engine, not the model). Muse can design a live
+comparison VIBloom computed, and for each value it read, the nearest point
+where the verdict would flip, found by the engine within four orders of
+magnitude and labelled as a local finding, grouped by whether a design
+change, a different world or a different goal would be needed. Muse can design a live
 visual of what the root is testing; it runs in a sandboxed frame with no
-network, storage or access to the key, and draws only the numbers VIBloom
-hands it. The chat answers in a few sentences, citing the roots it relied
+network, storage or access to the key, draws only the numbers VIBloom hands
+it, and is labelled as an illustration, not a simulation. The chat answers in a few sentences, citing the roots it relied
 on, and says which statements are computed and which are its own reasoning.
+An answer is tied to the values it was given; if they change, it is marked as
+outdated. The tree is saved in the browser and can be exported and reopened.
 
 **Chemistry, in depth.** The first specialised domain, chosen for its
 mathematical depth and because it can be seen: oscillating reactions

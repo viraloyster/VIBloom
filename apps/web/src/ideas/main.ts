@@ -38,6 +38,7 @@ const EXAMPLES = [
 const EFFORT = "low" as const;
 const MAX_OUT = { decompose: 8000, expand: 5000, view: 9000, chat: 1500 };
 const KEY_STORE = "vibloom.key";
+const PROJECT_STORE = "vibloom.project";
 
 const app = document.getElementById("app") ?? document.body;
 let key = "";
@@ -52,6 +53,11 @@ let busy = false;
 let recorded = false;
 
 const usd = (x: number) => (x < 0.01 ? `$${x.toFixed(4)}` : `$${x.toFixed(3)}`);
+
+function goalOf(events: IdeaEvent[]): string {
+  const b = events[0]?.body;
+  return b?.type === "goal" ? b.text.slice(0, 60) : "your last tree";
+}
 
 function landing() {
   const goal = el("textarea", {
@@ -99,6 +105,40 @@ function landing() {
   );
   const replay = el("button", { class: "ghost-btn" }, "Watch a recorded example - no key needed");
   replay.addEventListener("click", () => void playRecorded());
+  let saved: { events: IdeaEvent[] } | undefined;
+  try {
+    saved = JSON.parse(localStorage.getItem(PROJECT_STORE) ?? "null") as typeof saved;
+  } catch {
+    saved = undefined;
+  }
+  const resume = saved?.events.length
+    ? el("button", { class: "ghost-btn" }, `Continue: ${goalOf(saved.events)}`)
+    : null;
+  resume?.addEventListener("click", () => {
+    if (!saved) return;
+    try {
+      load(saved.events);
+    } catch (e) {
+      note.textContent = `The saved project could not be restored: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  });
+  const file = el("input", { type: "file", accept: "application/json", hidden: true });
+  const open = el("button", { class: "ghost-btn" }, "Open an exported tree");
+  open.addEventListener("click", () => {
+    file.click();
+  });
+  file.addEventListener("change", () => {
+    const f = file.files?.[0];
+    if (!f) return;
+    void f.text().then((text) => {
+      try {
+        // Replay re-verifies the hash chain and every computed result.
+        load((JSON.parse(text) as { events: IdeaEvent[] }).events);
+      } catch (e) {
+        note.textContent = `That file is not a valid tree: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    });
+  });
 
   grow.addEventListener("click", () => {
     const text = goal.value.trim();
@@ -165,7 +205,7 @@ function landing() {
           ),
         ),
         note,
-        replay,
+        el("div", { class: "row center" }, replay, resume, open, file),
       ),
     ),
   );
@@ -215,6 +255,8 @@ function workspace(goal: string) {
       gear(),
     ),
   );
+  // A new workspace must not leave the previous tree animating behind it.
+  if (typeof view !== "undefined") view.dispose();
   view = mountTreeView(treeHost, select);
   monitor = mountMonitor(monitorHost, {
     visualize: (id) => void visualize(id),
@@ -292,7 +334,32 @@ function nodeData(id: string) {
   return n ? viewData(tree, n) : {};
 }
 
+// The project lives in this browser too, so a reload does not lose it. A
+// recorded example is never saved over a person's own work.
+function save() {
+  if (recorded) return;
+  try {
+    localStorage.setItem(
+      PROJECT_STORE,
+      JSON.stringify({ format: "vibloom-ideas-1", events: tree.events }),
+    );
+  } catch {
+    // Storage full or blocked: Export still works.
+  }
+}
+
+function load(events: IdeaEvent[]) {
+  const t = IdeaTree.replay(events);
+  recorded = false;
+  tree = t;
+  chatUsage.length = 0;
+  selectedId = undefined;
+  for (const e of events) if ("usage" in e.body) ledger.entries.push(e.body.usage);
+  workspace(tree.goal);
+}
+
 function refresh() {
+  save();
   view.render(tree, ghosts);
   if (selectedId && !tree.nodes.has(selectedId)) selectedId = undefined;
   view.select(selectedId);
@@ -329,6 +396,8 @@ async function grow(under: string, kind: "decompose" | "expand") {
   view.busy(under);
   ghosts = [];
   monitor.status("Muse is thinking...", true);
+  const first = tree.nodes.size === 1;
+  if (first) view.seed("reading the goal...");
   let thought = "";
   try {
     const r = await muse().grow({
@@ -340,10 +409,12 @@ async function grow(under: string, kind: "decompose" | "expand") {
       onThought: (t) => {
         thought = (thought + t).slice(-240);
         monitor.status(`Muse is thinking: ${thought}`, true);
+        if (first && ghosts.length === 0) view.seed(thought.slice(-120));
       },
       onNode: (raw) => {
         const n = raw as { key?: unknown; title?: unknown };
         if (typeof n.key === "string" && typeof n.title === "string") {
+          if (ghosts.length === 0) view.seed(undefined);
           ghosts.push({ key: n.key, under, title: n.title });
           view.render(tree, ghosts);
         }
@@ -360,6 +431,8 @@ async function grow(under: string, kind: "decompose" | "expand") {
     });
     for (const n of nodes) check(n);
     refresh();
+    // Show the whole tree again with its new roots.
+    view.refit();
     monitor.status(r.summary);
     await repair();
   } catch (e) {
@@ -367,6 +440,7 @@ async function grow(under: string, kind: "decompose" | "expand") {
     monitor.status(`Stopped: ${explain(e)}`);
   } finally {
     busy = false;
+    view.seed(undefined);
     view.busy(undefined);
     refresh();
   }
@@ -416,17 +490,19 @@ async function ask(question: string) {
   asking = question;
   refresh();
   const focus = selectedId ?? "goal";
+  const asked = tree.scope();
   try {
     const { value, usage } = await muse().ask(
       {
         instructions: CHAT,
+        // The selected branch in full, the rest as a one-line index, and the
+        // last turns, so Muse answers about what the person is looking at.
         input: JSON.stringify({
           question,
-          focus: tree.context(focus),
-          statuses: [...tree.nodes.values()].map((n) => {
-            const r = tree.results.get(n.id);
-            return `${n.id} | ${n.title} | ${tree.status(n.id)}${r && !("error" in r) ? ` | computed ${String(r.value)} ${r.op} ${String(r.limit)} ${r.unit}` : ""}`;
-          }),
+          selected: nodeData(focus),
+          branch: tree.context(focus),
+          tree: [...tree.nodes.values()].map((n) => `${n.id} | ${n.title} | ${tree.status(n.id)}`),
+          recent: tree.chat.slice(-4).map((c) => ({ q: c.question, a: c.answer })),
         }),
         mode: tree.mode,
         effort: "low",
@@ -446,6 +522,7 @@ async function ask(question: string) {
       question,
       answer: typeof v.answer === "string" ? v.answer.slice(0, 1200) : "",
       cites: [...new Set(cites)].slice(0, 6),
+      asked,
       usage,
     });
     chatUsage[tree.chat.length - 1] = usage;

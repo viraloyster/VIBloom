@@ -42,40 +42,68 @@ export function mountChat(host: HTMLElement, actions: ChatActions) {
 
   return {
     render(tree: IdeaTree, pending?: string, cost?: (i: number) => string) {
-      const items = tree.chat.map((c, i) =>
-        el(
+      const items = tree.chat.map((c, i) => {
+        const cites = c.cites.map((id) => {
+          const n = tree.nodes.get(id);
+          const b = el(
+            "button",
+            { class: `cite ${tree.status(id)}`, title: statusLabel(tree.status(id)) },
+            n?.title ?? id,
+          );
+          b.addEventListener("click", () => {
+            actions.select(id);
+          });
+          return b;
+        });
+        const about = tree.nodes.get(c.focus)?.title;
+        return el(
           "div",
           { class: "turn" },
-          el("p", { class: "q" }, c.question),
-          el("p", { class: "a" }, c.answer),
+          el("div", { class: "msg me" }, el("p", {}, c.question)),
           el(
             "div",
-            { class: "cites" },
-            ...c.cites.map((id) => {
-              const n = tree.nodes.get(id);
-              const b = el(
-                "button",
-                { class: `cite ${tree.status(id)}`, title: statusLabel(tree.status(id)) },
-                n?.title ?? id,
-              );
-              b.addEventListener("click", () => {
-                actions.select(id);
-              });
-              return b;
-            }),
-            cost ? el("span", { class: "fine" }, cost(i)) : null,
+            { class: "msg muse" },
+            el("span", { class: "who" }, "Muse", about ? el("small", {}, ` on ${about}`) : null),
+            el("p", {}, c.answer),
+            tree.outdated(i)
+              ? el("p", { class: "note-line warn" }, "Values have changed since this answer.")
+              : null,
+            c.cites.length === 0
+              ? el("p", { class: "note-line warn" }, "No root cited: treat this as unsupported.")
+              : null,
+            el(
+              "div",
+              { class: "cites" },
+              ...cites,
+              cost ? el("span", { class: "fine" }, cost(i)) : null,
+            ),
           ),
-        ),
-      );
-      if (pending)
+        );
+      });
+      if (pending) {
         items.push(
           el(
             "div",
             { class: "turn" },
-            el("p", { class: "q" }, pending),
-            el("p", { class: "a thinking-dots" }, "Muse is answering"),
+            el("div", { class: "msg me" }, el("p", {}, pending)),
+            el(
+              "div",
+              { class: "msg muse" },
+              el("span", { class: "who" }, "Muse"),
+              el("p", { class: "typing" }, el("i", {}), el("i", {}), el("i", {})),
+            ),
           ),
         );
+      }
+      if (items.length === 0) {
+        items.push(
+          el(
+            "p",
+            { class: "chat-empty" },
+            "Ask Muse about the selected root: why it fails, what it rests on, what to test next.",
+          ),
+        );
+      }
       log.replaceChildren(...items);
       log.scrollTop = log.scrollHeight;
     },

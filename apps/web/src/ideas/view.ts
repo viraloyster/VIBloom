@@ -4,12 +4,12 @@
 import type { IdeaNode, IdeaTree, Status } from "@vibloom/ideas";
 import { el, svg } from "../dom";
 import { rng } from "../canopy";
-import { hash, rootSystem, TRUNK } from "../layout";
+import { hash } from "../layout";
 
 const DX = 112;
 const DY = 165;
-const CROWN_W = 760;
-const CROWN_H = 400;
+const CROWN_W = 600;
+const CROWN_H = 316;
 
 export interface Ghost {
   key: string;
@@ -19,6 +19,9 @@ export interface Ghost {
 
 export interface TreeView {
   render(tree: IdeaTree, ghosts?: Ghost[]): void;
+  seed(text: string | undefined): void;
+  refit(): void;
+  dispose(): void;
   select(id: string | undefined): void;
   focus(id: string): void;
   busy(id: string | undefined): void;
@@ -70,11 +73,13 @@ function rootShape(
   w1: number,
 ) {
   const r = rng(hash(seed));
-  const sway = (r() - 0.5) * 50;
+  const sway = (r() - 0.5) * 24;
+  // Roots drop together under the parent before they spread, like a real
+  // root crown, then curve out to their tips.
   const c: Pt[] = [
     [ax, ay],
-    [ax + (bx - ax) * 0.1 + sway, ay + (by - ay) * 0.5],
-    [bx - (bx - ax) * 0.3 - sway * 0.4, by - (by - ay) * 0.4],
+    [ax + (bx - ax) * 0.08 + sway, ay + (by - ay) * 0.62],
+    [bx - (bx - ax) * 0.35, by - (by - ay) * 0.18 + sway * 0.3],
     [bx, by],
   ];
   const at = (t: number): Pt => {
@@ -99,6 +104,17 @@ function rootShape(
   const f = ([x, y]: Pt) => `${x.toFixed(1)},${y.toFixed(1)}`;
   const body = `M${left.map(f).join(" L")} L${right.reverse().map(f).join(" L")} Z`;
   const core = `M${pts.map(f).join(" L")}`;
+  // A highlight along one flank and a shadow along the other give the root a
+  // rounded, lit-from-above look.
+  const lit = `M${pts
+    .map((p, i) => {
+      const q = pts[Math.min(i + 1, 18)] ?? p;
+      const o = pts[Math.max(i - 1, 0)] ?? p;
+      const len = Math.hypot(q[0] - o[0], q[1] - o[1]) || 1;
+      const w = (w0 + (w1 - w0) * (i / 18)) * 0.45;
+      return f([p[0] - ((q[1] - o[1]) / len) * w, p[1] + ((q[0] - o[0]) / len) * w]);
+    })
+    .join(" L")}`;
   // Fine rootlets along the way, the way real roots feather out.
   const hairs: string[] = [];
   for (const t of [0.35, 0.6, 0.85]) {
@@ -110,19 +126,20 @@ function rootShape(
       `M${f([x, y])} Q${f([x + Math.cos(ang) * len * 0.6 + (r() - 0.5) * 8, y + Math.sin(ang) * len * 0.5])} ${f([x + Math.cos(ang) * len, y + Math.sin(ang) * len])}`,
     );
   }
-  return { body, core, hairs };
+  return { body, core, hairs, lit };
 }
 
 const STATUS_LABEL: Record<Status, string> = {
   goal: "goal",
-  holds: "holds - computed",
-  broken: "broken - computed",
+  holds: "holds with these values",
+  broken: "fails with these values",
   affected: "a premise broke",
   stale: "stale - recheck",
   at_risk: "at risk - argued",
   argued: "argued",
   bedrock: "bedrock",
   proposed: "proposed",
+  unverified: "unverified - a premise is unconfirmed",
 };
 export const statusLabel = (s: Status) => STATUS_LABEL[s];
 
@@ -143,17 +160,44 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     d: "M-34,-110 C-26,-60 -40,-30 -60,-14 L60,-14 C40,-30 26,-60 34,-110 Z",
     class: "trunk",
   });
-  // Ornamental roots under the trunk: decoration, never data.
-  const decor = svg("g", {
-    class: "decor",
-    transform: `translate(${String(-TRUNK.x)} ${String(-TRUNK.y - 14)})`,
-  });
-  for (const st of rootSystem(520, 7)) {
-    decor.append(
-      svg("path", { d: st.d, "stroke-width": st.width * 0.8, class: `strand g${String(st.gen)}` }),
-    );
-  }
-  stage.append(decor, ground, crown, trunk, roots, marks);
+  // Shared shading for the orbs: one light from the upper left.
+  const defs = svg(
+    "defs",
+    {},
+    svg(
+      "radialGradient",
+      { id: "orb-light", cx: "35%", cy: "30%", r: "60%" },
+      svg("stop", { offset: "0%", "stop-color": "#fff", "stop-opacity": "0.85" }),
+      svg("stop", { offset: "45%", "stop-color": "#fff", "stop-opacity": "0.12" }),
+      svg("stop", { offset: "100%", "stop-color": "#fff", "stop-opacity": "0" }),
+    ),
+    svg(
+      "radialGradient",
+      { id: "orb-shade", cx: "65%", cy: "75%", r: "70%" },
+      svg("stop", { offset: "40%", "stop-color": "#000", "stop-opacity": "0" }),
+      svg("stop", { offset: "100%", "stop-color": "#000", "stop-opacity": "0.6" }),
+    ),
+    svg(
+      "filter",
+      { id: "root-shadow", x: "-20%", y: "-20%", width: "140%", height: "140%" },
+      svg("feDropShadow", {
+        dx: "3",
+        dy: "5",
+        stdDeviation: "3",
+        "flood-color": "#000",
+        "flood-opacity": "0.55",
+      }),
+    ),
+  );
+  const seed = svg(
+    "g",
+    { class: "seed", hidden: true },
+    svg("circle", { r: 40, class: "ring r1" }),
+    svg("circle", { r: 40, class: "ring r2" }),
+    svg("circle", { r: 40, class: "ring r3" }),
+    svg("ellipse", { rx: 13, ry: 9, class: "kernel" }),
+  );
+  stage.append(defs, ground, crown, trunk, roots, marks, seed);
   const canvas = svg("svg", { class: "canvas", "aria-label": "Idea tree" }, stage);
   host.append(canvas);
 
@@ -175,13 +219,15 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
   // Names stay readable: the goal, the selected root and its neighbours carry
   // labels; the rest show theirs on hover.
   const labels = () => {
+    // The main branches always carry their names.
     const near = new Set<string>(["goal"]);
+    for (const [id, par] of parentOf) if (par === "goal") near.add(id);
     if (selected) {
       near.add(selected);
       const up = parentOf.get(selected);
       if (up) near.add(up);
       for (const [id, par] of parentOf) if (par === selected) near.add(id);
-    } else for (const [id, par] of parentOf) if (par === "goal") near.add(id);
+    }
     for (const [id, g] of groups)
       g.classList.toggle("labeled", near.has(id) || id.startsWith("ghost:"));
   };
@@ -196,7 +242,7 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     // Frame the roots; the crown may run past the column's sides.
     const minX = Math.min(...xs, -180) - 80;
     const maxX = Math.max(...xs, 180) + 80;
-    const minY = -CROWN_H * 0.9;
+    const minY = -CROWN_H * 0.5;
     const maxY = Math.max(...ys) + 80;
     const k = Math.min(1.2, (r.width - 20) / (maxX - minX), (r.height - 40) / (maxY - minY));
     // The stage origin sits at 42% of the height; aim the box centre at the screen centre.
@@ -231,7 +277,7 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
       r.width,
     );
     const dy = fitAxis(
-      r.height * 0.42 + target.y + -CROWN_H * 0.9 * k,
+      r.height * 0.42 + target.y + -CROWN_H * 0.5 * k,
       r.height * 0.42 + target.y + (Math.max(...ys) + 70) * k,
       r.height,
     );
@@ -266,9 +312,10 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
       for (const [id, { el: g, parent }] of paths) shapeRoot(g, id, parent);
       for (const l of links) l.el.setAttribute("d", linkPath(l.a, l.b));
     }
-    requestAnimationFrame(tick);
+    if (alive) frame = requestAnimationFrame(tick);
   };
-  requestAnimationFrame(tick);
+  let alive = true;
+  let frame = requestAnimationFrame(tick);
 
   // Thick near the trunk, thin toward the tips.
   const shapeRoot = (g: SVGGElement, id: string, parent: string) => {
@@ -276,10 +323,11 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     const q = drawn.get(parent);
     if (!p || !q) return;
     const depth = Math.max(0, Math.round(q.y / DY));
-    const w0 = Math.max(1.1, 6 - depth * 1.6);
+    const w0 = Math.max(1.4, 10 - depth * 3);
     const s = rootShape(q.x, q.y + (parent === "goal" ? 0 : 8), p.x, p.y - 8, id, w0, w0 * 0.42);
-    const [body, core, hairs] = [...g.children];
+    const [body, lit, core, hairs] = [...g.children];
     body?.setAttribute("d", s.body);
+    lit?.setAttribute("d", s.lit);
     core?.setAttribute("d", s.core);
     hairs?.setAttribute("d", s.hairs.join(" "));
   };
@@ -327,9 +375,13 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     autoFit = true;
     fit();
   });
-  window.addEventListener("resize", () => {
+  const onResize = () => {
     if (autoFit) fit();
-  });
+  };
+  window.addEventListener("resize", onResize);
+  // While Muse works on the first roots, a seed germinates where they will grow.
+  const seedNote = el("div", { class: "seed-note", hidden: true });
+  host.append(seedNote);
 
   const chip = (n: IdeaNode | Ghost, status: Status | "ghost", id: string) => {
     const box = el(
@@ -346,7 +398,9 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
       "g",
       { class: `node ${status}`, "data-id": id, tabindex: 0, role: "button" },
       svg("circle", { r: 18, class: "halo" }),
-      svg("circle", { r: 7, class: "orb" }),
+      svg("circle", { r: 8, class: "orb" }),
+      svg("circle", { r: 8, fill: "url(#orb-shade)", class: "shade" }),
+      svg("circle", { r: 8, fill: "url(#orb-light)", class: "shine" }),
       fo,
     );
     g.addEventListener("click", () => {
@@ -397,6 +451,7 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
             "g",
             { class: `root ${status}` },
             svg("path", { class: "body" }),
+            svg("path", { class: "lit" }),
             svg("path", { class: "core" }),
             svg("path", { class: "hairs" }),
           );
@@ -442,7 +497,6 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     focus(id) {
       const p = goals.get(id);
       if (!p) return;
-      autoFit = false;
       // Only move when the node is out of view, and keep the zoom.
       const r = canvas.getBoundingClientRect();
       const sx = r.width / 2 + target.x + p.x * target.k;
@@ -450,6 +504,24 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
       if (sx > r.width * 0.1 && sx < r.width * 0.9 && sy > r.height * 0.1 && sy < r.height * 0.9)
         return;
       target = { ...target, x: -p.x * target.k, y: -p.y * target.k + 40 };
+    },
+    seed(text) {
+      const on = text !== undefined;
+      seed.toggleAttribute("hidden", !on);
+      seedNote.hidden = !on;
+      if (on) {
+        seedNote.replaceChildren(el("b", {}, "Muse is working on the seed"), el("span", {}, text));
+        if (autoFit) target = { x: 0, y: 40, k: 1.3 };
+      } else if (autoFit) fit();
+    },
+    refit() {
+      autoFit = true;
+      fit();
+    },
+    dispose() {
+      alive = false;
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", onResize);
     },
     busy(id) {
       working = id;

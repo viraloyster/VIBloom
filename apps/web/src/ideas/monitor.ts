@@ -107,12 +107,18 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
           show(v.html, data);
           shown = key;
         }
+        const redraw = el("button", { class: "ghost-btn", disabled: actions.busy() }, "Redraw");
+        redraw.addEventListener("click", () => {
+          actions.visualize(id);
+        });
         stage.replaceChildren(
           frame,
           el(
             "p",
             { class: "provenance" },
-            `${v.title} - designed by Muse, drawn from VIBloom's numbers`,
+            redraw,
+            " ",
+            `Illustration by Muse: ${v.title}. Not a simulation; the numbers and verdict are in the instrument.`,
           ),
         );
       } else {
@@ -192,25 +198,52 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
     ];
     if (r && "error" in r)
       out.push(el("div", { class: "result error" }, `Check could not run: ${r.error}`));
-    else if (r) out.push(gauge(r, tree.assumedInputs(n.id).length));
-    else if (n.role !== "goal")
+    else if (r) {
+      const backing = Object.keys(r.inputs).flatMap((k) => {
+        const p = tree.param(k);
+        return p ? [p] : [];
+      });
+      out.push(gauge(r, backing));
+    } else if (n.role !== "goal")
       out.push(el("p", { class: "fine" }, "No calculation: argued, not computed."));
+    // Grouped by what changing the value would mean: only a design change
+    // can fix a design; the others change the world or the goal.
     const flips = th.filter((t) => t.at !== undefined);
     if (flips.length) {
-      out.push(
-        el("p", { class: "eyebrow" }, "Where it flips - computed"),
-        el(
-          "ul",
-          { class: "flips" },
-          ...flips.map((t) =>
-            el(
-              "li",
-              {},
-              el("b", {}, words(t.name)),
-              ` ${t.holdsWhen === "above" ? ">=" : "<="} ${fmt(t.at ?? 0)}`,
-              el("span", {}, ` now ${fmt(t.current)} (x${fmt((t.at ?? 0) / t.current)})`),
+      const kinds: [string, string][] = [
+        ["design", "A design change would flip it"],
+        ["external", "Only if the world were different"],
+        ["requirement", "Only if the goal changed"],
+      ];
+      out.push(el("p", { class: "eyebrow" }, "Where the verdict flips - computed, locally"));
+      for (const [kind, label] of kinds) {
+        const group = flips.filter((t) => (tree.param(t.name)?.kind ?? "external") === kind);
+        if (group.length === 0) continue;
+        out.push(
+          el("p", { class: `flip-kind ${kind}` }, label),
+          el(
+            "ul",
+            { class: "flips" },
+            ...group.map((t) =>
+              el(
+                "li",
+                {},
+                el("b", {}, words(t.name)),
+                ` ${t.holdsWhen === "above" ? "above" : "below"} about ${fmt(t.at ?? 0)}`,
+                el("span", {}, ` now ${fmt(t.current)} (x${fmt((t.at ?? 0) / t.current)})`),
+                t.single === false
+                  ? el("em", {}, " flips back further out; no single threshold")
+                  : null,
+              ),
             ),
           ),
+        );
+      }
+      out.push(
+        el(
+          "p",
+          { class: "fine" },
+          "Found by scanning 1e-4 to 1e4 times each value with the others fixed.",
         ),
       );
     }
@@ -288,15 +321,34 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
   }
 
   function row(p: Param, shared: boolean, from?: string) {
+    // No edits while Muse is working: its answer must be about these values.
     const input = el("input", {
       type: "number",
       value: String(p.value),
       step: "any",
       "aria-label": p.name,
+      disabled: actions.busy(),
     });
     input.addEventListener("change", () => {
       const v = Number(input.value);
-      if (Number.isFinite(v) && v !== p.value) actions.setParam(p.name, v, "set by a person");
+      if (!Number.isFinite(v) || v === p.value) return;
+      // Editing a requirement changes the goal; say so before doing it.
+      if (
+        p.kind === "requirement" &&
+        !confirm("This is a requirement: changing it changes the goal, not the design. Continue?")
+      ) {
+        input.value = String(p.value);
+        return;
+      }
+      actions.setParam(
+        p.name,
+        v,
+        p.kind === "external"
+          ? "hypothetical: a person assumed a different world"
+          : p.kind === "requirement"
+            ? "goal changed by a person"
+            : "design changed by a person",
+      );
     });
     return el(
       "tr",
@@ -312,6 +364,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
       el(
         "td",
         {},
+        el("span", { class: `kind ${p.kind}`, title: KIND_HELP[p.kind] }, p.kind),
         el(
           "span",
           { class: `origin ${p.origin}`, title: p.source || "chosen without a named source" },
@@ -322,26 +375,63 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
   }
 }
 
-function gauge(r: CheckResult, assumed: number) {
+const KIND_HELP: Record<Param["kind"], string> = {
+  requirement: "What the goal demands; changing it changes the goal",
+  design: "What the builder chooses",
+  external: "How the world is; changing it is a hypothetical scenario",
+};
+
+// The verdict says only what the arithmetic shows: this comparison, with these
+// values. Its backing and the conclusion it allows are spelled out apart.
+function gauge(r: CheckResult, backing: Param[]) {
   const ratio = r.limit === 0 ? 1 : Math.abs(r.value / r.limit);
+  const unverified = backing.filter((p) => p.origin !== "reference" || p.source === "");
+  const assumed = backing.filter((p) => p.origin === "assumed").length;
   return el(
     "div",
     { class: `result ${r.pass ? "pass" : "fail"}` },
-    el("p", { class: "verdict" }, r.pass ? "Holds - computed" : "Fails - computed"),
-    el("p", { class: "nums" }, `${fmt(r.value)} ${r.op} ${fmt(r.limit)} ${r.unit}`),
+    el("p", { class: "verdict" }, r.pass ? "Holds with these values" : "Fails with these values"),
+    el(
+      "p",
+      { class: "nums" },
+      `${fmt(r.value)} ${r.op} ${fmt(r.limit)} ${r.unit} is ${r.pass ? "true" : "false"}`,
+    ),
     el(
       "div",
       { class: "bar" },
       el("i", { style: `width:${String(Math.min(1, ratio / 2) * 100)}%` }),
       el("b", { style: "left:50%" }),
     ),
-    el("p", { class: "fine" }, "Formula and numbers come from Muse; the evaluation is VIBloom's."),
-    assumed
-      ? el(
-          "p",
-          { class: "fine warn" },
-          `Rests on ${String(assumed)} assumed value${assumed === 1 ? "" : "s"}.`,
-        )
-      : null,
+    el(
+      "dl",
+      { class: "scope" },
+      el("dt", {}, "Backing"),
+      el(
+        "dd",
+        {},
+        backing.length === 0
+          ? "no values"
+          : `${String(backing.length)} value${backing.length === 1 ? "" : "s"}: ${String(assumed)} assumed, ${String(backing.length - assumed)} with a source Muse named; none checked by a person`,
+      ),
+      el("dt", {}, "Allowed conclusion"),
+      el(
+        "dd",
+        {},
+        r.pass
+          ? "With these values the assumption is consistent with its limit."
+          : "With these values the assumption conflicts with its limit. It shows that this scenario fails, not that the idea is impossible.",
+      ),
+      unverified.length ? el("dt", {}, "Next") : null,
+      unverified.length
+        ? el(
+            "dd",
+            {},
+            `Establish where ${unverified
+              .map((p) => words(p.name))
+              .slice(0, 3)
+              .join(", ")} come from and when they apply.`,
+          )
+        : null,
+    ),
   );
 }

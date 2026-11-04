@@ -632,11 +632,20 @@ h1 {
   fill: #2c2017;
 }
 
-/* A root: bark-coloured body, the status as a thin glowing core. */
+/* A root: bark body in relief, the status as a thin glowing core. */
 .root .body {
-  fill: #4a3526;
-  stroke: #2a1d14;
-  stroke-width: 0.6;
+  fill: #3e2c1f;
+  stroke: #1c130d;
+  stroke-width: 0.8;
+  filter: url(#root-shadow);
+}
+
+.root .lit {
+  fill: none;
+  stroke: #8a6a4e;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  opacity: 0.55;
 }
 
 .root .core {
@@ -683,7 +692,12 @@ h1 {
 .node .orb {
   fill: var(--c);
   stroke: #1a120c;
-  stroke-width: 2;
+  stroke-width: 1.5;
+}
+
+.node .shade,
+.node .shine {
+  pointer-events: none;
 }
 
 .node .halo {
@@ -802,6 +816,9 @@ h1 {
 }
 .proposed {
   --c: var(--proposed);
+}
+.unverified {
+  --c: var(--stale);
 }
 .ghost {
   --c: var(--ghost);
@@ -1039,4 +1056,291 @@ h1 {
   .hud {
     display: none;
   }
+}
+
+.scope {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  margin: 10px 0 0;
+  font-size: 12px;
+}
+
+.scope dt {
+  color: var(--muted);
+}
+
+.scope dd {
+  margin: 0;
+}
+
+.flip-kind {
+  margin: 8px 0 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.flip-kind.design {
+  color: var(--holds);
+}
+
+.flips em {
+  color: var(--at_risk);
+  font-style: normal;
+}
+
+.kind {
+  font-size: 10px;
+  padding: 1px 6px;
+  margin-right: 4px;
+  border-radius: 4px;
+  color: var(--muted);
+  border: 1px solid var(--edge);
+}
+
+.kind.requirement {
+  color: var(--proposed);
+}
+
+.kind.design {
+  color: var(--holds);
+}
+
+/* Chat in the familiar form: the person on the right, Muse on the left. */
+.chat-log {
+  gap: 14px;
+  padding: 4px 16px 10px;
+}
+
+.turn {
+  display: grid;
+  gap: 8px;
+}
+
+.msg {
+  max-width: 82%;
+  padding: 9px 13px;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.msg p {
+  margin: 0;
+}
+
+.msg.me {
+  justify-self: end;
+  background: rgb(139 123 255 / 22%);
+  border: 1px solid rgb(139 123 255 / 35%);
+  border-bottom-right-radius: 4px;
+}
+
+.msg.muse {
+  justify-self: start;
+  background: rgb(255 255 255 / 4%);
+  border: 1px solid var(--edge);
+  border-bottom-left-radius: 4px;
+}
+
+.who {
+  display: block;
+  margin-bottom: 3px;
+  font:
+    600 11px/1.2 ui-monospace,
+    "SF Mono",
+    "Cascadia Mono",
+    Menlo,
+    monospace;
+  color: var(--accent-2);
+}
+
+.who small {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.msg .cites {
+  margin-top: 8px;
+}
+
+.note-line {
+  margin-top: 6px !important;
+  font-size: 12px;
+}
+
+.note-line.warn {
+  color: var(--at_risk);
+}
+
+.chat-empty {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 6px 0;
+}
+
+.typing {
+  display: flex;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.typing i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-2);
+  animation: blink 1s ease-in-out infinite;
+}
+
+.typing i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+.chat-input {
+  font-size: 14px;
+}
+
+/* The seed: pulsing rings while Muse works on the first roots. */
+.seed .kernel {
+  fill: #c9a26b;
+  stroke: #5a3d22;
+  stroke-width: 2;
+  animation: breathe 2.4s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.seed .ring {
+  fill: none;
+  stroke: var(--accent-2);
+  stroke-width: 1.2;
+  opacity: 0;
+  animation: ripple 2.4s ease-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.seed .r2 {
+  animation-delay: 0.8s;
+}
+
+.seed .r3 {
+  animation-delay: 1.6s;
+}
+
+@keyframes ripple {
+  0% {
+    opacity: 0.7;
+    transform: scale(0.2);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.2);
+  }
+}
+
+.seed-note {
+  position: absolute;
+  left: 50%;
+  bottom: 18%;
+  transform: translateX(-50%);
+  width: min(80%, 320px);
+  display: grid;
+  gap: 4px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.seed-note b {
+  font:
+    600 11px/1.2 ui-monospace,
+    "SF Mono",
+    "Cascadia Mono",
+    Menlo,
+    monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+
+.seed-note[hidden] {
+  display: none;
+}
+
+.chip {
+  font-size: 12px;
+}
+
+.seed[hidden] {
+  display: none;
+}
+
+/* Landing, in the workspace's instrument style. */
+.landing {
+  background:
+    radial-gradient(1px 1px at 12% 22%, #fff9, transparent 60%),
+    radial-gradient(1px 1px at 33% 71%, #fff7, transparent 60%),
+    radial-gradient(1.5px 1.5px at 58% 18%, #cfe3ff, transparent 60%),
+    radial-gradient(1px 1px at 77% 46%, #fff8, transparent 60%),
+    radial-gradient(1px 1px at 88% 83%, #ffd9b0, transparent 60%),
+    radial-gradient(1px 1px at 22% 88%, #fff6, transparent 60%),
+    radial-gradient(1px 1px at 93% 12%, #fff8, transparent 60%),
+    radial-gradient(1px 1px at 5% 55%, #fff7, transparent 60%),
+    radial-gradient(70% 50% at 50% 30%, rgb(70 60 160 / 16%), transparent 70%), #04050a;
+}
+
+.landing .aurora {
+  display: none;
+}
+
+.landing h1 {
+  background: none;
+  color: #f2f5fa;
+  font-weight: 650;
+}
+
+.brand {
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+}
+
+.composer {
+  border-radius: 14px;
+  background: rgb(6 8 14 / 92%);
+  border: 1px solid rgb(139 123 255 / 35%);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.composer:focus-within {
+  border-color: var(--accent-2);
+  box-shadow: 0 0 0 3px rgb(46 230 197 / 12%);
+}
+
+.grow {
+  border-radius: 10px;
+  background: var(--accent-2);
+  box-shadow: none;
+}
+
+.grow:hover:not(:disabled) {
+  background: #5ff0d6;
+}
+
+.example {
+  border-radius: 8px;
+}
+
+.settings {
+  border-radius: 12px;
+  background: rgb(6 8 14 / 80%);
+}
+
+.row.center {
+  justify-content: center;
 }

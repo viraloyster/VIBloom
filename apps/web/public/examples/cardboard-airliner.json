@@ -21,39 +21,163 @@
         "under": "goal",
         "nodes": [
           {
-            "id": "primary-strength",
+            "id": "pressure-skin-strength",
             "parent": "goal",
-            "title": "Cardboard carries flight loads",
-            "statement": "Corrugated cardboard primary structure carries FAR 25 limit flight and pressure loads without crushing or buckling",
-            "axis": "loads",
+            "title": "Pressurized skin holds together",
+            "statement": "Corrugated cardboard fuselage skin carries the pressurization load with the required safety margin.",
+            "axis": "materials",
             "role": "assumption",
             "criticality": "critical",
             "risk": "high",
-            "rationale": "Flight, gust, and pressurization loads size an airliner at ~100 MPa; corrugated board is two orders weaker and buckles, so this alone fails the goal.",
+            "rationale": "Pressurized fuselage is a pressure vessel. If cardboard cannot carry hoop tension with aviation safety margin, the hull bursts in flight.",
             "params": [
               {
-                "name": "design_stress_mpa",
-                "value": 120,
-                "unit": "MPa",
-                "origin": "reference",
-                "source": "Bruhn Airplane Structures / Niu Airframe - Al fuselage hoop+bending stress ~100-150 MPa"
+                "name": "delta_p",
+                "kind": "requirement",
+                "value": 55,
+                "unit": "kPa",
+                "origin": "assumed",
+                "source": ""
               },
               {
-                "name": "cardboard_strength_mpa",
+                "name": "fuselage_radius",
+                "kind": "design",
                 "value": 2,
-                "unit": "MPa",
-                "origin": "reference",
-                "source": "TAPPI T811 ECT data - double-wall corrugated edge-crush derived strength ~1-3 MPa"
+                "unit": "m",
+                "origin": "assumed",
+                "source": ""
+              },
+              {
+                "name": "skin_thickness",
+                "kind": "design",
+                "value": 0.015,
+                "unit": "m",
+                "origin": "assumed",
+                "source": ""
+              },
+              {
+                "name": "cardboard_tensile_allowable",
+                "kind": "external",
+                "value": 8000,
+                "unit": "kPa",
+                "origin": "assumed",
+                "source": ""
+              },
+              {
+                "name": "safety_factor",
+                "kind": "requirement",
+                "value": 1.5,
+                "unit": "ratio",
+                "origin": "assumed",
+                "source": ""
               }
             ],
             "uses": [],
             "suggestions": [],
             "check": {
-              "description": "Limit-load skin and spar stress must not exceed cardboard compressive strength",
-              "value": "design_stress_mpa",
+              "description": "Hoop stress from pressurization must stay within allowable divided by safety factor.",
+              "value": "delta_p * fuselage_radius / skin_thickness",
               "op": "<=",
-              "limit": "cardboard_strength_mpa",
-              "unit": "MPa"
+              "limit": "cardboard_tensile_allowable / safety_factor",
+              "unit": "kPa"
+            },
+            "basis": [],
+            "proposed": false,
+            "expanded": false
+          },
+          {
+            "id": "wing-bending-strength",
+            "parent": "goal",
+            "title": "Wings carry flight loads",
+            "statement": "Cardboard wing structure carries the limit maneuver load without collapsing or breaking.",
+            "axis": "loads",
+            "role": "assumption",
+            "criticality": "critical",
+            "risk": "high",
+            "rationale": "Wings must support the whole aircraft weight multiplied by maneuver load. Cardboard buckles and crushes easily, so spar failure would mean loss of the wing.",
+            "params": [
+              {
+                "name": "wing_root_stress",
+                "kind": "design",
+                "value": 6000,
+                "unit": "kPa",
+                "origin": "assumed",
+                "source": ""
+              },
+              {
+                "name": "cardboard_bending_allowable",
+                "kind": "external",
+                "value": 5000,
+                "unit": "kPa",
+                "origin": "assumed",
+                "source": ""
+              },
+              {
+                "name": "limit_load_factor",
+                "kind": "requirement",
+                "value": 2.5,
+                "unit": "g",
+                "origin": "assumed",
+                "source": ""
+              }
+            ],
+            "uses": ["safety_factor"],
+            "suggestions": [],
+            "check": {
+              "description": "Wing root bending stress at limit load must stay within allowable divided by safety factor.",
+              "value": "wing_root_stress",
+              "op": "<=",
+              "limit": "cardboard_bending_allowable / safety_factor",
+              "unit": "kPa"
+            },
+            "basis": [],
+            "proposed": false,
+            "expanded": false
+          },
+          {
+            "id": "moisture-strength-loss",
+            "parent": "goal",
+            "title": "Cardboard survives getting wet",
+            "statement": "Cardboard keeps enough strength after long exposure to humidity, rain and condensation.",
+            "axis": "risks",
+            "role": "assumption",
+            "criticality": "critical",
+            "risk": "high",
+            "rationale": "Airliners sit in rain, ingest condensation, and cruise through humid air. Cardboard softens dramatically when wet, so dry lab strength is not enough.",
+            "params": [
+              {
+                "name": "dry_strength",
+                "kind": "external",
+                "value": 8000,
+                "unit": "kPa",
+                "origin": "assumed",
+                "source": ""
+              },
+              {
+                "name": "wet_retention",
+                "kind": "external",
+                "value": 0.2,
+                "unit": "ratio",
+                "origin": "assumed",
+                "source": ""
+              },
+              {
+                "name": "required_strength",
+                "kind": "design",
+                "value": 7333,
+                "unit": "kPa",
+                "origin": "assumed",
+                "source": ""
+              }
+            ],
+            "uses": [],
+            "suggestions": [],
+            "check": {
+              "description": "Wet strength after moisture exposure must still exceed the stress required in service.",
+              "value": "dry_strength * wet_retention",
+              "op": ">=",
+              "limit": "required_strength",
+              "unit": "kPa"
             },
             "basis": [],
             "proposed": false,
@@ -62,64 +186,27 @@
           {
             "id": "fire-certification",
             "parent": "goal",
-            "title": "Cardboard passes fire rules",
-            "statement": "Cardboard fuselage and cabin meet FAR 25.853 flammability, smoke and toxicity rules without negating cost savings",
+            "title": "Fire rules can be met",
+            "statement": "Cardboard airframe meets aviation fire resistance and burn-through certification rules.",
             "axis": "constraints",
             "role": "assumption",
             "criticality": "critical",
             "risk": "high",
-            "rationale": "Certification forbids flammable primary structure and cabin liners; untreated paper ignites at low temperature and propagates flame.",
+            "rationale": "Aviation rules require fire blocking and burn-through protection to allow evacuation. Untreated cellulose ignites easily and cannot be certified without fundamentally changing the material.",
             "params": [
               {
-                "name": "cardboard_burn_rate_mm_min",
-                "value": 110,
-                "unit": "mm/min",
-                "origin": "reference",
-                "source": "TAPPI / literature - untreated corrugated paper burns ~100-150 mm/min"
+                "name": "cardboard_burn_through_time",
+                "kind": "external",
+                "value": 1,
+                "unit": "min",
+                "origin": "assumed",
+                "source": ""
               },
               {
-                "name": "far_max_burn_rate_mm_min",
-                "value": 63.5,
-                "unit": "mm/min",
-                "origin": "reference",
-                "source": "FAR 25.853 Appendix F vertical burn - 2.5 in/min limit for cabin materials"
-              }
-            ],
-            "uses": [],
-            "suggestions": [],
-            "check": {
-              "description": "Burn rate must meet FAR 25.853 vertical test; cardboard burns far faster unless heavily treated",
-              "value": "cardboard_burn_rate_mm_min",
-              "op": "<=",
-              "limit": "far_max_burn_rate_mm_min",
-              "unit": "mm/min"
-            },
-            "basis": [],
-            "proposed": false,
-            "expanded": false
-          },
-          {
-            "id": "moisture-durability",
-            "parent": "goal",
-            "title": "Cardboard survives wet environment",
-            "statement": "Cardboard retains adequate strength and stiffness after prolonged humidity, rain, and condensation exposure",
-            "axis": "materials",
-            "role": "assumption",
-            "criticality": "critical",
-            "risk": "high",
-            "rationale": "Airliners sit in rain, humidity, condensation and de-icing fluid; paper wicks water and loses most strength and supports mold.",
-            "params": [
-              {
-                "name": "wet_retention_ratio",
-                "value": 0.2,
-                "unit": "ratio",
-                "origin": "reference",
-                "source": "Paper physics handbook - kraft liner loses 70-90% stiffness/strength at high RH/wetting"
-              },
-              {
-                "name": "required_retention_ratio",
-                "value": 0.85,
-                "unit": "ratio",
+                "name": "required_burn_through_time",
+                "kind": "requirement",
+                "value": 5,
+                "unit": "min",
                 "origin": "assumed",
                 "source": ""
               }
@@ -127,76 +214,39 @@
             "uses": [],
             "suggestions": [],
             "check": {
-              "description": "Wet strength retention must stay above structural knockdown allowance",
-              "value": "wet_retention_ratio",
+              "description": "Time to burn through the cardboard barrier must meet the minimum required for evacuation.",
+              "value": "cardboard_burn_through_time",
               "op": ">=",
-              "limit": "required_retention_ratio",
-              "unit": "ratio"
+              "limit": "required_burn_through_time",
+              "unit": "min"
             },
             "basis": [],
             "proposed": false,
             "expanded": false
           },
           {
-            "id": "stiffness-aeroelastic",
+            "id": "fatigue-service-life",
             "parent": "goal",
-            "title": "Wings stay stiff enough",
-            "statement": "Cardboard wings are stiff enough to prevent excessive bending and aeroelastic flutter in the flight envelope",
-            "axis": "principles",
+            "title": "Airframe lasts service life",
+            "statement": "Cardboard fuselage survives the full service life of pressurization cycles without fatigue failure.",
+            "axis": "loads",
             "role": "assumption",
             "criticality": "critical",
             "risk": "high",
-            "rationale": "Wing bending stiffness scales with modulus; cardboard is ~100x softer than aluminum, causing huge deflection, control loss and flutter.",
+            "rationale": "An airliner pressurizes on every flight for decades. Paper fibers creep, delaminate and grow cracks under repeated loading, so short packaging life does not transfer.",
             "params": [
               {
-                "name": "cardboard_modulus_mpa",
-                "value": 500,
-                "unit": "MPa",
-                "origin": "reference",
-                "source": "Corrugated board mechanics literature - effective out-of-plane/in-plane modulus ~0.3-1.0 GPa"
-              },
-              {
-                "name": "required_modulus_mpa",
-                "value": 20000,
-                "unit": "MPa",
-                "origin": "assumed",
-                "source": ""
-              }
-            ],
-            "uses": [],
-            "suggestions": [],
-            "check": {
-              "description": "Available bending modulus must meet that needed to limit deflection and avoid flutter",
-              "value": "cardboard_modulus_mpa",
-              "op": ">=",
-              "limit": "required_modulus_mpa",
-              "unit": "MPa"
-            },
-            "basis": [],
-            "proposed": false,
-            "expanded": false
-          },
-          {
-            "id": "fatigue-pressurization",
-            "parent": "goal",
-            "title": "Cardboard lasts service life",
-            "statement": "Cardboard pressure vessel survives 60000 pressurization cycles without delamination or creep failure",
-            "axis": "requirements",
-            "role": "assumption",
-            "criticality": "major",
-            "risk": "high",
-            "rationale": "Pressurization plus vibration delaminates paper and glue quickly; cardboard has no meaningful fatigue endurance like metal or composite.",
-            "params": [
-              {
-                "name": "lifetime_cycles",
+                "name": "design_cycles",
+                "kind": "requirement",
                 "value": 60000,
                 "unit": "cycles",
-                "origin": "reference",
-                "source": "A320/737 design service goal ~60000 flights / pressurization cycles"
+                "origin": "assumed",
+                "source": ""
               },
               {
-                "name": "cardboard_endurance_cycles",
-                "value": 200,
+                "name": "cardboard_cycle_life",
+                "kind": "external",
+                "value": 100,
                 "unit": "cycles",
                 "origin": "assumed",
                 "source": ""
@@ -205,10 +255,10 @@
             "uses": [],
             "suggestions": [],
             "check": {
-              "description": "Required pressurization lifetime must fit within cardboard fatigue / creep life",
-              "value": "lifetime_cycles",
-              "op": "<=",
-              "limit": "cardboard_endurance_cycles",
+              "description": "Demonstrated pressurization cycle life of cardboard must reach the required service life.",
+              "value": "cardboard_cycle_life",
+              "op": ">=",
+              "limit": "design_cycles",
               "unit": "cycles"
             },
             "basis": [],
@@ -216,41 +266,45 @@
             "expanded": false
           },
           {
-            "id": "lifecycle-cost",
+            "id": "lifetime-cost-saving",
             "parent": "goal",
             "title": "Cardboard actually cuts cost",
-            "statement": "Cardboard airframe lowers total lifecycle cost versus aluminum despite frequent replacement and upkeep",
+            "statement": "Frequent replacement and upkeep of cardboard still leaves total cost below a metal airliner.",
             "axis": "economics",
             "role": "assumption",
             "criticality": "major",
-            "risk": "high",
-            "rationale": "Cheap per sheet does not mean cheap per life; constant replacement, inspection, waterproofing, and grounding would erase material savings.",
+            "risk": "medium",
+            "rationale": "Cheap per sheet does not mean cheap per lifetime. If the hull must be rebuilt constantly and grounded for inspection, replacement labor and downtime erase material savings.",
             "params": [
               {
-                "name": "cardboard_airframe_cost_usd",
+                "name": "cardboard_hull_cost",
+                "kind": "external",
                 "value": 500000,
                 "unit": "USD",
                 "origin": "assumed",
                 "source": ""
               },
               {
-                "name": "replacement_interval_years",
-                "value": 0.5,
-                "unit": "years",
+                "name": "aluminum_hull_cost",
+                "kind": "external",
+                "value": 10000000,
+                "unit": "USD",
                 "origin": "assumed",
                 "source": ""
               },
               {
-                "name": "service_life_years",
-                "value": 25,
-                "unit": "years",
-                "origin": "reference",
-                "source": "Typical narrowbody economic life ~25 years"
+                "name": "design_life_flights",
+                "kind": "requirement",
+                "value": 60000,
+                "unit": "flights",
+                "origin": "assumed",
+                "source": ""
               },
               {
-                "name": "aluminum_airframe_cost_usd",
-                "value": 10000000,
-                "unit": "USD",
+                "name": "cardboard_hull_life",
+                "kind": "design",
+                "value": 100,
+                "unit": "flights",
                 "origin": "assumed",
                 "source": ""
               }
@@ -258,10 +312,10 @@
             "uses": [],
             "suggestions": [],
             "check": {
-              "description": "Lifetime cardboard replacements plus waterproofing and fireproofing must still be cheaper than aluminum airframe",
-              "value": "cardboard_airframe_cost_usd * service_life_years / replacement_interval_years",
-              "op": "<=",
-              "limit": "aluminum_airframe_cost_usd",
+              "description": "Lifetime hull replacement cost for cardboard must stay below the metal hull it replaces.",
+              "value": "cardboard_hull_cost * design_life_flights / cardboard_hull_life",
+              "op": "<",
+              "limit": "aluminum_hull_cost",
               "unit": "USD"
             },
             "basis": [],
@@ -269,404 +323,364 @@
             "expanded": false
           }
         ],
-        "summary": "A cardboard airliner is not viable: cardboard is ~60x too weak and ~100x too soft, rots when wet, burns, and fatigues, so it cannot be certified or actually save money.",
+        "summary": "Read as primary load-bearing fuselage and wings made of corrugated packaging cardboard to lower cost, not just cardboard interior panels or trim. The concept fails on strength, moisture, fire, fatigue and lifetime cost.",
         "usage": {
           "model": "muse-spark-1.3",
-          "input": 969,
+          "input": 1123,
           "cached": 0,
-          "output": 3554,
-          "reasoning": 1806,
-          "cost": 0.01631575
+          "output": 5216,
+          "reasoning": 2932,
+          "cost": 0.02357175
         }
       },
-      "hash": "23269e81d0e76e1b833ec405f9a9dfb14b5ec3e8bb36b354f9a4730a7e585ed1"
+      "hash": "dad586031096ee7601ea8f10e0896b4c68efaa7f531cb03db96548a2c5e9a618"
     },
     {
       "seq": 2,
-      "prev": "23269e81d0e76e1b833ec405f9a9dfb14b5ec3e8bb36b354f9a4730a7e585ed1",
+      "prev": "dad586031096ee7601ea8f10e0896b4c68efaa7f531cb03db96548a2c5e9a618",
       "actor": "engine",
       "body": {
         "type": "check",
-        "node": "primary-strength",
+        "node": "pressure-skin-strength",
         "result": {
           "pass": false,
-          "value": 120,
-          "limit": 2,
+          "value": 7333.333333333334,
+          "limit": 5333.333333333333,
           "op": "<=",
-          "unit": "MPa",
+          "unit": "kPa",
           "inputs": {
-            "design_stress_mpa": 120,
-            "cardboard_strength_mpa": 2
+            "delta_p": 55,
+            "fuselage_radius": 2,
+            "skin_thickness": 0.015,
+            "cardboard_tensile_allowable": 8000,
+            "safety_factor": 1.5
           }
         }
       },
-      "hash": "75f700ba8c27c6088fc482b14fa7bf88b7028b68bdc912171372b1b8e73b13e3"
+      "hash": "313cb4ee57afb0b7c9592e492162778332834452af72730466062f1d0099bae1"
     },
     {
       "seq": 3,
-      "prev": "75f700ba8c27c6088fc482b14fa7bf88b7028b68bdc912171372b1b8e73b13e3",
+      "prev": "313cb4ee57afb0b7c9592e492162778332834452af72730466062f1d0099bae1",
+      "actor": "engine",
+      "body": {
+        "type": "check",
+        "node": "wing-bending-strength",
+        "result": {
+          "pass": false,
+          "value": 6000,
+          "limit": 3333.3333333333335,
+          "op": "<=",
+          "unit": "kPa",
+          "inputs": {
+            "wing_root_stress": 6000,
+            "cardboard_bending_allowable": 5000,
+            "safety_factor": 1.5
+          }
+        }
+      },
+      "hash": "7dd74fb74b7a7350bc6d933a9c18d89253507e668699b21fa6c878be06bc824c"
+    },
+    {
+      "seq": 4,
+      "prev": "7dd74fb74b7a7350bc6d933a9c18d89253507e668699b21fa6c878be06bc824c",
+      "actor": "engine",
+      "body": {
+        "type": "check",
+        "node": "moisture-strength-loss",
+        "result": {
+          "pass": false,
+          "value": 1600,
+          "limit": 7333,
+          "op": ">=",
+          "unit": "kPa",
+          "inputs": {
+            "dry_strength": 8000,
+            "wet_retention": 0.2,
+            "required_strength": 7333
+          }
+        }
+      },
+      "hash": "6794de0dee2f26aa250dfd6c3345c1b2855613a8ea81fc4752a7bb61e32367b3"
+    },
+    {
+      "seq": 5,
+      "prev": "6794de0dee2f26aa250dfd6c3345c1b2855613a8ea81fc4752a7bb61e32367b3",
       "actor": "engine",
       "body": {
         "type": "check",
         "node": "fire-certification",
         "result": {
           "pass": false,
-          "value": 110,
-          "limit": 63.5,
-          "op": "<=",
-          "unit": "mm/min",
-          "inputs": {
-            "cardboard_burn_rate_mm_min": 110,
-            "far_max_burn_rate_mm_min": 63.5
-          }
-        }
-      },
-      "hash": "f1ff6af5e4ff610d9458a63d3e0cd980696f0f5b80dd225d1347f4adf7d60f4d"
-    },
-    {
-      "seq": 4,
-      "prev": "f1ff6af5e4ff610d9458a63d3e0cd980696f0f5b80dd225d1347f4adf7d60f4d",
-      "actor": "engine",
-      "body": {
-        "type": "check",
-        "node": "moisture-durability",
-        "result": {
-          "pass": false,
-          "value": 0.2,
-          "limit": 0.85,
+          "value": 1,
+          "limit": 5,
           "op": ">=",
-          "unit": "ratio",
+          "unit": "min",
           "inputs": {
-            "wet_retention_ratio": 0.2,
-            "required_retention_ratio": 0.85
+            "cardboard_burn_through_time": 1,
+            "required_burn_through_time": 5
           }
         }
       },
-      "hash": "71dffe492b2cad818a957854cc5892cdf1d98c677876bd9c42ce9ccd27914d26"
-    },
-    {
-      "seq": 5,
-      "prev": "71dffe492b2cad818a957854cc5892cdf1d98c677876bd9c42ce9ccd27914d26",
-      "actor": "engine",
-      "body": {
-        "type": "check",
-        "node": "stiffness-aeroelastic",
-        "result": {
-          "pass": false,
-          "value": 500,
-          "limit": 20000,
-          "op": ">=",
-          "unit": "MPa",
-          "inputs": {
-            "cardboard_modulus_mpa": 500,
-            "required_modulus_mpa": 20000
-          }
-        }
-      },
-      "hash": "9629ea15ee6ac05ec3baba92cbf3d20adbbd8b954db99e34340aa5c39fccf544"
+      "hash": "c080844d7783d9cc378a39c0d625b9de8afefefc4f197d2974e251bb517a264f"
     },
     {
       "seq": 6,
-      "prev": "9629ea15ee6ac05ec3baba92cbf3d20adbbd8b954db99e34340aa5c39fccf544",
+      "prev": "c080844d7783d9cc378a39c0d625b9de8afefefc4f197d2974e251bb517a264f",
       "actor": "engine",
       "body": {
         "type": "check",
-        "node": "fatigue-pressurization",
+        "node": "fatigue-service-life",
         "result": {
           "pass": false,
-          "value": 60000,
-          "limit": 200,
-          "op": "<=",
+          "value": 100,
+          "limit": 60000,
+          "op": ">=",
           "unit": "cycles",
           "inputs": {
-            "lifetime_cycles": 60000,
-            "cardboard_endurance_cycles": 200
+            "cardboard_cycle_life": 100,
+            "design_cycles": 60000
           }
         }
       },
-      "hash": "4fc14d7b6a63c7ad36b293094d408a5710c9dcbf5bc38739f06dc57baf0bf190"
+      "hash": "fbe915f4fd2290a8e4ca31d9e9225f8901ef909e1f072de4102177c347cd2b35"
     },
     {
       "seq": 7,
-      "prev": "4fc14d7b6a63c7ad36b293094d408a5710c9dcbf5bc38739f06dc57baf0bf190",
+      "prev": "fbe915f4fd2290a8e4ca31d9e9225f8901ef909e1f072de4102177c347cd2b35",
       "actor": "engine",
       "body": {
         "type": "check",
-        "node": "lifecycle-cost",
+        "node": "lifetime-cost-saving",
         "result": {
           "pass": false,
-          "value": 25000000,
+          "value": 300000000,
           "limit": 10000000,
-          "op": "<=",
+          "op": "<",
           "unit": "USD",
           "inputs": {
-            "cardboard_airframe_cost_usd": 500000,
-            "service_life_years": 25,
-            "replacement_interval_years": 0.5,
-            "aluminum_airframe_cost_usd": 10000000
+            "cardboard_hull_cost": 500000,
+            "design_life_flights": 60000,
+            "cardboard_hull_life": 100,
+            "aluminum_hull_cost": 10000000
           }
         }
       },
-      "hash": "989cf16f503ebe11d2897db65094151cdda973d03368943877503e3d5c1890cf"
+      "hash": "5692be69a854c8ec88fef9532639fbdbbb94ce87cf6c935630fc5f92e89dc41c"
     },
     {
       "seq": 8,
-      "prev": "989cf16f503ebe11d2897db65094151cdda973d03368943877503e3d5c1890cf",
+      "prev": "5692be69a854c8ec88fef9532639fbdbbb94ce87cf6c935630fc5f92e89dc41c",
       "actor": "muse:muse-spark-1.3",
       "body": {
         "type": "grow",
-        "under": "primary-strength",
+        "under": "pressure-skin-strength",
         "nodes": [
           {
-            "id": "primary-strength.bending-crush-strength",
-            "parent": "primary-strength",
-            "title": "Bending compression strength",
-            "statement": "Corrugated board in wings and fuselage carries limit flight bending compression without crushing",
+            "id": "pressure-skin-strength.thickness-margin-adequate",
+            "parent": "pressure-skin-strength",
+            "title": "Thickness and margin suffice",
+            "statement": "The chosen wall thickness keeps pressure tension below the safe strength with margin.",
+            "axis": "requirements",
+            "role": "assumption",
+            "criticality": "critical",
+            "risk": "high",
+            "rationale": "This is the arithmetic heart of the parent: given pressure, geometry, material and margin, the wall either holds or bursts.",
+            "params": [],
+            "uses": [
+              "delta_p",
+              "fuselage_radius",
+              "skin_thickness",
+              "cardboard_tensile_allowable",
+              "safety_factor"
+            ],
+            "suggestions": [],
+            "check": {
+              "description": "Hoop stress from pressure load must stay within allowable divided by safety factor.",
+              "value": "delta_p * fuselage_radius / skin_thickness",
+              "op": "<=",
+              "limit": "cardboard_tensile_allowable / safety_factor",
+              "unit": "kPa"
+            },
+            "basis": [],
+            "proposed": false,
+            "expanded": false
+          },
+          {
+            "id": "pressure-skin-strength.cardboard-hoop-strength",
+            "parent": "pressure-skin-strength",
+            "title": "Cardboard hoop strength",
+            "statement": "Cardboard keeps its assumed pulling strength in the damp air of a pressurized cabin.",
             "axis": "materials",
             "role": "assumption",
             "criticality": "critical",
             "risk": "high",
-            "rationale": "Limit maneuver and gust bending sizes skins, spars and stringers in compression, and board crushes at very low stress compared with airframe metal.",
+            "rationale": "Corrugated board is paper fibers with starch glue; humidity and creep sharply lower tensile capacity, so the dry catalog value may not apply in service.",
             "params": [],
-            "uses": ["design_stress_mpa", "cardboard_strength_mpa"],
+            "uses": ["cardboard_tensile_allowable"],
             "suggestions": [],
-            "check": {
-              "description": "Limit flight stress must not exceed cardboard compressive strength",
-              "value": "design_stress_mpa",
-              "op": "<=",
-              "limit": "cardboard_strength_mpa",
-              "unit": "MPa"
-            },
             "basis": [],
             "proposed": false,
             "expanded": false
           },
           {
-            "id": "primary-strength.pressure-hoop-strength",
-            "parent": "primary-strength",
-            "title": "Pressure hoop strength",
-            "statement": "Fuselage skin hoop tension from cabin pressurization is carried by corrugated board without rupture",
+            "id": "pressure-skin-strength.cabin-pressure-load",
+            "parent": "pressure-skin-strength",
+            "title": "Cabin pressure load",
+            "statement": "Pressure difference at cruise stays within the level of a normal airliner.",
             "axis": "loads",
             "role": "assumption",
             "criticality": "critical",
-            "risk": "high",
-            "rationale": "Pressurized fuselage acts as a thin pressure vessel, so hoop tension is unavoidable at any practical skin thickness and exceeds paperboard strength.",
-            "params": [
-              {
-                "name": "cabin_delta_p_mpa",
-                "value": 0.06,
-                "unit": "MPa",
-                "origin": "reference",
-                "source": "FAR 25.365 / Boeing 737 - cabin delta-p ~55-60 kPa"
-              },
-              {
-                "name": "cardboard_thickness_m",
-                "value": 0.01,
-                "unit": "m",
-                "origin": "assumed",
-                "source": ""
-              },
-              {
-                "name": "fuselage_radius_m",
-                "value": 2,
-                "unit": "m",
-                "origin": "reference",
-                "source": "Boeing 737 - fuselage radius ~1.9 m"
-              }
-            ],
-            "uses": ["cardboard_strength_mpa"],
+            "risk": "medium",
+            "rationale": "Airliners pressurize to roughly 75 kPa cabin at 10 km altitude, giving about 50-60 kPa difference; if higher differential or pressure spikes occur the load rises.",
+            "params": [],
+            "uses": ["delta_p"],
             "suggestions": [],
-            "check": {
-              "description": "Thin-wall hoop stress from cabin pressure must not exceed board tensile strength",
-              "value": "cabin_delta_p_mpa * fuselage_radius_m / cardboard_thickness_m",
-              "op": "<=",
-              "limit": "cardboard_strength_mpa",
-              "unit": "MPa"
-            },
             "basis": [],
             "proposed": false,
             "expanded": false
           },
           {
-            "id": "primary-strength.panel-buckling-stability",
-            "parent": "primary-strength",
-            "title": "Panel buckling stability",
-            "statement": "Thin corrugated panels between frames remain stable against buckling at limit compression",
+            "id": "pressure-skin-strength.hoop-stress-law",
+            "parent": "pressure-skin-strength",
+            "title": "Hoop stress law",
+            "statement": "Skin pulling force follows the thin-walled pressure vessel law.",
             "axis": "principles",
-            "role": "assumption",
-            "criticality": "critical",
-            "risk": "high",
-            "rationale": "Airliner skins are thin panels between frames and stringers, and low board modulus makes elastic buckling critical long before material crushing.",
-            "params": [
-              {
-                "name": "buckling_k",
-                "value": 4,
-                "unit": "ratio",
-                "origin": "reference",
-                "source": "Bruhn Airplane Structures Ch.5 - simply supported plate k ~4"
-              },
-              {
-                "name": "panel_thickness_m",
-                "value": 0.01,
-                "unit": "m",
-                "origin": "assumed",
-                "source": ""
-              },
-              {
-                "name": "panel_width_m",
-                "value": 0.5,
-                "unit": "m",
-                "origin": "assumed",
-                "source": ""
-              },
-              {
-                "name": "poisson_ratio",
-                "value": 0.3,
-                "unit": "ratio",
-                "origin": "assumed",
-                "source": ""
-              }
-            ],
-            "uses": ["cardboard_modulus_mpa", "design_stress_mpa"],
+            "role": "bedrock",
+            "criticality": "major",
+            "risk": "low",
+            "rationale": "Cutting a thin cylinder in half shows internal pressure must be balanced by wall tension, giving stress proportional to pressure times radius over thickness.",
+            "params": [],
+            "uses": [],
             "suggestions": [],
-            "check": {
-              "description": "Applied limit stress must not exceed plate buckling critical stress",
-              "value": "design_stress_mpa",
-              "op": "<=",
-              "limit": "buckling_k * pi ^ 2 * cardboard_modulus_mpa / (12 * (1 - poisson_ratio ^ 2)) * (panel_thickness_m / panel_width_m) ^ 2",
-              "unit": "MPa"
-            },
             "basis": [],
             "proposed": false,
             "expanded": false
           }
         ],
-        "summary": "Cardboard primary structure fails on direct compression, pressure hoop tension, and panel buckling, each by more than an order of magnitude.",
+        "summary": "The burst claim rests on the pressure load, the hoop-stress law, the cardboard strength in humidity, and the thickness-plus-margin calculation, which already fails on the assumed numbers.",
         "usage": {
           "model": "muse-spark-1.3",
-          "input": 1407,
-          "cached": 881,
-          "output": 3548,
-          "reasoning": 2363,
-          "cost": 0.015868649999999998
+          "input": 1592,
+          "cached": 1009,
+          "output": 2987,
+          "reasoning": 1975,
+          "cost": 0.013574850000000001
         }
       },
-      "hash": "aa63de069ae36244f684e2f95b09a7a71d00526359f1aa59aeb66332fe65bf8a"
+      "hash": "2dfef0c939a3ea411425fc99ed690a917322af054bf8993fd2c20cd30fc02abd"
     },
     {
       "seq": 9,
-      "prev": "aa63de069ae36244f684e2f95b09a7a71d00526359f1aa59aeb66332fe65bf8a",
+      "prev": "2dfef0c939a3ea411425fc99ed690a917322af054bf8993fd2c20cd30fc02abd",
       "actor": "engine",
       "body": {
         "type": "check",
-        "node": "primary-strength.bending-crush-strength",
+        "node": "pressure-skin-strength.thickness-margin-adequate",
         "result": {
           "pass": false,
-          "value": 120,
-          "limit": 2,
+          "value": 7333.333333333334,
+          "limit": 5333.333333333333,
           "op": "<=",
-          "unit": "MPa",
+          "unit": "kPa",
           "inputs": {
-            "design_stress_mpa": 120,
-            "cardboard_strength_mpa": 2
+            "delta_p": 55,
+            "fuselage_radius": 2,
+            "skin_thickness": 0.015,
+            "cardboard_tensile_allowable": 8000,
+            "safety_factor": 1.5
           }
         }
       },
-      "hash": "7205aeabb612619700df4bd408afb4c6004bb2ffb011d5aa5f1e4142f03f1fdd"
+      "hash": "71e47f8c00f464a260dd0263a39053ee0bfd8369331ec9e09ac447c89a2950e3"
     },
     {
       "seq": 10,
-      "prev": "7205aeabb612619700df4bd408afb4c6004bb2ffb011d5aa5f1e4142f03f1fdd",
-      "actor": "engine",
-      "body": {
-        "type": "check",
-        "node": "primary-strength.pressure-hoop-strength",
-        "result": {
-          "pass": false,
-          "value": 12,
-          "limit": 2,
-          "op": "<=",
-          "unit": "MPa",
-          "inputs": {
-            "cabin_delta_p_mpa": 0.06,
-            "fuselage_radius_m": 2,
-            "cardboard_thickness_m": 0.01,
-            "cardboard_strength_mpa": 2
-          }
-        }
-      },
-      "hash": "ebe7ac3ca3aefd9713a77d78d1f4ac00e62f5ef6c2075ba6b90840bd4e802f51"
-    },
-    {
-      "seq": 11,
-      "prev": "ebe7ac3ca3aefd9713a77d78d1f4ac00e62f5ef6c2075ba6b90840bd4e802f51",
-      "actor": "engine",
-      "body": {
-        "type": "check",
-        "node": "primary-strength.panel-buckling-stability",
-        "result": {
-          "pass": false,
-          "value": 120,
-          "limit": 0.7230479414717479,
-          "op": "<=",
-          "unit": "MPa",
-          "inputs": {
-            "design_stress_mpa": 120,
-            "buckling_k": 4,
-            "cardboard_modulus_mpa": 500,
-            "poisson_ratio": 0.3,
-            "panel_thickness_m": 0.01,
-            "panel_width_m": 0.5
-          }
-        }
-      },
-      "hash": "620eb1d572baebba02abbffc63c034dc89221db0a7ff9c056a4baf27191c03d1"
-    },
-    {
-      "seq": 12,
-      "prev": "620eb1d572baebba02abbffc63c034dc89221db0a7ff9c056a4baf27191c03d1",
+      "prev": "71e47f8c00f464a260dd0263a39053ee0bfd8369331ec9e09ac447c89a2950e3",
       "actor": "muse:muse-spark-1.3",
       "body": {
         "type": "view",
-        "node": "primary-strength",
-        "title": "Cardboard fuselage overload",
-        "html": "<style>*{box-sizing:border-box;margin:0;padding:0}html,body{height:100%}#w{position:fixed;inset:0;background:#05070b;color:#e8eef6;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;display:flex;flex-direction:column;padding:14px 16px;overflow:hidden}#w::before{content:\"\";position:absolute;inset:0;background:radial-gradient(900px 500px at 70% 10%,rgba(56,189,248,.10),transparent 60%),radial-gradient(700px 500px at 10% 90%,rgba(244,63,94,.08),transparent 60%);pointer-events:none}header{display:flex;align-items:center;gap:10px;z-index:1}header .dot{width:10px;height:10px;border-radius:50%;background:#f43f5e;box-shadow:0 0 12px #f43f5e;animation:blink 1.6s infinite}header h1{font-size:clamp(11px,1.6vw,14px);font-weight:700;letter-spacing:.08em;text-transform:uppercase}header h1 span{color:#8ea0b5;font-weight:500;letter-spacing:.02em;text-transform:none}#badge{margin-left:auto;font-size:11px;font-weight:800;letter-spacing:.12em;padding:5px 11px;border-radius:99px;border:1px solid #f43f5e;color:#f43f5e;background:rgba(244,63,94,.12)}h2{font-size:clamp(18px,3.2vw,30px);font-weight:800;line-height:1.05;z-index:1}h2 em{font-style:normal;color:#38bdf8}.sub{color:#8ea0b5;font-size:clamp(11px,1.5vw,13px);z-index:1;margin-top:4px}main{flex:1;display:grid;grid-template-columns:1.35fr .85fr;gap:14px;margin-top:12px;min-height:0;z-index:1}@media(max-width:700px){main{grid-template-columns:1fr;overflow:auto}}.card{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.10);border-radius:16px;padding:12px;position:relative;display:flex;flex-direction:column;min-height:0;overflow:hidden}.card h3{font-size:11px;letter-spacing:.14em;color:#8ea0b5;text-transform:uppercase;margin-bottom:8px}#planeWrap{flex:1;display:flex;align-items:center;justify-content:center;min-height:0}svg{width:100%;height:100%;max-height:300px}.flow{stroke-dasharray:7 9;animation:dash 1.1s linear infinite}@keyframes dash{to{stroke-dashoffset:-32}}@keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}.crush{transform-origin:center;transform-box:fill-box}#bars{flex:1;display:flex;align-items:flex-end;justify-content:center;gap:22px;min-height:140px;padding-top:18px}.col{display:flex;flex-direction:column;align-items:center;gap:8px;height:100%;justify-content:flex-end}.track{width:64px;height:100%;min-height:140px;max-height:230px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:12px;position:relative;overflow:visible;display:flex;align-items:flex-end}.fill{width:100%;border-radius:11px;position:relative;transition:height 1s}.fill.load{background:linear-gradient(180deg,#fb7185,#e11d48);box-shadow:0 0 22px rgba(244,63,94,.55)}.fill.cap{background:linear-gradient(180deg,#38bdf8,#0369a1);box-shadow:0 0 14px rgba(56,189,248,.4)}.vlab{font-size:13px;font-weight:800}.vlab small{font-weight:600;color:#8ea0b5;font-size:11px}.clab{font-size:11px;color:#cbd5e1;text-align:center;line-height:1.3}.vs{font-size:22px;font-weight:900;color:#f43f5e}.ratio{margin-top:10px;text-align:center;background:rgba(244,63,94,.10);border:1px solid rgba(244,63,94,.4);border-radius:12px;padding:8px;font-size:clamp(12px,1.8vw,14px);font-weight:700}#kids{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}.kid{flex:1;min-width:110px;font-size:11px;padding:7px 9px;border-radius:10px;background:rgba(255,255,255,.05);border:1px solid rgba(244,63,94,.35);color:#fecdd3;display:flex;gap:7px;align-items:center}footer{display:flex;justify-content:space-between;color:#64748b;font-size:11px;margin-top:10px;z-index:1}</style><div id=\"w\"><header><div class=\"dot\"></div><h1 id=\"goal\">AIRLINER <span id=\"goalSub\"></span></h1><div id=\"badge\">BROKEN</div></header><h2>Can <em>cardboard</em> carry flight loads?</h2><div class=\"sub\" id=\"stmt\"></div><main><div class=\"card\"><h3>Fuselage + wing &mdash; limit load sketch</h3><div id=\"planeWrap\"><svg viewBox=\"0 0 520 300\" preserveAspectRatio=\"xMidYMid meet\"><defs><pattern id=\"corr\" width=\"10\" height=\"8\" patternUnits=\"userSpaceOnUse\"><rect width=\"10\" height=\"8\" fill=\"#101a28\"/><path d=\"M0 4 Q2.5 1 5 4 T10 4\" stroke=\"#38bdf8\" stroke-width=\"1\" fill=\"none\" opacity=\".7\"/></pattern><filter id=\"glow\" x=\"-50%\" y=\"-50%\" width=\"200%\" height=\"200%\"><feGaussianBlur stdDeviation=\"3\" result=\"b\"/><feMerge><feMergeNode in=\"b\"/><feMergeNode in=\"SourceGraphic\"/></feMerge></filter></defs><g id=\"wingL\" opacity=\".95\"><path d=\"M250 140 L60 90 L60 170 L250 165 Z\" fill=\"url(#corr)\" stroke=\"#38bdf8\" stroke-width=\"1.5\"/></g><g id=\"wingR\" opacity=\".95\"><path d=\"M270 140 L460 90 L460 170 L270 165 Z\" fill=\"url(#corr)\" stroke=\"#38bdf8\" stroke-width=\"1.5\"/></g><path class=\"flow\" d=\"M40 110 L240 150\" stroke=\"#38bdf8\" stroke-width=\"2\" fill=\"none\" opacity=\".8\"/><path class=\"flow\" d=\"M480 110 L280 150\" stroke=\"#38bdf8\" stroke-width=\"2\" fill=\"none\" opacity=\".8\"/><g id=\"arrows\"><path d=\"M130 60 L130 95\" stroke=\"#f43f5e\" stroke-width=\"3\" marker-end=\"url(#a)\" filter=\"url(#glow)\"/><path d=\"M390 60 L390 95\" stroke=\"#f43f5e\" stroke-width=\"3\" marker-end=\"url(#a)\" filter=\"url(#glow)\"/><path d=\"M260 230 L260 195\" stroke=\"#38bdf8\" stroke-width=\"2\" stroke-dasharray=\"4 4\"/><text x=\"266\" y=\"245\" fill=\"#8ea0b5\" font-size=\"11\">lift</text><text x=\"100\" y=\"55\" fill=\"#f43f5e\" font-size=\"12\" font-weight=\"800\" id=\"loadLab\">load</text></g><defs><marker id=\"a\" markerWidth=\"8\" markerHeight=\"8\" refX=\"4\" refY=\"4\" orient=\"auto\"><path d=\"M0 0 L8 4 L0 8 Z\" fill=\"#f43f5e\"/></marker></defs><g id=\"fuse\"><rect x=\"235\" y=\"90\" width=\"50\" height=\"130\" rx=\"25\" fill=\"url(#corr)\" stroke=\"#e8eef6\" stroke-width=\"2\"/><ellipse cx=\"260\" cy=\"90\" rx=\"25\" ry=\"10\" fill=\"#1a2a44\" stroke=\"#e8eef6\" stroke-width=\"2\"/><g id=\"cracks\" stroke=\"#f43f5e\" stroke-width=\"2.5\" stroke-linecap=\"round\" filter=\"url(#glow)\"><path d=\"M242 125 L275 135 L245 145\" fill=\"none\"/><path d=\"M242 165 L270 175 L248 190\" fill=\"none\"/></g><text x=\"260\" y=\"155\" text-anchor=\"middle\" fill=\"#fff\" font-size=\"10\" font-weight=\"700\">CARDBOARD</text></g><g id=\"puffs\"></g></svg></div><div id=\"kids\"></div></div><div class=\"card\"><h3>Stress vs strength &mdash; must hold below</h3><div id=\"bars\"><div class=\"col\"><div class=\"track\"><div class=\"fill load\" id=\"fLoad\" style=\"height:100%\"></div></div><div class=\"vlab\" id=\"vLoad\" style=\"color:#f43f5e\"></div><div class=\"clab\" id=\"lLoad\"></div></div><div class=\"vs\">&times;</div><div class=\"col\"><div class=\"track\"><div class=\"fill cap\" id=\"fCap\" style=\"height:5%\"></div></div><div class=\"vlab\" id=\"vCap\" style=\"color:#38bdf8\"></div><div class=\"clab\" id=\"lCap\"></div></div></div><div class=\"ratio\" id=\"ratio\"></div></div></main><footer><span id=\"desc\"></span><span>LIVE &bull; FAR 25 LIMIT</span></footer></div><script>(function(){var VB=window.VIBLOOM||{};var D=VB.data||VB||{};var node=D.node||{};var check=D.check||{};var params=D.params||[];var kids=node.children||D.children||[];function num(v){return (typeof v===\"number\"&&isFinite(v))?v:parseFloat(v)}var val=num(check.value);var lim=num(check.limit);var unit=check.unit||\"MPa\";var pass=!!check.pass;function param(n){for(var i=0;i<params.length;i++){if(params[i].name===n) return params[i]}return {}}var pLoad=param(\"design_stress_mpa\");var pCap=param(\"cardboard_strength_mpa\");document.getElementById(\"goal\").firstChild.textContent=(D.goal||\"TEST\").toUpperCase().slice(0,44)+\" \";document.getElementById(\"stmt\").textContent=node.statement||check.description||\"\";document.getElementById(\"desc\").textContent=check.description||\"\";var b=document.getElementById(\"badge\");b.textContent=(node.status||(pass?\"HOLDS\":\"BROKEN\")).toUpperCase();var good=\"#22c55e\",bad=\"#f43f5e\";b.style.color=pass?good:bad;b.style.borderColor=pass?good:bad;b.querySelector;document.querySelector(\"#w .dot\").style.background=pass?good:bad;document.querySelector(\"#w .dot\").style.boxShadow=\"0 0 12px \"+(pass?good:bad);var ratio=val/lim;document.getElementById(\"vLoad\").innerHTML=val+\" <small>\"+unit+\"</small>\";document.getElementById(\"vCap\").innerHTML=lim+\" <small>\"+unit+\"</small>\";document.getElementById(\"lLoad\").textContent=(pLoad.label||\"design stress\");document.getElementById(\"lCap\").textContent=(pCap.label||\"cardboard strength\");document.getElementById(\"loadLab\").textContent=val+\" \"+unit+\" DOWN\";var r=document.getElementById(\"ratio\");if(!pass){r.style.color=\"#fecdd3\";r.innerHTML=\"Over by <b style='color:\"+bad+\";font-size:1.25em'>\"+ratio.toFixed(0)+\"&times;</b> &mdash; skin crushes & buckles.\"}else{r.style.color=\"#bbf7d0\";r.textContent=\"Holds with margin.\"}var fc=document.getElementById(\"fCap\");var h=Math.max(val,lim)>0?(lim/Math.max(val,lim)*100):0;fc.style.height=Math.max(h,3)+\"%\";var box=document.getElementById(\"kids\");(kids||[]).forEach(function(k){var d=document.createElement(\"div\");d.className=\"kid\";d.innerHTML=\"<span style='width:8px;height:8px;border-radius:50%;background:\"+(pass?good:bad)+\";box-shadow:0 0 8px \"+(pass?good:bad)+\"'></span>\"+(k.title||\"sub-check\")+\" &bull; \"+(k.status||\"broken\");if(pass){d.style.borderColor=\"rgba(34,197,94,.35)\";d.style.color=\"#bbf7d0\"}box.appendChild(d)});var t=0;var wL=document.getElementById(\"wingL\"),wR=document.getElementById(\"wingR\"),cr=document.getElementById(\"cracks\"),pu=document.getElementById(\"puffs\");function puff(x,y){var c=document.createElementNS(\"http://www.w3.org/2000/svg\",\"circle\");c.setAttribute(\"cx\",x);c.setAttribute(\"cy\",y);c.setAttribute(\"r\",3+Math.random()*4);c.setAttribute(\"fill\",\"none\");c.setAttribute(\"stroke\",pass?\"#22c55e\":\"#f43f5e\");c.setAttribute(\"stroke-width\",\"2\");c.setAttribute(\"opacity\",\".9\");pu.appendChild(c);var r0=parseFloat(c.getAttribute(\"r\"));var o=0;var iv=setInterval(function(){o+=.07;r0+=1.4;c.setAttribute(\"r\",r0);c.setAttribute(\"opacity\",Math.max(0,.9-o));if(o>.9){clearInterval(iv);c.remove()}},50)}setInterval(function(){t+=.08;var bend=Math.sin(t*2)*(pass?1.5:6);wL.setAttribute(\"transform\",\"rotate(\"+(-bend*.4)+\" 260 155)\");wR.setAttribute(\"transform\",\"rotate(\"+(bend*.4)+\" 260 155)\");cr.setAttribute(\"opacity\",pass?.25:(.55+.45*Math.sin(t*3)));cr.setAttribute(\"transform\",\"scale(\"+(1+.06*Math.sin(t*5))+\")\");if(!pass&&Math.random()<.35)puff(235+Math.random()*50,115+Math.random()*85)},80);})();</script>",
+        "node": "pressure-skin-strength",
+        "title": "Hoop Tension in Thin Skin",
+        "html": "<style>html,body{margin:0;height:100%;background:transparent}*{box-sizing:border-box}.wrap{width:100%;height:100%;min-height:280px;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse at 50% 55%,rgba(120,170,255,.10),transparent 70%);font-family:system-ui,sans-serif}svg{width:100%;height:100%;display:block}.thin{stroke:rgba(230,240,255,.88);fill:none;stroke-linecap:round}.faint{stroke:rgba(160,190,230,.28)}.glow{filter:drop-shadow(0 0 6px rgba(255,110,110,.9))}.parrow{animation:pulse 2.2s ease-in-out infinite}@keyframes pulse{0%,100%{opacity:.35}50%{opacity:1}}.spin{animation:spin 14s linear infinite;transform-origin:center;transform-box:fill-box}@keyframes spin{to{transform:rotate(360deg)}}.dash{stroke-dasharray:7 7;animation:dashm 1.6s linear infinite}@keyframes dashm{to{stroke-dashoffset:-28}}.crack{animation:flick 1.1s steps(2) infinite}@keyframes flick{0%,100%{opacity:1}50%{opacity:.35}}.lbl{fill:rgba(220,232,250,.9);font-size:11px;letter-spacing:.06em}.sub{fill:rgba(160,180,205,.75);font-size:9px;letter-spacing:.08em}</style><div class=\"wrap\"><svg viewBox=\"0 0 620 360\" preserveAspectRatio=\"xMidYMid meet\"><defs><radialGradient id=\"cab\" cx=\"50%\" cy=\"50%\" r=\"60%\"><stop offset=\"0%\" stop-color=\"rgba(140,180,255,.22)\"/><stop offset=\"100%\" stop-color=\"rgba(140,180,255,.02)\"/></radialGradient><linearGradient id=\"card\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"0\"><stop offset=\"0%\" stop-color=\"#c9a86a\"/><stop offset=\"50%\" stop-color=\"#e8d0a0\"/><stop offset=\"100%\" stop-color=\"#c9a86a\"/></linearGradient></defs><text x=\"28\" y=\"34\" class=\"lbl\">PRESSURE STRETCHES SKIN ROUND HOOP</text><text x=\"28\" y=\"48\" class=\"sub\">thin wall &#183; tension = pressure &#215; radius / thickness</text><g id=\"fuseG\"><circle id=\"cabFill\" cx=\"250\" cy=\"190\" r=\"110\" fill=\"url(#cab)\"/><circle id=\"outer\" cx=\"250\" cy=\"190\" r=\"110\" class=\"thin\" stroke-width=\"2.4\"/><circle id=\"inner\" cx=\"250\" cy=\"190\" r=\"98\" class=\"thin faint\" stroke-width=\"1.2\"/><g id=\"parrows\"></g><g id=\"hoop\"></g><path id=\"crackP\" class=\"crack glow\" d=\"\" fill=\"none\" stroke=\"#ff7a7a\" stroke-width=\"2.6\" stroke-linecap=\"round\"/></g><g id=\"zoom\"><rect x=\"412\" y=\"96\" width=\"182\" height=\"188\" rx=\"12\" fill=\"rgba(255,255,255,.04)\" stroke=\"rgba(200,215,235,.35)\" stroke-width=\"1.2\"/><text x=\"426\" y=\"116\" class=\"lbl\">SKIN ZOOM</text><text x=\"426\" y=\"130\" class=\"sub\">liners + fluting</text><g id=\"flute\"></g><g id=\"fibers\"></g><text x=\"426\" y=\"268\" class=\"sub\" id=\"tLab\">skin thickness</text></g><text x=\"28\" y=\"322\" class=\"sub\">arrows outward = cabin pressure &#183; arrows along skin = hoop tension</text><text x=\"28\" y=\"338\" class=\"sub\">bulge + tear grow as tension outruns fibre capacity</text></svg></div><script>(function(){var V=window.VIBLOOM||{};function P(n){var a=(V.params||[]);for(var i=0;i<a.length;i++){if(a[i].name===n)return a[i].value}return NaN}function L(n){var a=(V.params||[]);for(var i=0;i<a.length;i++){if(a[i].name===n)return (a[i].label||n)+' / '+(a[i].unit||'')}return n}var dp=P('delta_p'),R=P('fuselage_radius'),t=P('skin_thickness'),allow=P('cardboard_tensile_allowable'),sf=P('safety_factor');var chk=V.check||{};var stress=t>0?dp*R/t:1;var eff=allow/sf;var ratio=eff>0?stress/eff:1.4;ratio=Math.max(.6,Math.min(2.4,ratio));var NS='http://www.w3.org/2000/svg';var pg=document.getElementById('parrows'),hg=document.getElementById('hoop');var cx=250,cy=190,r0=110;function el(n,at,parent){var e=document.createElementNS(NS,n);for(var k in at)e.setAttribute(k,at[k]);parent.appendChild(e);return e}for(var k=0;k<12;k++){var a=k/12*Math.PI*2+.26;var x1=cx+Math.cos(a)*54,x2=cx+Math.cos(a)*(r0-8),y1=cy+Math.sin(a)*54,y2=cy+Math.sin(a)*(r0-8);var g=el('g',{class:'parrow',style:'animation-delay:'+(k*.18)+'s'},pg);el('line',{x1:x1,y1:y1,x2:x2,y2:y2,stroke:'rgba(140,190,255,.9)','stroke-width':1.8},g);var ang=a*57.29;el('path',{d:'M0,-4 L5,0 L0,4',transform:'translate('+x2+','+y2+') rotate('+ang+')',stroke:'rgba(140,190,255,.95)','stroke-width':1.8,fill:'none'},g)}for(var j=0;j<2;j++){var dir=j?1:-1;for(var s=0;s<4;s++){var aa=-.7+s*.42+(j?.32:3.46);var px=cx+Math.cos(aa)*(r0+14),py=cy+Math.sin(aa)*(r0+14);var tx=-Math.sin(aa)*dir,ty=Math.cos(aa)*dir;el('line',{x1:px-tx*18,y1:py-ty*18,x2:px+tx*18,y2:py+ty*18,stroke:ratio>1?'rgba(255,130,110,.95)':'rgba(140,230,170,.9)','stroke-width':2.1,class:'dash'},hg);el('path',{d:'M-4,-3 L0,0 L-4,3',transform:'translate('+(px+tx*18)+','+(py+ty*18)+') rotate('+(Math.atan2(ty,tx)*57.29)+')',stroke:ratio>1?'#ff8a7a':'#8df0ae','stroke-width':2,fill:'none'},hg)}}var bulge=(ratio-1)*22;if(bulge>0){el('path',{d:'M '+(cx+r0-12)+' '+(cy-54)+' Q '+(cx+r0+bulge)+' '+cy+' '+(cx+r0-12)+' '+(cy+54),stroke:'rgba(255,140,120,.9)','stroke-width':2.2,fill:'none'},pg)}var cp='M '+cx+' '+(cy-r0)+' L '+(cx+14)+' '+(cy-r0+22)+' L '+(cx-6)+' '+(cy-r0+44)+' L '+(cx+18)+' '+(cy-r0+68);if(ratio>1.2)cp+=' L '+(cx-2)+' '+(cy-r0+92)+' L '+(cx+10)+' '+(cy-r0+112);document.getElementById('crackP').setAttribute('d',cp);var fg=document.getElementById('flute');var thPx=8+ (t/R)*900;thPx=Math.max(9,Math.min(38,thPx));var zy=148;el('rect',{x:426,y:zy,width:154,height:thPx,fill:'none',stroke:'rgba(230,240,255,.7)','stroke-width':1.4},fg);el('line',{x1:426,y1:zy+3,x2:580,y2:zy+3,stroke:'#c9a86a','stroke-width':3},fg);el('line',{x1:426,y1:zy+thPx-3,x2:580,y2:zy+thPx-3,stroke:'#c9a86a','stroke-width':3},fg);var p='M426 '+(zy+thPx-3);for(var x=426;x<580;x+=12){p+=' Q '+(x+6)+' '+(zy-4)+' '+(x+12)+' '+(zy+thPx-3)}el('path',{d:p,stroke:'#e8d0a0','stroke-width':1.6,fill:'none',opacity:.9},fg);var fb=document.getElementById('fibers');var nF=Math.round(4+ratio*6);for(var f=0;f<nF;f++){var fx=440+f*(134/Math.max(1,nF-1)),fy=zy+thPx/2+((f%2)?-4:4);var br=ratio>1&&f%3===1;el('line',{x1:fx-7,y1:fy-6,x2:fx+7,y2:fy+6,stroke:br?'#ff8080':'rgba(200,220,245,.6)','stroke-width':br?2.2:1.2,class:br?'crack':''},fb);if(br){el('circle',{cx:fx,cy:fy,r:3.2,fill:'none',stroke:'#ff8080','stroke-width':1.2,class:'crack'},fb)}}document.getElementById('tLab').textContent=L('skin_thickness');})();</script>",
         "usage": {
           "model": "muse-spark-1.3",
-          "input": 511,
+          "input": 763,
           "cached": 0,
-          "output": 4956,
-          "reasoning": 1335,
-          "cost": 0.02170175
+          "output": 4347,
+          "reasoning": 1854,
+          "cost": 0.0194285
         }
       },
-      "hash": "484f4cb02fb98bac53de299a890a747dd79e4dcac667753b6f11d752e4988181"
+      "hash": "73e43ae4fb61af033c2eb5f87ac3c32703cee9c4770bd105634a178a03c8c929"
     },
     {
-      "seq": 13,
-      "prev": "484f4cb02fb98bac53de299a890a747dd79e4dcac667753b6f11d752e4988181",
+      "seq": 11,
+      "prev": "73e43ae4fb61af033c2eb5f87ac3c32703cee9c4770bd105634a178a03c8c929",
       "actor": "muse:muse-spark-1.3",
       "body": {
         "type": "chat",
-        "focus": "primary-strength",
-        "question": "Why is this root red, and what would have to change for it to hold?",
-        "answer": "This root is red because VIBloom computed 120 <= 2 MPa as broken. My reasoning is it would hold only if cardboard strength rose to at least 120 MPa or design stress fell that low, including its hoop and buckling children. The broken status is VIBloom's computation; the threshold change is my own reasoning.",
+        "focus": "pressure-skin-strength",
+        "question": "What would have to be true for this to hold, and which root should I open next?",
+        "answer": "VIBloom computed the check as failing, with a single-parameter flip available on each input. My reasoning is the hoop-stress law is bedrock, so physics won't save it \u2014 the leverage is the argued pressure load and at-risk cardboard strength. Open Cardboard hoop strength next to test whether the allowable can be defended, then Thickness and margin suffice.",
         "cites": [
-          "primary-strength",
-          "primary-strength.bending-crush-strength",
-          "primary-strength.pressure-hoop-strength",
-          "primary-strength.panel-buckling-stability"
+          "pressure-skin-strength",
+          "pressure-skin-strength.hoop-stress-law",
+          "pressure-skin-strength.cardboard-hoop-strength",
+          "pressure-skin-strength.cabin-pressure-load",
+          "pressure-skin-strength.thickness-margin-adequate"
         ],
+        "asked": {
+          "delta_p": 55,
+          "fuselage_radius": 2,
+          "skin_thickness": 0.015,
+          "cardboard_tensile_allowable": 8000,
+          "safety_factor": 1.5,
+          "wing_root_stress": 6000,
+          "cardboard_bending_allowable": 5000,
+          "limit_load_factor": 2.5,
+          "dry_strength": 8000,
+          "wet_retention": 0.2,
+          "required_strength": 7333,
+          "cardboard_burn_through_time": 1,
+          "required_burn_through_time": 5,
+          "design_cycles": 60000,
+          "cardboard_cycle_life": 100,
+          "cardboard_hull_cost": 500000,
+          "aluminum_hull_cost": 10000000,
+          "design_life_flights": 60000,
+          "cardboard_hull_life": 100
+        },
         "usage": {
           "model": "muse-spark-1.3",
-          "input": 984,
+          "input": 1482,
           "cached": 0,
-          "output": 862,
-          "reasoning": 695,
-          "cost": 0.0048935
+          "output": 1073,
+          "reasoning": 897,
+          "cost": 0.00641275
         }
       },
-      "hash": "e510ebad4092b7f6efe7cb6e7e49a2d96894959c25748ac164c8d428e72f5092"
+      "hash": "325fac5b5702bd8e92e379729f23f527510fd8669c2b5baa8872f9a21f8c4b85"
+    },
+    {
+      "seq": 12,
+      "prev": "325fac5b5702bd8e92e379729f23f527510fd8669c2b5baa8872f9a21f8c4b85",
+      "actor": "muse:muse-spark-1.3",
+      "body": {
+        "type": "view",
+        "node": "pressure-skin-strength",
+        "title": "Hoop Tension in Thin Skin Wall",
+        "html": "<style>\nhtml,body{margin:0;height:100%;background:#05070b;overflow:hidden}\n#w{width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(900px 500px at 32% 50%,#0c1526 0%,#05070b 70%);font-family:system-ui,Segoe UI,Roboto,sans-serif}\nsvg{width:100%;height:100%;display:block}\n.t{fill:#dbe7f5;font-size:13px;letter-spacing:.06em}\n.s{fill:#8ea0b8;font-size:11px;letter-spacing:.05em}\n.lbl{fill:#a9bcd6;font-size:11px;letter-spacing:.08em;text-transform:uppercase}\n</style>\n<div id=w>\n<svg viewBox=\"0 0 860 460\" preserveAspectRatio=\"xMidYMid meet\">\n<defs>\n<radialGradient id=air cx=50% cy=50% r=50%><stop offset=0% stop-color=#1a3a5e stop-opacity=\".9\"/><stop offset=100% stop-color=#0a1526 stop-opacity=\".1\"/></radialGradient>\n<filter id=gl x=-60% y=-60% width=220% height=220%><feGaussianBlur stdDeviation=4 result=b /><feMerge><feMergeNode in=b /><feMergeNode in=SourceGraphic /></feMerge></filter>\n<marker id=ah markerWidth=8 markerHeight=8 refX=7 refY=4 orient=auto><path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#7cc4ff\"/></marker>\n<marker id=ah2 markerWidth=9 markerHeight=9 refX=7 refY=4 orient=auto><path d=\"M0,0 L9,4 L0,8 Z\" fill=\"#ffb86b\"/></marker>\n</defs>\n<!-- left fuselage -->\n<g>\n<text x=44 y=42 class=lbl>cross-section &#183; thin wall vessel</text>\n<circle id=airFill cx=250 cy=250 r=128 fill=\"url(#air)\" opacity=\".85\"/>\n<g id=dots></g>\n<circle id=ringOuter cx=250 cy=250 r=142 fill=none stroke=\"#c9a87a\" stroke-width=\"3\" opacity=\".95\"/>\n<circle id=ringInner cx=250 cy=250 r=128 fill=none stroke=\"#8a6a3e\" stroke-width=\"1.2\" opacity=\".9\"/>\n<g id=parrows></g>\n<!-- hoop pull arcs -->\n<path id=arcT d=\"M 128 180 A 145 145 0 0 1 200 122\" fill=none stroke=\"#ffb86b\" stroke-width=\"2.4\" marker-end=\"url(#ah2)\"/>\n<path id=arcB d=\"M 372 320 A 145 145 0 0 1 300 378\" fill=none stroke=\"#ffb86b\" stroke-width=\"2.4\" marker-end=\"url(#ah2)\"/>\n<text x=88 y=404 class=t>hoop pull in skin wall</text>\n<text x=88 y=420 class=s>tension runs around circle, not across it</text>\n<text x=44 y=68 class=s>cabin air pressure &#8594; pushes out (kPa)</text>\n</g>\n<!-- connector -->\n<path d=\"M390 200 L530 150 L530 360 L390 300\" fill=none stroke=\"#2a3a52\" stroke-width=\"1.2\" stroke-dasharray=\"6 6\"/>\n<g>\n<text x=544 y=42 class=lbl>wall magnified &#183; corrugated sandwich</text>\n<g id=wallBox>\n<rect x=540 y=90 width=276 height=250 rx=12 fill=\"#0a1220\" stroke=\"#25344b\" stroke-width=\"1.2\"/>\n<!-- liners -->\n<rect id=linerTop x=560 y=130 width=236 height=10 rx=3 fill=\"#d8b37c\"/>\n<rect id=linerBot x=560 y=270 width=236 height=10 rx=3 fill=\"#d8b37c\"/>\n<path id=flute d=\"\" fill=none stroke=\"#9ec7ff\" stroke-width=\"3.2\" stroke-linecap=\"round\"/>\n<g id=cracks stroke=\"#ff6b6b\" stroke-width=\"2\" stroke-linecap=\"round\" filter=\"url(#gl)\"></g>\n<g id=tArrows></g>\n</g>\n<text x=560 y=122 class=s>liner</text>\n<text x=560 y=304 class=s>liner</text>\n<text x=560 y=248 class=s>flute &#183; glue line</text>\n<text x=544 y=370 class=t>wall stretches &#183; fibres separate</text>\n<text x=544 y=388 class=s>thin skin &#215; wide radius concentrates pull (m)</text>\n<text x=544 y=406 class=s>allowable divided by safety factor (kPa, ratio)</text>\n</g>\n<!-- stress strip -->\n<g>\n<text x=44 y=438 class=s>mechanism: pressure &#215; radius / thickness = membrane pull &#183; animation scaled by live inputs</text>\n</g>\n</svg>\n</div>\n<script>\n(function(){\nconst V=window.VIBLOOM||{};const P={};(V.params||[]).forEach(o=>{P[o.name]=o.value});\nconst dp=P.delta_p, R=P.fuselage_radius, th=P.skin_thickness, al=P.cardboard_tensile_allowable, sf=P.safety_factor;\nconst hoop=dp*R/th; const cap=al/sf; const over=hoop/cap;\nconst NS='http://www.w3.org/2000/svg';\nconst cx=250, cy=250, r0=128;\nconst pg=document.getElementById('parrows');\nconst dots=document.getElementById('dots');\nconst N=16;\nfor(let i=0;i<N;i++){\n const a=i/N*Math.PI*2;\n const x1=cx+Math.cos(a)*(r0-18), y1=cy+Math.sin(a)*(r0-18);\n const x2=cx+Math.cos(a)*(r0+44), y2=cy+Math.sin(a)*(r0+44);\n const l=document.createElementNS(NS,'line');\n l.setAttribute('x1',x1);l.setAttribute('y1',y1);l.setAttribute('x2',x2);l.setAttribute('y2',y2);\n l.setAttribute('stroke','#7cc4ff');l.setAttribute('stroke-width','2');l.setAttribute('marker-end','url(#ah)');l.setAttribute('opacity','.9');\n l.dataset.a=a; pg.appendChild(l);\n}\nfor(let i=0;i<42;i++){\n const c=document.createElementNS(NS,'circle');\n c.setAttribute('r',(3+Math.random()*4).toFixed(1));\n c.setAttribute('fill','#7cc4ff');c.setAttribute('opacity',(.12+Math.random()*.28).toFixed(2));\n c.dataset.s=Math.random()*6.28; c.dataset.rr=Math.random()*92; dots.appendChild(c);\n}\nconst fl=document.getElementById('flute');\n(function(){\n let d='M 560 200 ';\n const w=236, n=9, amp=34, y0=200;\n for(let s=0;s<=120;s++){\n  const x=560+w*s/120; const y=y0+Math.sin(s/120*n*Math.PI*2)*amp*.5+Math.sin(s/120*n*Math.PI*2-Math.PI/2)*amp*.28;\n  d+=(s===0?'':'L ')+x.toFixed(1)+' '+y.toFixed(1)+' ';\n }\n fl.setAttribute('d',d);\n})();\nconst cg=document.getElementById('cracks');\nconst cn=Math.max(4,Math.min(10,Math.round(over*5)));\nfor(let i=0;i<cn;i++){\n const x=590+Math.random()*170;\n const p=document.createElementNS(NS,'path');\n const j=(Math.random()*14-7).toFixed(1);\n p.setAttribute('d','M '+x.toFixed(0)+' 132 l '+j+' 22 l '+(-j)+' 18 l 6 18');\n p.setAttribute('fill','none');p.dataset.ph=Math.random()*6.28;\n cg.appendChild(p);\n}\nconst tg=document.getElementById('tArrows');\n[[548,205,522,205],[808,205,834,205]].forEach(v=>{\n const l=document.createElementNS(NS,'line');\n l.setAttribute('x1',v[0]);l.setAttribute('y1',v[1]);l.setAttribute('x2',v[2]);l.setAttribute('y2',v[3]);\n l.setAttribute('stroke','#ffb86b');l.setAttribute('stroke-width','2.4');l.setAttribute('marker-end','url(#ah2)');\n tg.appendChild(l);\n});\nconst ringO=document.getElementById('ringOuter');\nconst ringI=document.getElementById('ringInner');\nconst tR=Math.min(28,Math.max(6,(th/R)*760));\nringO.setAttribute('r',r0+tR); ringI.setAttribute('r',r0);\nlet t=0;\nfunction tick(){\n t+=0.03;\n const pulse=0.5+0.5*Math.sin(t*1.7);\n const jig=Math.min(1.6,Math.max(0.25,(over-0.6)*0.9));\n const wob=Math.sin(t*7)*jig*2.2+Math.sin(t*13.7)*jig;\n ringO.setAttribute('r',(r0+tR+wob+pulse*2.2).toFixed(1));\n ringO.setAttribute('stroke', over>1 ? '#ff7a7a' : '#c9a87a');\n ringO.setAttribute('opacity',(.65+.35*pulse).toFixed(2));\n [...pg.children].forEach((l,i)=>{\n  const a=parseFloat(l.dataset.a);\n  const ext=44+pulse*14+wob;\n  l.setAttribute('x2',(cx+Math.cos(a)*(r0+ext)).toFixed(1));\n  l.setAttribute('y2',(cy+Math.sin(a)*(r0+ext)).toFixed(1));\n  l.setAttribute('opacity',(.45+.5*pulse).toFixed(2));\n });\n [...dots.children].forEach(c=>{\n  const s=parseFloat(c.dataset.s)+t*.4, rr=parseFloat(c.dataset.rr);\n  c.setAttribute('cx',(cx+Math.cos(s)*rr*.9).toFixed(1));\n  c.setAttribute('cy',(cy+Math.sin(s*1.3)*rr*.9).toFixed(1));\n });\n [...cg.children].forEach(p=>{\n  const ph=parseFloat(p.dataset.ph);\n  p.setAttribute('opacity',(.35+.65*Math.abs(Math.sin(t*2.4+ph))).toFixed(2));\n });\n fl.setAttribute('opacity',(.55+.35*Math.sin(t*3.1)).toFixed(2));\n requestAnimationFrame(tick);\n}\ntick();\n})();\n</script>",
+        "usage": {
+          "model": "muse-spark-1.3",
+          "input": 786,
+          "cached": 241,
+          "output": 4377,
+          "reasoning": 1554,
+          "cost": 0.01931965
+        }
+      },
+      "hash": "863ed89ade3ec8b151a26bb9615708028e554a68a8baf2eaed06a20a8d8e4650"
     }
   ]
 }
