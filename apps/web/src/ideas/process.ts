@@ -224,9 +224,6 @@ export function steps(tree: IdeaTree): Step[] {
       }
       case "predict": {
         const p = tree.predictions.find((x) => x.id === b.id);
-        const prior = tree.runs.find(
-          (r) => r.node === b.node && r.purpose === "check" && r.seq < e.seq,
-        );
         out.push({
           seq: e.seq,
           actor: "muse",
@@ -235,10 +232,10 @@ export function steps(tree: IdeaTree): Step[] {
           result: b.reason,
           ...(p && !p.blind ? { tone: "warn" as const } : {}),
           badges: p?.blind
-            ? [{ text: "Blind: no run of these values existed yet", tone: "ok" }]
+            ? [{ text: "Blind: the project held no result of this experiment yet", tone: "ok" }]
             : [
                 {
-                  text: `Not blind: a run of these values was already in the log${prior ? ` (#${String(prior.seq)})` : ""}; not scored`,
+                  text: `Not blind: the result was already in the log${p?.prior !== undefined ? ` (#${String(p.prior)})` : ""}, though not in Muse's input; not scored`,
                   tone: "warn",
                 },
               ],

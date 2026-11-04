@@ -790,6 +790,36 @@ describe("predictions and lessons", () => {
     expect(t.predictions[1]?.blind).toBe(true);
   });
 
+  it("treats a result of the same experiment on another node, or from a test, as seen", () => {
+    const t = clock();
+    const spec = t.nodes.get("kinetics")?.check;
+    if (spec?.kind !== "oregonator") throw new Error("missing");
+    const twin = t.admit("goal", [
+      grown("kinetics-twin", {
+        params: [],
+        check: { ...spec, value: "", op: "none", limit: "", unit: "" },
+      }),
+    ]);
+    t.append("muse", { type: "grow", under: "goal", nodes: twin, summary: "", usage });
+    const run = runNow(t);
+    t.append("muse", { ...predict("holds"), node: "kinetics-twin" });
+    expect(t.predictions[0]).toMatchObject({ blind: false, prior: seqOf(t, "kinetics") });
+    // The registered test of a lesson also reveals its values.
+    t.append("muse", predict("holds", "p2"));
+    t.confirm(seqOf(t, "kinetics"), runCheck(run, t.scope()));
+    t.append("engine", { type: "check", node: "kinetics", result: runCheck(run, t.scope()) });
+    const h = { ...hypotheses(), prediction: "p2" };
+    expect(() => t.append("muse", h)).not.toThrow();
+    t.append("engine", {
+      type: "test",
+      hypotheses: "h1",
+      result: runCheck(run, { ...inputs, s: 2 }),
+    });
+    t.append("person", { type: "set_param", name: "s", value: 2, source: "edit" });
+    t.append("muse", { ...predict("holds", "p3"), inputs: { ...inputs, s: 2 } });
+    expect(t.predictions.find((p) => p.id === "p3")?.blind).toBe(false);
+  });
+
   it("records what a lesson was learned under and stops calling it current when that changes", () => {
     const t = clock();
     t.append("muse", predict("holds"));

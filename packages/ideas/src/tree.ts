@@ -296,6 +296,19 @@ export class IdeaTree {
         if (!sameRun(b.inputs, this.scope())) {
           throw new Error("a prediction is made for the current values");
         }
+        // Blind means the project held no result of the same experiment yet:
+        // the same question (and tolerance) at the same values, on any node,
+        // from a check or a test, under any solver version.
+        const spec = n.check;
+        const prior = this.runs.find((r) => {
+          const c = this.nodes.get(r.node)?.check;
+          return (
+            c?.kind === "oregonator" &&
+            c.question === spec.question &&
+            (c.question !== "reduction_keeps_period" || c.tolerance === spec.tolerance) &&
+            sameRun(r.result.inputs ?? {}, b.inputs)
+          );
+        });
         this.predictions.push({
           id: b.id,
           node: b.node,
@@ -303,12 +316,8 @@ export class IdeaTree {
           expect: b.expect,
           confidence: Math.min(0.99, Math.max(0.5, b.confidence)),
           reason: b.reason,
-          blind: !this.runs.some(
-            (r) =>
-              r.node === b.node &&
-              r.purpose === "check" &&
-              sameRun(r.result.inputs ?? {}, b.inputs),
-          ),
+          blind: !prior,
+          ...(prior ? { prior: prior.seq } : {}),
           uses: b.uses.filter((u) => this.lessons.some((l) => l.id === u && l.run !== undefined)),
           unsupported: unsupportedNumbers(
             b.reason,

@@ -268,8 +268,11 @@ export interface Prediction {
   uses: string[];
   // The first run of exactly these values after the prediction; permanent.
   run?: number;
-  // No run of these values on this experiment was in the log yet. A
-  // prediction made after one is kept, but it is not counted as foresight.
+  // No result of the same experiment (question, tolerance, values; any node,
+  // check or test) was in the log yet. A prediction made after one is kept,
+  // but it is not counted as foresight. Muse's input never holds a result.
   blind: boolean;
+  // The run that already held the result, when not blind.
+  prior?: number;
   unsupported: string[];
 }
