@@ -5,8 +5,9 @@ useful map too.
 
 ## Project
 
-VIBloom decomposes any goal into the assumptions it rests on and keeps every
-conclusion linked to them; chemistry is its first specialised domain. Read
+VIBloom is a research instrument specialised in chemistry: Muse proposes
+assumptions, experiments, predictions and explanations; a deterministic engine
+runs and decides, and every conclusion stays linked to what it rests on. Read
 [docs/architecture.md](docs/architecture.md) before changing the engine and
 [docs/science.md](docs/science.md) before changing the chemistry.
 

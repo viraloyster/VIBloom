@@ -39,7 +39,7 @@ const earlier = JSON.parse(await readFile(new URL(spec2.base_rate_from, root), "
 const unseen = earlier.rows.filter((r) => !r.seen);
 // Probability of "holds" estimated on the earlier grid only.
 const baseRate = unseen.filter((r) => r.truth === "holds").length / unseen.length;
-const BUDGET = 1;
+const BUDGET = 3;
 
 // The session the lesson came from, frozen with the evaluation.
 const example = new URL("./lesson-session.json", import.meta.url);

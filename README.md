@@ -1,233 +1,200 @@
 # VIBloom
 
-> Every conclusion rests on assumptions. The most common assumption is that
-> the assumptions are fine, and it is the one almost nobody tests.
+**A research instrument for chemistry where Muse Spark has to predict each
+experiment before it runs, is proven wrong by a stiff solver, and must
+explain why in a record anyone can replay.**
 
-**VIBloom turns any idea into a tree of the assumptions it rests on, tests
-the ones that can be computed or run as experiments, and makes Muse predict,
-fail and learn in a record anyone can replay.** Muse Spark does the thinking;
-a deterministic engine checks every result it can, and the record keeps the
-two apart.
+VIBloom turns a chemistry question into a tree of the assumptions it rests on.
+Muse Spark builds the tree, chooses the experiments, commits to their outcomes
+in advance and, when a run contradicts it, registers two explanations and the
+one test that tells them apart. A deterministic engine runs every experiment,
+decides every verdict and refuses any step that breaks the protocol. Today the
+experiments are Oregonator simulations of the Belousov-Zhabotinsky reaction,
+built from a real recipe.
 
-- **Live app:** https://viraloyster.github.io/VIBloom/ (static, runs in your
-  browser with your own Meta Model API key)
-- **No key?** Choose one of the three recorded Muse sessions on the first
-  screen. They replay real sessions and re-run every calculation and
-  experiment in your browser.
-- **For reviewers:** [what to look at, and where](#for-reviewers-where-to-look).
+Built during the Meta Global AI Developer Hackathon, from November 2, 2026
+(first commit). More details in [HACKATHON.md](HACKATHON.md).
+
+- **Live app:** https://viraloyster.github.io/VIBloom/ (three recorded
+  sessions replay without a key; with your own Meta Model API key, run new
+  ones)
+- **Verify without a browser or a key:** `npm ci && npm run verify` replays
+  every recorded session, checks its hash chain and runs each experiment
+  again (about 6 s)
+- **Evaluation:** [docs/evaluation.md](docs/evaluation.md)
+
+![A recorded session: the experiment's outcome first, the clock in seconds, both models' traces, and the selected root's line of support lit in the tree](docs/img/experiment.jpg)
+
+## Results
+
+| What                                         | Result                                                                                                                                                         | Where to check                                                                         |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| A handwritten BZ recipe, tested              | Period 6.5 min against a 60 s target; at 0.2 M malonic acid 67 s, but the two-variable model is then 42% off                                                   | [recorded session](apps/web/public/examples/chemical-clock.json), `npm run verify`     |
+| Muse proven wrong, then a discriminating run | Muse predicted the reduction would hold (85%, blind); it failed. Its test (ten times the bromate) contradicts one explanation and is consistent with the other | Same session, Process view                                                             |
+| Do lessons change Muse's predictions?        | On a grid frozen before the run: no lesson 6/28 right, lesson as outcomes 22/28, lesson with its measured numbers 26/28 (always "fails": 79%)                  | [evaluation](docs/evaluation.md)                                                       |
+| Solver against an independent reference      | Oregonator periods agree with SciPy (Radau) to a relative 5e-4                                                                                                 | [validation](docs/validation.md)                                                       |
+| Every recorded run reproduces                | Re-run in the browser and by `npm run verify`, to a relative 1e-4                                                                                              | [`packages/ideas/eval/verify.ts`](packages/ideas/eval/verify.ts)                       |
+| Tests                                        | 218, including a regression for every issue found in review                                                                                                    | [`packages/ideas/src/ideas.test.ts`](packages/ideas/src/ideas.test.ts) and per package |
 
 ## The problem
 
-Ideas fail at an assumption nobody checked: a material that is not strong
-enough, a model that is wrong outside the range it was fit on, a number that
-was typed in rather than measured. AI makes this sharper: a model produces a
-fluent conclusion in seconds, and nothing shows which of its premises were
-computed, which were cited and which were only asserted, or whether the model
-learns anything when it turns out to be wrong.
+Chemistry relies on simplified models because the full ones are expensive or
+unwieldy. Whether a simplification still holds at the conditions someone
+actually uses is usually assumed, not checked. When a language model is asked,
+it answers fluently and confidently, and nothing shows which premises were
+computed, which were asserted, or whether the model learns anything when it
+turns out to be wrong.
 
-VIBloom attacks that: every conclusion is tied to its roots, every root says
-how it is known, and the model has to commit to predictions that code then
-settles.
+The BZ clock makes this concrete. A teacher wants a colour change every 60 s
+and wants to know whether the simpler two-variable Oregonator can be trusted
+for planning. Speeding the clock up to meet the target is exactly what breaks
+the simplification, and Muse, asked before the run, expected the opposite.
 
-## What it does
+## What happens in a session
 
-1. **Decompose.** You say what you want to build. Muse Spark grows the
-   assumptions under it, down toward first principles, every number with its
-   unit and origin (from a source, or assumed). You can also **write or
-   sketch the idea by hand** or upload a photo of paper; Muse reads it.
-2. **Mark how each root is known.** Computed and reproducible, cited, argued,
-   or bedrock (a law of nature). A green that rests on unchecked premises is
-   shown as unverified or partial, never as holding. A check whose "result"
-   is a number someone typed in stays argued.
-3. **Compute what can be computed.** Muse writes comparisons in a small
-   arithmetic language the engine parses and evaluates itself (no model code
-   ever runs). You can write a formula by hand; Muse maps your symbols to the
-   tree's parameters and the engine decides whether it computes. In
-   chemistry, Muse attaches real experiments that a stiff solver runs.
-4. **Predict, fail, learn.** Before every experiment runs, Muse commits to an
-   outcome and a confidence, shown no result. If the run contradicts it, Muse registers two
-   explanations and one discriminating test before that test runs; the engine
-   runs it and code decides which explanation the evidence fits. The lesson
-   keeps the measured contrast, Muse's interpretation and what one test
-   cannot establish, apart.
-5. **Show it.** Muse designs a live illustration of each mechanism in a
-   sandboxed frame, then looks at a picture of what the monitor actually
-   shows and redraws once if it is wrong. Experiments appear as beakers and
-   spiral-wave dishes computed from the run's exact values. The chat sees the
-   monitor too, cites the roots it used, and any number it writes that was
-   not in its data is flagged.
+1. **The question becomes a tree.** Muse reads the handwritten recipe (vision)
+   and grows the assumptions: does the recipe oscillate, does its period hit
+   60 s +/- 10, does the reduced model keep the full model's period.
+2. **The recipe becomes the model.** The engine converts concentrations into
+   Oregonator parameters with cited rate constants and a time scale in
+   seconds. Muse cannot set those parameters itself; the engine refuses it.
+3. **Muse predicts before every run.** It is shown the assumption, the
+   question, the tolerance and the values, never a result. The engine marks
+   whether the prediction was blind and scores only blind ones (Brier).
+4. **The engine runs the experiment.** A stiff solver integrates both models;
+   a classification protocol decides oscillation and the period gap.
+5. **A contradiction must be explained before anything is learned.** Muse
+   registers two explanations that expect different outcomes and one test,
+   either a recipe change (every model parameter follows) or a model change
+   (labelled as such). The engine refuses explanations without a contradicted
+   prediction, runs the test, and decides which explanation the run is
+   consistent with. The lesson keeps the measured contrast apart from the
+   interpretation and states that one test does not establish a cause.
+6. **The lesson is evidence with conditions.** It records the values,
+   question, tolerance, recipe conversion and solver version it was learned
+   under, and is fed back to Muse with its measured numbers. If any of those
+   change, it stays as history and is no longer offered as a current finding.
 
-The examples on the first screen are deliberately absurd and taken seriously
-(a commercial airliner made of cardboard, a tree that grows gold): the engine
-must show exactly which root breaks and why, not dismiss the idea.
+![The Process view: every step from the log, with who took it, what was recorded and whether it reproduced here](docs/img/process.jpg)
 
-## A real case: a chemical clock for a class demo
+## What is new in the design
 
-A teacher writes a Belousov-Zhabotinsky recipe in a notebook (0.06 M bromate,
-0.02 M malonic acid, 0.8 M acid, cerium catalyst) and wants the colour to flip
-every 60 s, asking whether the simpler two-variable model can be trusted. In
-the recorded session:
-
-1. Muse reads the handwritten recipe and grows the tree: does the recipe
-   oscillate, does the period hit 60 s +/- 10, can the reduction be trusted.
-2. VIBloom turns the recipe into the model's parameters with cited rate
-   constants. Before each experiment runs, Muse commits to an outcome; then
-   the engine runs it: it oscillates, but every 6.5 minutes, so the 60-second
-   root is red with the real number.
-3. With malonic acid raised to 0.2 M, Muse predicts again before the runs.
-   The clock ticks every 67 s and that root turns green, but the two-variable
-   model is now 42% off, against Muse's "holds" (85%): speeding the clock up
-   breaks the simplification.
-4. Muse registers two explanations and a recipe change that tells them apart
-   (ten times the bromate). The engine runs it: the reduction holds again,
-   consistent with one explanation (eps grew too large for the time scales to
-   stay separated) and contradicting the other. One test does not establish
-   a cause, and the lesson says so.
-
-The **Process** view shows the same session as a timeline read from the log:
-each step says whether Muse, the engine or the person took it, what went in,
-what came out, what it cost and which log entry holds it, and lights the
-roots it touched. Each run keeps three facts apart: what was recorded, whether
-this browser reproduced it, and whether the tree has moved on since. Each
-prediction says whether it was blind (no run of its values existed yet; only
-blind ones are scored). Whatever the engine refused (an off-protocol root, a
-repair that changed more than a name, a value the recipe already sets) is
-listed in place, beside the log without changing its state.
-
-A recorded session replays its own log, event by event, with the same order
-and hashes; the browser only adds its re-runs beside it, and the playback can
-be paused, stepped or replayed. Its cost meter shows what the recording cost,
-never this tab's spend.
-
-The monitor shows the period in seconds, a beaker changing colour at that
-rhythm (real time or a stated speed-up) and both models' concentrations side
-by side.
-
-## Why chemistry first
-
-The engine is general; the first specialisation is chemistry because it has
-real mathematical depth and can be seen. VIBloom runs the Oregonator model of
-the Belousov-Zhabotinsky oscillating reaction: does it oscillate at these
-values, and does the simpler two-variable model keep the full model's period?
-The solver is checked against an independent SciPy reference (periods agree
-to a relative 5e-4; see [validation](docs/validation.md)), and a recorded run
-counts only once the viewer's browser reproduces it (relative 1e-4,
-measured).
+| Idea                                              | How it is enforced                                                                                                                                                                                                                        |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The model proposes; code decides                  | Muse's output is never a result. Every check is parsed by the engine's own arithmetic language or run by the solver; pass and fail are computed ([`tree.ts`](packages/ideas/src/tree.ts), [`expr.ts`](packages/ideas/src/expr.ts)).       |
+| Pre-registration as a protocol rule, not a prompt | A prediction is blind only if no run of its values exists; explanations are accepted only after a contradicted prediction and before their test; the test that runs is the one registered. Anything else is refused and logged.           |
+| A record anyone can re-execute                    | A hash-chained log. Replay re-verifies every hash, recomputes every formula, refuses a result that does not reproduce, and re-runs each experiment in the browser or with `npm run verify`. A recording replays with its original hashes. |
+| Lessons as data with an identity                  | A lesson carries what it depended on; a change invalidates it. Muse receives it with the measured contrast, and the evaluation measures whether that changes its predictions.                                                             |
+| The process is visible                            | The Process view reads the log: each step's actor (Muse, engine, person), inputs, cost and log entry; recorded, reproduced and current shown separately; refused attempts listed in place.                                                |
 
 ## Where Muse is indispensable
 
-Without Muse there is no tree, no formula, no prediction and no explanation:
-the engine only verifies. Every task below is Muse's; the right column is what
+Without Muse there is no tree, no experiment choice, no prediction and no
+explanation: the engine only verifies. Each task is Muse's (Meta Model API,
+`muse-spark-1.3`, streamed JSON with strict schemas); the right column is what
 code does with it.
 
-| Muse (Meta Model API, `muse-spark-1.3`)                         | What the engine does                                                    |
-| --------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Decomposes the idea into roots, streamed as structured JSON     | Admits only protocol-valid nodes; one value per parameter name          |
-| Reads handwriting, sketches and formulas (vision)               | Accepts a handwritten formula only in the tree's own parameter names    |
-| Writes each check as a comparison, or chooses an experiment     | Parses and evaluates it, or runs the stiff solver; decides pass or fail |
-| Predicts before each run, with a confidence                     | Settles the prediction with the run, permanently; scores it (Brier)     |
-| After a surprise, proposes two explanations and one test        | Refuses them without a contradicted prediction; runs the test; decides  |
-| Designs an HTML illustration of the mechanism                   | Runs it sandboxed: no network, no storage, no key                       |
-| Looks at a picture of its own drawing (vision) and redraws once | Bounds it to one redraw; records what Muse found                        |
-| Answers in the chat, seeing the monitor                         | Flags any number not in the data Muse was given                         |
+| Muse                                                            | The engine                                                                  |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Reads a handwritten recipe or formula (vision)                  | Accepts a formula only in the tree's own parameter names                    |
+| Decomposes the question into assumptions with units and sources | Admits only protocol-valid nodes; one value per parameter name              |
+| Chooses which experiment tests each assumption                  | Runs the stiff solver and the classification protocol; decides pass or fail |
+| Predicts each run with a confidence, before it runs             | Settles it with the run, permanently; scores blind ones only                |
+| After a surprise, proposes two explanations and one test        | Refuses them without a contradicted prediction; runs the test; decides      |
+| Designs an illustration of the mechanism, then checks a picture | Runs it sandboxed (no network, storage or key); allows one redraw           |
+| Answers questions in the chat, seeing the monitor               | Flags numbers absent from the data Muse was given (a heuristic detector)    |
 
-Cost is part of the design: before each request the API counts the input
-tokens, the session reserves the most that request could cost and stops at
-the budget. A recorded session costs about $0.03 to $0.12.
+Cost is controlled per request: the API counts input tokens first, the
+session reserves the most the request could cost and stops at its budget. The
+recorded chemistry sessions cost $0.04 and $0.07.
 
-## Evidence
+## Map for reviewers
 
-- **Learning, measured** ([evaluation](docs/evaluation.md)). On a grid frozen
-  in a commit before the run, Muse with the recorded lesson's measured
-  contrast got 26 of 28 predictions right (Brier 0.090); with the lesson as
-  outcomes only, 22 (Brier 0.173, no better than always answering "fails");
-  with no lesson, 6 (Brier 0.555). The advantage of the numbers comes from
-  three points near the tolerance, and the report says so.
-- **Solver** checked against SciPy, with explicit failure codes instead of a
-  silent "no oscillation" ([validation](docs/validation.md)).
-- **Record**: a hash-chained log; replay recomputes every formula, refuses a
-  result that does not reproduce, and re-runs experiments in the browser.
-  Unknown event types are refused. A lesson records what it was learned
-  under (values, question, tolerance, recipe conversion, solver version); if
-  any of them changes, it stays readable as history but is no longer offered
-  as a current finding.
-- **Tests**: 218, including regressions for every issue found in review
-  (circular checks, inverted repairs, lessons without history, lost
-  prediction history, confirmations that changed the record).
+| To check                                               | Look at                                                                                                                                        |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| The rules: gates, statuses, blind predictions, lessons | [`packages/ideas/src/tree.ts`](packages/ideas/src/tree.ts)                                                                                     |
+| Muse's prompts and JSON schemas                        | [`packages/ideas/src/protocol.ts`](packages/ideas/src/protocol.ts)                                                                             |
+| Calls to the Meta Model API (streaming, vision, cost)  | [`packages/ideas/src/muse.ts`](packages/ideas/src/muse.ts), [`packages/ideas/src/cost.ts`](packages/ideas/src/cost.ts)                         |
+| Recipe to model (rate constants, version)              | [`packages/chem/src/recipe.ts`](packages/chem/src/recipe.ts), [docs/science.md](docs/science.md)                                               |
+| The stiff solver, the models, the classifier           | [`packages/chem/src/`](packages/chem/src/), validated in [docs/validation.md](docs/validation.md)                                              |
+| The arithmetic language (no `eval`)                    | [`packages/ideas/src/expr.ts`](packages/ideas/src/expr.ts)                                                                                     |
+| The Process view, read from the log                    | [`apps/web/src/ideas/process.ts`](apps/web/src/ideas/process.ts)                                                                               |
+| Faithful replay of a recording                         | `playRecorded` in [`apps/web/src/ideas/main.ts`](apps/web/src/ideas/main.ts), [`packages/ideas/eval/verify.ts`](packages/ideas/eval/verify.ts) |
+| The evaluation, its frozen grids and baselines         | [`packages/ideas/eval/`](packages/ideas/eval/), results in [docs/evaluation.md](docs/evaluation.md) and [docs/eval/](docs/eval/)               |
+| Tests                                                  | [`packages/ideas/src/ideas.test.ts`](packages/ideas/src/ideas.test.ts), [`packages/chem/src/`](packages/chem/src/)                             |
 
-## For reviewers: where to look
+## Status
 
-| What                                                                 | Where                                                                                                                  |
-| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| The rules that keep Muse honest (gates, statuses, lessons, scoring)  | [`packages/ideas/src/tree.ts`](packages/ideas/src/tree.ts)                                                             |
-| Muse's prompts and JSON schemas                                      | [`packages/ideas/src/protocol.ts`](packages/ideas/src/protocol.ts)                                                     |
-| Calls to the Meta Model API (streaming, vision, token count, budget) | [`packages/ideas/src/muse.ts`](packages/ideas/src/muse.ts), [`packages/ideas/src/cost.ts`](packages/ideas/src/cost.ts) |
-| The arithmetic language (no `eval`)                                  | [`packages/ideas/src/expr.ts`](packages/ideas/src/expr.ts)                                                             |
-| The number detector (heuristic)                                      | [`packages/ideas/src/numbers.ts`](packages/ideas/src/numbers.ts)                                                       |
-| The stiff solver and the Oregonator                                  | [`packages/chem/`](packages/chem/)                                                                                     |
-| Tests                                                                | [`packages/ideas/src/ideas.test.ts`](packages/ideas/src/ideas.test.ts), and next to the code in each package           |
-| The evaluation script and its frozen grid                            | [`packages/ideas/eval/`](packages/ideas/eval/)                                                                         |
-| The app                                                              | [`apps/web/src/ideas/`](apps/web/src/ideas/)                                                                           |
+| State                              | What                                                                                                                                                                                  |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Live in the public app             | Assumption tree, recipe to model, Oregonator experiments, blind predictions, hypotheses and tests, versioned lessons, Process view, faithful replay, handwriting, chat, illustrations |
+| Implemented, not in the public app | Region claims and counterexample search over parameter regions (`apps/api`, `bench.html`, run locally with the Worker)                                                                |
+| Not built                          | Other oscillators and reaction models, temperature and reagent depletion, branches of a tree                                                                                          |
+
+## Scope and limits
+
+- **Simulation, not laboratory.** Every verdict comes from the Oregonator, a
+  semi-quantitative model of the BZ reaction. The solver is validated against
+  SciPy; the model is not validated against measured periods of a real
+  beaker. A real recipe can behave differently.
+- **One model family.** The questions are oscillation and whether the
+  two-variable reduction keeps the period. Temperature and reagent depletion
+  are not modelled.
+- **The evaluation is small.** One question type, one lesson, two grids. It
+  measures whether a recorded lesson changes Muse's predictions on new points
+  against simple baselines; it does not show general learning.
+- **Outside chemistry, checks compute on assumed numbers.** The app accepts
+  any goal and computes the comparisons Muse writes, but there are no
+  experiments outside chemistry, so those results are only as good as the
+  numbers in the tree, which are shown as assumed.
+- **The number detector is heuristic.** It flags numbers absent from Muse's
+  data; it cannot prove a number is right.
 
 ## Vision
 
-Everything has assumptions, so the engine is meant for any field: an
-engineering project, a mathematical conjecture, a business plan, an argument.
-Chemistry comes first; other domains follow as their experiments are added.
+VIBloom is specialising in chemistry first. The engine underneath is general:
+every goal rests on assumptions, and the same protocol (decompose, predict
+blind, run, contradict, explain, test, learn with conditions) applies to an
+engineering design, a mathematical conjecture or a business plan as soon as
+that domain has instruments that can settle its questions.
 
-The long-term goal is a deep research tool built around Muse: Muse proposes,
-the engine experiments, Muse is wrong in the open, and the lessons it earns
-are kept with the evidence and premises they depend on. The record of
-predictions, outcomes and corrections then becomes data in its own right, to
-measure whether Muse is learning and to improve the models doing the
-research. The tree is refined by that loop, not written once.
+- **Context for machine learning.** Each session produces data that rarely
+  exists in a clean form: what a model predicted, with what confidence, what
+  the experiment showed, which explanation survived a test and under which
+  premises. That record can measure whether a model learns from experiments
+  and train models to do research.
+- **A workspace for frontier research.** A hosted service where researchers
+  develop ideas with Muse against their own instruments and data, keeping
+  every conclusion tied to the evidence and premises it depends on.
+- **A loop, not a document.** Muse proposes, the engine experiments, Muse is
+  wrong in the open, and the tree is refined by what survives.
 
-## Try it
+## Run it
 
-- **Without a key:** open the [app](https://viraloyster.github.io/VIBloom/)
-  and choose a recorded session: the handwritten BZ recipe (the real case
-  above), Muse surprised by an experiment and learning from it, or the
-  cardboard airliner (a handwritten formula, Muse checking its own drawing).
-- **With your own Meta Model API key:** grow any idea, or write it by hand.
-  The key stays in the tab (or on the device, if you ask) and is sent only to
-  api.meta.ai. The session budget is a limit for the tab, not for your
-  account: set a spend limit in your Meta billing settings too. Standard mode
-  keeps your content out of Meta's training; contributor mode is about 20
-  times cheaper and lets Meta train on it.
-- **Locally:** `npm ci && npm run dev`, then open the printed address.
-  `npm test` runs the tests.
-
-## Not built yet
-
-Directions, not features:
-
-- Branches of a tree, to experiment without touching the main one.
-- Region claims and counterexample search in the static app (they run behind
-  the API in `apps/api`, `bench.html`).
-- More chemistry: other oscillators and questions, more lessons, and an
-  evaluation of whether lessons also help Muse choose better tests.
-
-Built during the Meta Global AI Developer Hackathon (October 27 - November 4,
-2026); the git history is the record. See [HACKATHON.md](HACKATHON.md).
+- **No key:** open the [app](https://viraloyster.github.io/VIBloom/) and
+  choose a recorded session (the handwritten BZ recipe; Muse surprised and
+  learning; the cardboard airliner, a deliberately absurd goal outside
+  chemistry). Playback can be paused and stepped; experiments are re-run in
+  your browser.
+- **With a Meta Model API key:** grow a new tree or write the question by
+  hand. The key stays in the tab (or on the device, if you ask) and is sent
+  only to api.meta.ai. The session budget limits the tab, not your account.
+  Standard mode keeps your content out of Meta's training; contributor mode is
+  about 20 times cheaper and allows it.
+- **Locally:** `npm ci && npm run dev`. `npm test` runs the tests;
+  `npm run verify` re-runs the recorded sessions.
 
 ## Repository
 
 ```
 apps/web          static app: idea tree (index.html), chemistry bench (bench.html)
 apps/api          Cloudflare Worker and Durable Objects (region claims, search)
-packages/ideas    the idea tree: protocol, engine rules, Muse client, evaluation
-packages/chem     stiff solver, Oregonator models, classifier
+packages/ideas    the tree: protocol, engine rules, Muse client, evaluation, verify
+packages/chem     stiff solver, Oregonator models, recipe conversion, classifier
 packages/         also contracts, engine (hashing, log), search, agent
 tools/reference   SciPy reference data generator
 docs/             architecture, science, validation, evaluation
 ```
-
-## Documentation
-
-- [Evaluation](docs/evaluation.md): does a lesson improve Muse's predictions?
-- [Validation](docs/validation.md): the solver against SciPy, reproduction in the browser
-- [Scientific scope](docs/science.md)
-- [Architecture](docs/architecture.md)
 
 ## Credits
 
