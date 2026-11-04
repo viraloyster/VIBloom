@@ -8,6 +8,20 @@
 - Refuting a claim is a valid result. The system protects the record, not the
   expected outcome.
 
+## Two systems in one repository
+
+- **The public app** (`apps/web/index.html`, `packages/ideas`, `packages/chem`):
+  the assumption tree, Muse's predictions and lessons, the recipe map and the
+  Process view. Its rules are summarised in [Anticipation and
+  lessons](#anticipation-and-lessons), from "In the idea tree".
+- **The research bench** (`apps/web/bench.html`, `apps/api`, `packages/engine`,
+  `packages/agent`, `packages/search`): claims over parameter regions,
+  counterexample search and a multi-turn investigator agent. It runs locally
+  with the Worker and is not part of the public app. Most sections below,
+  from "State model" on, describe it.
+
+Both share `contracts`, the chemistry engine and the hash-chained log.
+
 ## Packages
 
 | Package     | Responsibility                                                                 | May import                    |

@@ -1,5 +1,12 @@
 {
   "name": "vibloom",
+  "description": "A research instrument for chemistry where Muse Spark predicts experiments before they run, a stiff solver settles them, and every step is kept in a replayable record.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/viraloyster/VIBloom.git"
+  },
+  "homepage": "https://viraloyster.github.io/VIBloom/",
   "private": true,
   "type": "module",
   "workspaces": [
