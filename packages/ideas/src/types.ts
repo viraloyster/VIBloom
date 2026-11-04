@@ -125,6 +125,32 @@ export type EventBody =
       asked: Record<string, number>;
       usage: Usage;
     }
+  | {
+      type: "predict";
+      node: string;
+      // The values the prediction was made for.
+      inputs: Record<string, number>;
+      expect: "holds" | "fails";
+      confidence: number;
+      reason: string;
+      // Lessons the model says it used.
+      uses: string[];
+      usage: Usage;
+    }
+  | {
+      type: "lesson";
+      id: string;
+      node: string;
+      // The surprising run: values and what happened.
+      basis: Record<string, number>;
+      observed: "holds" | "fails";
+      candidates: { explanation: string; scope: string; expect: "holds" | "fails" }[];
+      // One run that tells the candidates apart: the same values with one changed.
+      test: { param: string; value: number };
+      // Computed by the engine, re-computed when the log is replayed.
+      outcome: "holds" | "fails";
+      usage: Usage;
+    }
   | { type: "accept"; node: string }
   | { type: "reject"; node: string };
 
@@ -139,3 +165,24 @@ export interface IdeaEvent {
 // Standard keeps content out of Meta's training; contributor is cheaper and
 // lets Meta train on it. A person chooses.
 export type Mode = "standard" | "contributor";
+
+export interface Lesson {
+  id: string;
+  node: string;
+  basis: Record<string, number>;
+  observed: "holds" | "fails";
+  candidates: { explanation: string; scope: string; expect: "holds" | "fails" }[];
+  test: { param: string; value: number };
+  outcome: "holds" | "fails";
+  // Index of the candidate the test supported, derived by code.
+  supported: number;
+}
+
+export interface Prediction {
+  node: string;
+  inputs: Record<string, number>;
+  expect: "holds" | "fails";
+  confidence: number;
+  reason: string;
+  uses: string[];
+}

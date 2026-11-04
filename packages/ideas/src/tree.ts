@@ -2,7 +2,7 @@
 // what the model returns is validated here before it becomes a node.
 
 import { canonical, sha256 } from "@vibloom/engine";
-import { runCheck } from "./check";
+import { runCheck, SIM_PARAMS } from "./check";
 import { bare, MAX_EXPR, names, OPS, rename, tokens, type Op } from "./expr";
 import { AXES, type GrownNode } from "./protocol";
 import type {
@@ -11,7 +11,9 @@ import type {
   EventBody,
   IdeaEvent,
   IdeaNode,
+  Lesson,
   Mode,
+  Prediction,
   Param,
   SimQuestion,
   Usage,
@@ -36,6 +38,8 @@ export class IdeaTree {
   readonly events: IdeaEvent[] = [];
   readonly nodes = new Map<string, IdeaNode>();
   readonly results = new Map<string, CheckResult | CheckError>();
+  readonly lessons: Lesson[] = [];
+  readonly predictions: Prediction[] = [];
   // Experiment results read from a log and not yet re-run in this browser.
   readonly unconfirmed = new Set<string>();
   // Visuals Muse designed for a node, latest last.
@@ -74,6 +78,8 @@ export class IdeaTree {
       results: structuredClone(this.results),
       views: structuredClone(this.views),
       chat: this.chat.length,
+      lessons: this.lessons.length,
+      predictions: this.predictions.length,
       goal: this.goal,
       mode: this.mode,
     };
@@ -87,6 +93,8 @@ export class IdeaTree {
       this.views.clear();
       for (const [k, v] of before.views) this.views.set(k, v);
       this.chat.length = before.chat;
+      this.lessons.length = before.lessons;
+      this.predictions.length = before.predictions;
       this.goal = before.goal;
       this.mode = before.mode;
       throw e;
@@ -190,6 +198,54 @@ export class IdeaTree {
           asked: { ...b.asked },
         });
         break;
+      case "predict": {
+        const n = this.nodes.get(b.node);
+        if (n?.check?.kind !== "oregonator") throw new Error(`no experiment on ${b.node}`);
+        const confidence = Math.min(0.99, Math.max(0.5, b.confidence));
+        this.predictions.push({
+          node: b.node,
+          inputs: { ...b.inputs },
+          expect: b.expect,
+          confidence,
+          reason: b.reason,
+          uses: b.uses.filter((u) => this.lessons.some((l) => l.id === u)),
+        });
+        break;
+      }
+      case "lesson": {
+        const spec = this.nodes.get(b.node)?.check;
+        if (spec?.kind !== "oregonator") throw new Error(`no experiment on ${b.node}`);
+        // The gate: two explanations that expect different outcomes, and a test
+        // that changes exactly one experiment parameter.
+        const [a, c] = b.candidates;
+        if (b.candidates.length !== 2 || !a || !c || a.expect === c.expect) {
+          throw new Error("a lesson needs two explanations that expect different outcomes");
+        }
+        if (!(SIM_PARAMS as readonly string[]).includes(b.test.param)) {
+          throw new Error(`the test may change only ${SIM_PARAMS.join(", ")}`);
+        }
+        const before = b.basis[b.test.param];
+        if (!(b.test.value > 0) || before === undefined || b.test.value === before) {
+          throw new Error("the test must change its parameter to a new positive value");
+        }
+        if (this.lessons.some((l) => l.id === b.id)) throw new Error(`lesson ${b.id} exists`);
+        // The engine reruns the test; a recorded outcome it does not reach is refused.
+        const again = runCheck(spec, { ...b.basis, [b.test.param]: b.test.value });
+        if ("error" in again) throw new Error(`the test could not run: ${again.error}`);
+        const outcome = again.pass ? "holds" : "fails";
+        if (outcome !== b.outcome) throw new Error(`lesson ${b.id} does not reproduce`);
+        this.lessons.push({
+          id: b.id,
+          node: b.node,
+          basis: { ...b.basis },
+          observed: b.observed,
+          candidates: b.candidates.map((x) => ({ ...x })),
+          test: { ...b.test },
+          outcome,
+          supported: b.candidates.findIndex((x) => x.expect === outcome),
+        });
+        break;
+      }
       case "accept":
       case "reject": {
         const n = this.nodes.get(b.node);
@@ -500,6 +556,26 @@ export class IdeaTree {
       id,
       same ? again : { error: "the recorded experiment did not reproduce here" },
     );
+  }
+
+  // A lesson holds while the premises it was learned under still have the
+  // values it was learned with; change one and it is invalidated, not erased.
+  lessonState(l: Lesson): "current" | "invalidated" {
+    const now = this.scope();
+    return Object.entries(l.basis).every(([k, v]) => now[k] === v) ? "current" : "invalidated";
+  }
+
+  // How often the model's predictions matched the engine's runs.
+  calibration(): { made: number; right: number; surprises: number } {
+    let made = 0;
+    let right = 0;
+    for (const p of this.predictions) {
+      const r = this.results.get(p.node);
+      if (!r || "error" in r || JSON.stringify(r.inputs) !== JSON.stringify(p.inputs)) continue;
+      made++;
+      if ((r.pass ? "holds" : "fails") === p.expect) right++;
+    }
+    return { made, right, surprises: made - right };
   }
 
   // Whether values an answer relied on have changed since it was given.

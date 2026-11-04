@@ -520,6 +520,112 @@ describe("chemistry experiments", () => {
   });
 });
 
+describe("predictions and lessons", () => {
+  const clock = () => {
+    const t = new IdeaTree();
+    t.append("person", { type: "goal", text: "A chemical clock", mode: "standard" });
+    const nodes = t.admit("goal", [
+      grown("kinetics", {
+        params: [
+          { ...p("s", 1, "reference", ""), kind: "design" },
+          { ...p("q", 7.62e-5, "reference", ""), kind: "external" },
+          { ...p("eps", 0.0099, "reference", ""), kind: "external" },
+          { ...p("eps_prime", 1e-4, "reference", ""), kind: "external" },
+        ],
+        check: {
+          kind: "oregonator",
+          question: "reduction_keeps_period",
+          tolerance: 0.05,
+          description: "",
+          value: "",
+          op: "none",
+          limit: "",
+          unit: "",
+        },
+      }),
+    ]);
+    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    return t;
+  };
+
+  it("records a surprise, settles explanations by a run, and invalidates the lesson when a premise changes", () => {
+    const t = clock();
+    const spec = t.nodes.get("kinetics")?.check;
+    if (!spec) throw new Error("missing");
+    const inputs = { s: 1, q: 7.62e-5, eps: 0.0099, eps_prime: 1e-4 };
+    t.append("muse", {
+      type: "predict",
+      node: "kinetics",
+      inputs,
+      expect: "holds",
+      confidence: 0.8,
+      reason: "",
+      uses: [],
+      usage,
+    });
+    t.append("engine", { type: "check", node: "kinetics", result: runCheck(spec, t.scope()) });
+    expect(t.calibration()).toEqual({ made: 1, right: 0, surprises: 1 });
+    const test = { param: "s", value: 2 };
+    const r = runCheck(spec, { ...inputs, s: 2 });
+    if ("error" in r) throw new Error(r.error);
+    const outcome: "holds" | "fails" = r.pass ? "holds" : "fails";
+    const lesson = {
+      type: "lesson" as const,
+      id: "l1",
+      node: "kinetics",
+      basis: inputs,
+      observed: "fails" as const,
+      candidates: [
+        {
+          explanation: "the reduction drifts at low s",
+          scope: "s near 1",
+          expect: "holds" as const,
+        },
+        {
+          explanation: "the reduction drifts everywhere",
+          scope: "all s",
+          expect: "fails" as const,
+        },
+      ],
+      test,
+      outcome,
+      usage,
+    };
+    t.append("muse", lesson);
+    const l = t.lessons[0];
+    expect(l?.supported).toBe(outcome === "holds" ? 0 : 1);
+    expect(t.lessonState(l ?? (undefined as never))).toBe("current");
+    t.append("person", { type: "set_param", name: "eps_prime", value: 2e-4, source: "edit" });
+    expect(t.lessonState(l ?? (undefined as never))).toBe("invalidated");
+    // A recorded outcome the engine does not reach is refused.
+    const forged = clock();
+    expect(() =>
+      forged.append("muse", { ...lesson, outcome: outcome === "holds" ? "fails" : "holds" }),
+    ).toThrow(/reproduce/);
+    expect(forged.lessons).toHaveLength(0);
+  });
+
+  it("refuses explanations that the test cannot tell apart", () => {
+    const t = clock();
+    expect(() =>
+      t.append("muse", {
+        type: "lesson",
+        id: "l2",
+        node: "kinetics",
+        basis: { s: 1, q: 7.62e-5, eps: 0.0099, eps_prime: 1e-4 },
+        observed: "fails",
+        candidates: [
+          { explanation: "a", scope: "", expect: "holds" },
+          { explanation: "b", scope: "", expect: "holds" },
+        ],
+        test: { param: "s", value: 2 },
+        outcome: "holds",
+        usage,
+      }),
+    ).toThrow(/different outcomes/);
+  });
+});
+
 describe("cost", () => {
   it("prices cached input apart from fresh input", () => {
     expect(cost("muse-spark-1.3", 1e6, 0, 0)).toBeCloseTo(1.25);

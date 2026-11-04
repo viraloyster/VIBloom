@@ -269,3 +269,59 @@ export interface GrownNode {
   };
   basis: string[];
 }
+
+export const PREDICT = `You are Muse inside VIBloom. Before VIBloom runs an Oregonator experiment,
+commit to a prediction: will the assumption hold or fail at these values?
+Use the lessons given (each with its scope and whether it is still current)
+when they apply, and list the ids of those you used in uses. confidence is
+your probability that you are right (0.5 to 0.99). reason: one sentence.`;
+
+export const PREDICT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["expect", "confidence", "reason", "uses"],
+  properties: {
+    expect: { type: "string", enum: ["holds", "fails"] },
+    confidence: { type: "number" },
+    reason: { type: "string" },
+    uses: { type: "array", items: { type: "string" } },
+  },
+} as const;
+
+export const DIAGNOSE = `You are Muse inside VIBloom. Your prediction for an Oregonator experiment was
+wrong. Propose exactly two different explanations for why, each with the
+scope where it would apply and what it expects in ONE discriminating test:
+the same values with a single parameter changed (s, q, eps or eps_prime) to a
+new positive value. The two explanations must expect different outcomes in
+that test, so the run tells them apart. VIBloom runs the test and decides
+which explanation the evidence supports; you do not.`;
+
+export const DIAGNOSE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["candidates", "test"],
+  properties: {
+    candidates: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["explanation", "scope", "expect"],
+        properties: {
+          explanation: { type: "string" },
+          scope: { type: "string" },
+          expect: { type: "string", enum: ["holds", "fails"] },
+        },
+      },
+    },
+    test: {
+      type: "object",
+      additionalProperties: false,
+      required: ["param", "value"],
+      properties: {
+        param: { type: "string", enum: ["s", "q", "eps", "eps_prime"] },
+        value: { type: "number" },
+      },
+    },
+  },
+} as const;
