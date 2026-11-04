@@ -1,0 +1,3576 @@
+{
+  "grid": {
+    "note": "Frozen before the run. Every point is new: q on both sides of and between the two lessons, eps, s and eps_prime off every lesson run.",
+    "q": [0.00015, 0.0003, 0.0006],
+    "eps": [0.005, 0.02],
+    "s": [0.8, 1.3],
+    "eps_prime": [0.00002, 0.00005, 0.00015]
+  },
+  "reps": 2,
+  "lessons": [
+    {
+      "id": "lesson-1",
+      "basis": {
+        "s": 1,
+        "q": 0.0000762,
+        "eps": 0.01,
+        "eps_prime": 0.0002
+      },
+      "test": {
+        "param": "eps_prime",
+        "value": 0.00002
+      }
+    },
+    {
+      "id": "lesson-2",
+      "basis": {
+        "s": 1,
+        "q": 0.0003,
+        "eps": 0.03,
+        "eps_prime": 0.0001
+      },
+      "test": {
+        "param": "eps_prime",
+        "value": 0.0002
+      }
+    }
+  ],
+  "lessonRuns": [
+    {
+      "v": {
+        "s": 1,
+        "q": 0.0000762,
+        "eps": 0.01,
+        "eps_prime": 0.0002
+      },
+      "gap": 0.5501360091505223
+    },
+    {
+      "v": {
+        "s": 1,
+        "q": 0.0000762,
+        "eps": 0.01,
+        "eps_prime": 0.00002
+      },
+      "gap": 0.03916139589088791
+    },
+    {
+      "v": {
+        "s": 1,
+        "q": 0.0003,
+        "eps": 0.03,
+        "eps_prime": 0.0001
+      },
+      "gap": 0.04813040436851966
+    },
+    {
+      "v": {
+        "s": 1,
+        "q": 0.0003,
+        "eps": 0.03,
+        "eps_prime": 0.0002
+      },
+      "gap": 0.09340816363000212
+    }
+  ],
+  "points": 36,
+  "holds": 24,
+  "excluded": [],
+  "conditions": {
+    "none": {
+      "n": 72,
+      "unanswered": 0,
+      "right": 48,
+      "accuracy": 0.6666666666666666,
+      "brier": 0.2524666666666668,
+      "meanConfidence": 0.8736111111111113,
+      "citedLesson": 0,
+      "cost": 0.2514006
+    },
+    "one": {
+      "n": 72,
+      "unanswered": 0,
+      "right": 55,
+      "accuracy": 0.7638888888888888,
+      "brier": 0.18458333333333324,
+      "meanConfidence": 0.6527777777777775,
+      "citedLesson": 69,
+      "cost": 0.40213754999999984
+    },
+    "two": {
+      "n": 72,
+      "unanswered": 0,
+      "right": 61,
+      "accuracy": 0.8472222222222222,
+      "brier": 0.1380861111111111,
+      "meanConfidence": 0.7049999999999998,
+      "citedLesson": 70,
+      "cost": 0.32627834999999994
+    }
+  },
+  "baselines": {
+    "one lesson, eps_prime": 0.6666666666666666,
+    "two lessons, eps_prime and q": 0.8888888888888888,
+    "two lessons, eps_prime and eps": 0.6666666666666666,
+    "always fails": 0.3333333333333333
+  },
+  "total": 0.9798165000000003,
+  "rows": [
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.02648369204133719,
+      "cost": 0.0031385,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.02648369204133719,
+      "cost": 0.00535145,
+      "expect": "holds",
+      "confidence": 0.68,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.02648369204133719,
+      "cost": 0.0036828000000000004,
+      "expect": "holds",
+      "confidence": 0.75,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.05502955263981562,
+      "cost": 0.0039704499999999995,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.05502955263981562,
+      "cost": 0.00568295,
+      "expect": "fails",
+      "confidence": 0.62,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.05502955263981562,
+      "cost": 0.00303255,
+      "expect": "holds",
+      "confidence": 0.7,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.1513663148103999,
+      "cost": 0.0025976999999999997,
+      "expect": "holds",
+      "confidence": 0.88,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.1513663148103999,
+      "cost": 0.00423795,
+      "expect": "fails",
+      "confidence": 0.75,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.1513663148103999,
+      "cost": 0.0052468,
+      "expect": "fails",
+      "confidence": 0.62,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.028620021688460538,
+      "cost": 0.0033839499999999997,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.028620021688460538,
+      "cost": 0.00388945,
+      "expect": "holds",
+      "confidence": 0.65,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.028620021688460538,
+      "cost": 0.00321105,
+      "expect": "holds",
+      "confidence": 0.78,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.058480786787032384,
+      "cost": 0.0040682,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.058480786787032384,
+      "cost": 0.0085687,
+      "expect": "holds",
+      "confidence": 0.55,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.058480786787032384,
+      "cost": 0.0036190500000000004,
+      "expect": "holds",
+      "confidence": 0.72,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.1571876939746409,
+      "cost": 0.00417445,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.1571876939746409,
+      "cost": 0.004647,
+      "expect": "fails",
+      "confidence": 0.7,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.1571876939746409,
+      "cost": 0.0051618,
+      "expect": "holds",
+      "confidence": 0.7,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.020526571049957018,
+      "cost": 0.0040979499999999995,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.020526571049957018,
+      "cost": 0.00556395,
+      "expect": "holds",
+      "confidence": 0.68,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.020526571049957018,
+      "cost": 0.0028115500000000003,
+      "expect": "holds",
+      "confidence": 0.72,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.046170435468704,
+      "cost": 0.0030737,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.046170435468704,
+      "cost": 0.00527495,
+      "expect": "fails",
+      "confidence": 0.62,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.046170435468704,
+      "cost": 0.0033513,
+      "expect": "holds",
+      "confidence": 0.72,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.13590741465278675,
+      "cost": 0.0045187,
+      "expect": "holds",
+      "confidence": 0.75,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.13590741465278675,
+      "cost": 0.0040637,
+      "expect": "fails",
+      "confidence": 0.7,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.13590741465278675,
+      "cost": 0.006296550000000001,
+      "expect": "fails",
+      "confidence": 0.62,
+      "uses": ["lesson-2", "lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.021691559904065065,
+      "cost": 0.00362725,
+      "expect": "holds",
+      "confidence": 0.92,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.021691559904065065,
+      "cost": 0.00540775,
+      "expect": "holds",
+      "confidence": 0.65,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.021691559904065065,
+      "cost": 0.00469005,
+      "expect": "holds",
+      "confidence": 0.7,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.04831822098383038,
+      "cost": 0.0025976999999999997,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.04831822098383038,
+      "cost": 0.0057891999999999996,
+      "expect": "holds",
+      "confidence": 0.65,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.04831822098383038,
+      "cost": 0.0038783000000000003,
+      "expect": "holds",
+      "confidence": 0.7,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.13981752807086356,
+      "cost": 0.00390245,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.13981752807086356,
+      "cost": 0.005283449999999999,
+      "expect": "fails",
+      "confidence": 0.68,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.13981752807086356,
+      "cost": 0.00529355,
+      "expect": "fails",
+      "confidence": 0.62,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.017110897333415965,
+      "cost": 0.00303545,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.017110897333415965,
+      "cost": 0.00401695,
+      "expect": "holds",
+      "confidence": 0.7,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.017110897333415965,
+      "cost": 0.003993050000000001,
+      "expect": "holds",
+      "confidence": 0.72,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.03570592894615217,
+      "cost": 0.0029164499999999997,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.03570592894615217,
+      "cost": 0.00774845,
+      "expect": "holds",
+      "confidence": 0.65,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.03570592894615217,
+      "cost": 0.0041758,
+      "expect": "holds",
+      "confidence": 0.78,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.08710579251933658,
+      "cost": 0.00292495,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.08710579251933658,
+      "cost": 0.00440795,
+      "expect": "fails",
+      "confidence": 0.65,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.08710579251933658,
+      "cost": 0.0064878,
+      "expect": "fails",
+      "confidence": 0.65,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.018488861190293793,
+      "cost": 0.0032181999999999996,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.018488861190293793,
+      "cost": 0.0079567,
+      "expect": "holds",
+      "confidence": 0.6,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.018488861190293793,
+      "cost": 0.0030623,
+      "expect": "holds",
+      "confidence": 0.78,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.037983068215498406,
+      "cost": 0.00409475,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.037983068215498406,
+      "cost": 0.00641395,
+      "expect": "holds",
+      "confidence": 0.65,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.037983068215498406,
+      "cost": 0.0050625,
+      "expect": "holds",
+      "confidence": 0.78,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.0915181323852615,
+      "cost": 0.00410645,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.0915181323852615,
+      "cost": 0.00484995,
+      "expect": "fails",
+      "confidence": 0.68,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.0915181323852615,
+      "cost": 0.00535305,
+      "expect": "fails",
+      "confidence": 0.7,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.012289944360581966,
+      "cost": 0.0028526999999999997,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.012289944360581966,
+      "cost": 0.00415295,
+      "expect": "holds",
+      "confidence": 0.68,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.012289944360581966,
+      "cost": 0.00394205,
+      "expect": "holds",
+      "confidence": 0.8,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.02790376032447085,
+      "cost": 0.0027251999999999997,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.02790376032447085,
+      "cost": 0.00636295,
+      "expect": "fails",
+      "confidence": 0.65,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.02790376032447085,
+      "cost": 0.0047793,
+      "expect": "holds",
+      "confidence": 0.7,
+      "uses": ["lesson-2", "lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.07456244129492742,
+      "cost": 0.00307795,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.07456244129492742,
+      "cost": 0.0040552,
+      "expect": "fails",
+      "confidence": 0.7,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.07456244129492742,
+      "cost": 0.00406105,
+      "expect": "fails",
+      "confidence": 0.68,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.013010056310538117,
+      "cost": 0.00222795,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.013010056310538117,
+      "cost": 0.00557245,
+      "expect": "holds",
+      "confidence": 0.62,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.013010056310538117,
+      "cost": 0.00440955,
+      "expect": "holds",
+      "confidence": 0.8,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.029377461782243094,
+      "cost": 0.0035581999999999996,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.029377461782243094,
+      "cost": 0.00513045,
+      "expect": "holds",
+      "confidence": 0.62,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.029377461782243094,
+      "cost": 0.0036615500000000004,
+      "expect": "holds",
+      "confidence": 0.72,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.07760555432312836,
+      "cost": 0.00419995,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.07760555432312836,
+      "cost": 0.0053641999999999995,
+      "expect": "fails",
+      "confidence": 0.7,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.07760555432312836,
+      "cost": 0.0062413,
+      "expect": "fails",
+      "confidence": 0.62,
+      "uses": ["lesson-2", "lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.011005310812511273,
+      "cost": 0.0033456999999999996,
+      "expect": "holds",
+      "confidence": 0.88,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.011005310812511273,
+      "cost": 0.004985949999999999,
+      "expect": "holds",
+      "confidence": 0.68,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.011005310812511273,
+      "cost": 0.00393355,
+      "expect": "holds",
+      "confidence": 0.78,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.023205768190727415,
+      "cost": 0.00337545,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.023205768190727415,
+      "cost": 0.00637145,
+      "expect": "fails",
+      "confidence": 0.62,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.023205768190727415,
+      "cost": 0.00507255,
+      "expect": "holds",
+      "confidence": 0.72,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.05611147900802027,
+      "cost": 0.0033797,
+      "expect": "holds",
+      "confidence": 0.82,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.05611147900802027,
+      "cost": 0.00443345,
+      "expect": "fails",
+      "confidence": 0.65,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.05611147900802027,
+      "cost": 0.00576105,
+      "expect": "fails",
+      "confidence": 0.68,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.011849434642458976,
+      "cost": 0.0057767,
+      "expect": "holds",
+      "confidence": 0.88,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.011849434642458976,
+      "cost": 0.0066137,
+      "expect": "holds",
+      "confidence": 0.65,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.011849434642458976,
+      "cost": 0.00437295,
+      "expect": "holds",
+      "confidence": 0.75,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.025360104506279617,
+      "cost": 0.00356245,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.025360104506279617,
+      "cost": 0.0058359499999999995,
+      "expect": "fails",
+      "confidence": 0.62,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.025360104506279617,
+      "cost": 0.004847300000000001,
+      "expect": "holds",
+      "confidence": 0.65,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.05974840662291624,
+      "cost": 0.0037069499999999997,
+      "expect": "holds",
+      "confidence": 0.82,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.05974840662291624,
+      "cost": 0.0062057,
+      "expect": "fails",
+      "confidence": 0.6,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "fails",
+      "gap": 0.05974840662291624,
+      "cost": 0.0056633000000000005,
+      "expect": "fails",
+      "confidence": 0.62,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.007288375694059319,
+      "cost": 0.0037281999999999997,
+      "expect": "holds",
+      "confidence": 0.93,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.007288375694059319,
+      "cost": 0.0098522,
+      "expect": "holds",
+      "confidence": 0.55,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.007288375694059319,
+      "cost": 0.00299855,
+      "expect": "holds",
+      "confidence": 0.72,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.016947523890313232,
+      "cost": 0.00296745,
+      "expect": "holds",
+      "confidence": 0.95,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.016947523890313232,
+      "cost": 0.01040045,
+      "expect": "fails",
+      "confidence": 0.5,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.016947523890313232,
+      "cost": 0.0035298,
+      "expect": "holds",
+      "confidence": 0.72,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.04516877888542406,
+      "cost": 0.00269545,
+      "expect": "holds",
+      "confidence": 0.82,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.04516877888542406,
+      "cost": 0.0042677,
+      "expect": "fails",
+      "confidence": 0.7,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.04516877888542406,
+      "cost": 0.00449455,
+      "expect": "fails",
+      "confidence": 0.65,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.007792201775689485,
+      "cost": 0.0046207,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.007792201775689485,
+      "cost": 0.004987,
+      "expect": "holds",
+      "confidence": 0.75,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.007792201775689485,
+      "cost": 0.00446055,
+      "expect": "holds",
+      "confidence": 0.7,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.01804992346288286,
+      "cost": 0.0030822,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.01804992346288286,
+      "cost": 0.0059847,
+      "expect": "fails",
+      "confidence": 0.62,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.01804992346288286,
+      "cost": 0.00474105,
+      "expect": "holds",
+      "confidence": 0.68,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.04748384698606307,
+      "cost": 0.0035539499999999997,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.04748384698606307,
+      "cost": 0.004943449999999999,
+      "expect": "fails",
+      "confidence": 0.7,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 0,
+      "truth": "holds",
+      "gap": 0.04748384698606307,
+      "cost": 0.0077628,
+      "expect": "fails",
+      "confidence": 0.58,
+      "uses": ["lesson-2", "lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.02648369204133719,
+      "cost": 0.0027251999999999997,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.02648369204133719,
+      "cost": 0.0047352,
+      "expect": "holds",
+      "confidence": 0.65,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.02648369204133719,
+      "cost": 0.0033768,
+      "expect": "holds",
+      "confidence": 0.68,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.05502955263981562,
+      "cost": 0.0028526999999999997,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.05502955263981562,
+      "cost": 0.0078547,
+      "expect": "fails",
+      "confidence": 0.62,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.05502955263981562,
+      "cost": 0.00405255,
+      "expect": "holds",
+      "confidence": 0.72,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.1513663148103999,
+      "cost": 0.0030481999999999996,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.1513663148103999,
+      "cost": 0.0043357,
+      "expect": "fails",
+      "confidence": 0.75,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.1513663148103999,
+      "cost": 0.00511505,
+      "expect": "fails",
+      "confidence": 0.62,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.028620021688460538,
+      "cost": 0.00402145,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.028620021688460538,
+      "cost": 0.0054407,
+      "expect": "holds",
+      "confidence": 0.65,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.028620021688460538,
+      "cost": 0.0031643,
+      "expect": "holds",
+      "confidence": 0.78,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.058480786787032384,
+      "cost": 0.00410645,
+      "expect": "holds",
+      "confidence": 0.82,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.058480786787032384,
+      "cost": 0.00751895,
+      "expect": "fails",
+      "confidence": 0.65,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.058480786787032384,
+      "cost": 0.0040483,
+      "expect": "holds",
+      "confidence": 0.72,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.1571876939746409,
+      "cost": 0.00425945,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.1571876939746409,
+      "cost": 0.00654145,
+      "expect": "fails",
+      "confidence": 0.68,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.1571876939746409,
+      "cost": 0.00666795,
+      "expect": "fails",
+      "confidence": 0.6,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.020526571049957018,
+      "cost": 0.0028526999999999997,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.020526571049957018,
+      "cost": 0.006435199999999999,
+      "expect": "fails",
+      "confidence": 0.6,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.020526571049957018,
+      "cost": 0.0044393,
+      "expect": "holds",
+      "confidence": 0.75,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.046170435468704,
+      "cost": 0.00313745,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.046170435468704,
+      "cost": 0.0042422,
+      "expect": "fails",
+      "confidence": 0.7,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.046170435468704,
+      "cost": 0.0035978000000000004,
+      "expect": "holds",
+      "confidence": 0.78,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.13590741465278675,
+      "cost": 0.00464195,
+      "expect": "holds",
+      "confidence": 0.88,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.13590741465278675,
+      "cost": 0.0035707,
+      "expect": "fails",
+      "confidence": 0.65,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.13590741465278675,
+      "cost": 0.00376355,
+      "expect": "fails",
+      "confidence": 0.65,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.021691559904065065,
+      "cost": 0.0033669499999999996,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.021691559904065065,
+      "cost": 0.0043824499999999995,
+      "expect": "holds",
+      "confidence": 0.65,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.021691559904065065,
+      "cost": 0.00308355,
+      "expect": "holds",
+      "confidence": 0.72,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.04831822098383038,
+      "cost": 0.00386845,
+      "expect": "holds",
+      "confidence": 0.92,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.04831822098383038,
+      "cost": 0.00512195,
+      "expect": "fails",
+      "confidence": 0.68,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.04831822098383038,
+      "cost": 0.004889800000000001,
+      "expect": "holds",
+      "confidence": 0.75,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.13981752807086356,
+      "cost": 0.0051137,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.13981752807086356,
+      "cost": 0.0043612,
+      "expect": "fails",
+      "confidence": 0.72,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.00015,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.13981752807086356,
+      "cost": 0.00469855,
+      "expect": "fails",
+      "confidence": 0.68,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.017110897333415965,
+      "cost": 0.0025084499999999997,
+      "expect": "holds",
+      "confidence": 0.92,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.017110897333415965,
+      "cost": 0.00456945,
+      "expect": "holds",
+      "confidence": 0.65,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.017110897333415965,
+      "cost": 0.00321105,
+      "expect": "holds",
+      "confidence": 0.8,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.03570592894615217,
+      "cost": 0.0029207,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.03570592894615217,
+      "cost": 0.00705995,
+      "expect": "fails",
+      "confidence": 0.6,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.03570592894615217,
+      "cost": 0.005272300000000001,
+      "expect": "holds",
+      "confidence": 0.7,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.08710579251933658,
+      "cost": 0.0036389499999999997,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.08710579251933658,
+      "cost": 0.0048372,
+      "expect": "fails",
+      "confidence": 0.7,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.08710579251933658,
+      "cost": 0.00622005,
+      "expect": "fails",
+      "confidence": 0.68,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.018488861190293793,
+      "cost": 0.0036219499999999996,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.018488861190293793,
+      "cost": 0.0038639499999999997,
+      "expect": "holds",
+      "confidence": 0.68,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.018488861190293793,
+      "cost": 0.00402705,
+      "expect": "holds",
+      "confidence": 0.8,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.037983068215498406,
+      "cost": 0.0036431999999999997,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.037983068215498406,
+      "cost": 0.0047777,
+      "expect": "holds",
+      "confidence": 0.62,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.037983068215498406,
+      "cost": 0.00439255,
+      "expect": "holds",
+      "confidence": 0.7,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.0915181323852615,
+      "cost": 0.0025551999999999997,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.0915181323852615,
+      "cost": 0.0048541999999999995,
+      "expect": "fails",
+      "confidence": 0.65,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.0915181323852615,
+      "cost": 0.0070998,
+      "expect": "holds",
+      "confidence": 0.62,
+      "uses": ["lesson-2", "lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.012289944360581966,
+      "cost": 0.0032267,
+      "expect": "holds",
+      "confidence": 0.95,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.012289944360581966,
+      "cost": 0.0080502,
+      "expect": "holds",
+      "confidence": 0.6,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.012289944360581966,
+      "cost": 0.00419705,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.02790376032447085,
+      "cost": 0.00322245,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.02790376032447085,
+      "cost": 0.0065712,
+      "expect": "fails",
+      "confidence": 0.62,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.02790376032447085,
+      "cost": 0.004290550000000001,
+      "expect": "holds",
+      "confidence": 0.75,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.07456244129492742,
+      "cost": 0.0034476999999999997,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.07456244129492742,
+      "cost": 0.0042549499999999995,
+      "expect": "fails",
+      "confidence": 0.68,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.07456244129492742,
+      "cost": 0.0045073000000000005,
+      "expect": "fails",
+      "confidence": 0.7,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.013010056310538117,
+      "cost": 0.0035667,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.013010056310538117,
+      "cost": 0.0059082,
+      "expect": "holds",
+      "confidence": 0.65,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.013010056310538117,
+      "cost": 0.0038995500000000003,
+      "expect": "holds",
+      "confidence": 0.8,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.029377461782243094,
+      "cost": 0.0030142,
+      "expect": "holds",
+      "confidence": 0.88,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.029377461782243094,
+      "cost": 0.010519450000000001,
+      "expect": "holds",
+      "confidence": 0.6,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.029377461782243094,
+      "cost": 0.00374655,
+      "expect": "holds",
+      "confidence": 0.72,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.07760555432312836,
+      "cost": 0.0022662,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.07760555432312836,
+      "cost": 0.00454395,
+      "expect": "fails",
+      "confidence": 0.68,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0003,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.07760555432312836,
+      "cost": 0.0057653,
+      "expect": "fails",
+      "confidence": 0.72,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.011005310812511273,
+      "cost": 0.00384825,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.011005310812511273,
+      "cost": 0.0039574499999999995,
+      "expect": "holds",
+      "confidence": 0.62,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.011005310812511273,
+      "cost": 0.0050938,
+      "expect": "holds",
+      "confidence": 0.7,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.023205768190727415,
+      "cost": 0.00346045,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.023205768190727415,
+      "cost": 0.00636295,
+      "expect": "holds",
+      "confidence": 0.58,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.023205768190727415,
+      "cost": 0.0051915500000000005,
+      "expect": "holds",
+      "confidence": 0.72,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.05611147900802027,
+      "cost": 0.0032989499999999997,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.05611147900802027,
+      "cost": 0.0053047,
+      "expect": "fails",
+      "confidence": 0.68,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.05611147900802027,
+      "cost": 0.00630505,
+      "expect": "holds",
+      "confidence": 0.6,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.011849434642458976,
+      "cost": 0.00378345,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.011849434642458976,
+      "cost": 0.00388945,
+      "expect": "holds",
+      "confidence": 0.7,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.011849434642458976,
+      "cost": 0.0037593,
+      "expect": "holds",
+      "confidence": 0.72,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.025360104506279617,
+      "cost": 0.0032776999999999997,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.025360104506279617,
+      "cost": 0.00914245,
+      "expect": "holds",
+      "confidence": 0.62,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.025360104506279617,
+      "cost": 0.00374655,
+      "expect": "holds",
+      "confidence": 0.7,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.05974840662291624,
+      "cost": 0.0029717,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.05974840662291624,
+      "cost": 0.0053641999999999995,
+      "expect": "fails",
+      "confidence": 0.68,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.005,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "fails",
+      "gap": 0.05974840662291624,
+      "cost": 0.0059013,
+      "expect": "fails",
+      "confidence": 0.65,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.007288375694059319,
+      "cost": 0.0028612,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.007288375694059319,
+      "cost": 0.0045652,
+      "expect": "holds",
+      "confidence": 0.7,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.007288375694059319,
+      "cost": 0.0031643,
+      "expect": "holds",
+      "confidence": 0.72,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.016947523890313232,
+      "cost": 0.0026232,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.016947523890313232,
+      "cost": 0.0057637,
+      "expect": "fails",
+      "confidence": 0.62,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.016947523890313232,
+      "cost": 0.004974800000000001,
+      "expect": "holds",
+      "confidence": 0.7,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.04516877888542406,
+      "cost": 0.0034306999999999996,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.04516877888542406,
+      "cost": 0.005113449999999999,
+      "expect": "fails",
+      "confidence": 0.68,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 0.8,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.04516877888542406,
+      "cost": 0.00467305,
+      "expect": "fails",
+      "confidence": 0.65,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.007792201775689485,
+      "cost": 0.0035539499999999997,
+      "expect": "holds",
+      "confidence": 0.95,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.007792201775689485,
+      "cost": 0.00416145,
+      "expect": "holds",
+      "confidence": 0.65,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00002
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.007792201775689485,
+      "cost": 0.00350855,
+      "expect": "holds",
+      "confidence": 0.75,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.01804992346288286,
+      "cost": 0.0069242,
+      "expect": "holds",
+      "confidence": 0.88,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.01804992346288286,
+      "cost": 0.005840199999999999,
+      "expect": "holds",
+      "confidence": 0.62,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00005
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.01804992346288286,
+      "cost": 0.0037678,
+      "expect": "holds",
+      "confidence": 0.68,
+      "uses": ["lesson-1", "lesson-2"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "none",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.04748384698606307,
+      "cost": 0.0038556999999999997,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "one",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.04748384698606307,
+      "cost": 0.0036471999999999997,
+      "expect": "fails",
+      "confidence": 0.65,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "q": 0.0006,
+        "eps": 0.02,
+        "s": 1.3,
+        "eps_prime": 0.00015
+      },
+      "condition": "two",
+      "rep": 1,
+      "truth": "holds",
+      "gap": 0.04748384698606307,
+      "cost": 0.00552305,
+      "expect": "fails",
+      "confidence": 0.55,
+      "uses": []
+    }
+  ]
+}

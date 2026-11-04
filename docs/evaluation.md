@@ -1,16 +1,63 @@
 # Evaluation: does a lesson improve Muse's predictions?
 
-Three small, reproducible measurements of the anticipation loop, run on
+Four small, reproducible measurements of the anticipation loop, run on
 November 4, 2026. They are hackathon-sized, not benchmarks: one model
-(`muse-spark-1.3`, effort low), one lesson, one experiment question, each point
-predicted twice. Repetitions of the same point are not independent cases.
+(`muse-spark-1.3`, effort low), one experiment question, one or two lessons,
+each point predicted twice. Repetitions of the same point are not independent
+cases.
 
-**Result in one line.** On the third grid, which varies every model parameter
-and was frozen in a commit before the run, Muse was right on 56% of new
-predictions without a lesson, 75% with the lesson as outcomes and 83% with the
-lesson's measured numbers. A rule with no model that interpolates the lesson's
-two measured gaps scores 78%. The lesson carries most of the gain; Muse's edge
-over that rule is small and within run-to-run variation.
+**Result in one line.** Lessons change Muse's predictions clearly: on the
+fourth grid, frozen before the run, Muse was right on 67% of new predictions
+with no lesson, 76% with one lesson and 85% with two. Rules with no model that
+fit the same lesson numbers score 67% (one lesson), 89% (two lessons, change
+attributed to q) and 67% (two lessons, change attributed to eps). Muse does not
+beat the correctly specified rule; it comes close to it without being told
+which parameter carried the change.
+
+## Fourth evaluation: two lessons, against rules that fit their numbers
+
+The second lesson was learned in a live continuation of the first lesson's
+session ([second-lesson.ts](../packages/ideas/eval/second-lesson.ts), log in
+[lesson-session-2.json](../packages/ideas/eval/lesson-session-2.json), $0.04):
+at q 3e-4, eps 0.03, s 1, eps_prime 1e-4 Muse predicted "fails" (70%, blind)
+with the first lesson; the gap was 4.8% and the reduction held. Its test,
+eps_prime 2e-4, failed at 9.3%, consistent with the explanation that expected
+"fails". The two lessons therefore carry four measured runs: two at q 7.62e-5,
+eps 0.01 and two at q 3e-4, eps 0.03. They moved q and eps together.
+
+The grid ([grid-4.json](../packages/ideas/eval/grid-4.json), committed before
+the run in `486eb21`): q in {1.5e-4, 3e-4, 6e-4} times eps in {0.005, 0.02}
+times s in {0.8, 1.3} times eps_prime in {2e-5, 5e-5, 1.5e-4}, 36 points, all
+conclusive and none shared with a lesson run; 24 hold.
+
+| Condition (36 points x 2)                       | Right | Accuracy | Brier | Mean confidence |
+| ----------------------------------------------- | ----: | -------: | ----: | --------------: |
+| No lesson                                       | 48/72 |      67% | 0.252 |             87% |
+| First lesson, measured contrast                 | 55/72 |      76% | 0.185 |             65% |
+| Both lessons, measured contrast                 | 61/72 |      85% | 0.138 |             70% |
+| Rule: fit on eps_prime, first lesson's two runs | 24/36 |      67% |     - |               - |
+| Rule: fit on eps_prime and q, all four runs     | 32/36 |      89% |     - |               - |
+| Rule: fit on eps_prime and eps, all four runs   | 24/36 |      67% |     - |               - |
+| Always "fails"                                  | 12/36 |      33% |     - |               - |
+
+### Reading it honestly
+
+- **The second lesson helps Muse**: from 76% to 85%, Brier from 0.185 to
+  0.138. Muse cited a lesson on 70 of 72 predictions with both.
+- **A rule fitted on the right variables does better (89%).** Because the two
+  lessons changed q and eps together, a rule has to choose which one carries
+  the change: q gives 89%, eps gives 67%, no better than one lesson. Muse was
+  not told which; its 85% is close to the right choice and far from the wrong
+  one. That is the measured value of Muse here, and it is modest.
+- **Where Muse still misses** is near the tolerance: at q 1.5e-4, eps 0.005,
+  eps_prime 5e-5 the gap is 5.5% to 5.8% and it said "holds"; at q 6e-4, eps
+  0.02, eps_prime 1.5e-4 the gap is 4.5% to 4.7% and it said "fails".
+- **What this does not show**: that Muse would choose tests that separate q
+  from eps, or that it generalises beyond this question. A lesson whose test
+  changes q alone is the next measurement.
+
+Cost: $0.98 for 216 predictions. Raw results:
+[two-lesson grid](eval/predictions-2026-11-04-two-lessons.json).
 
 ## Third evaluation: every parameter varies, against a model-free rule
 
@@ -159,7 +206,8 @@ contrast and to the clearer applicability.
 
 Raw results: [first grid](eval/predictions-2026-11-04.json),
 [second grid](eval/predictions-2026-11-04-grid2.json),
-[third grid](eval/predictions-2026-11-04-grid3.json).
+[third grid](eval/predictions-2026-11-04-grid3.json),
+[two-lesson grid](eval/predictions-2026-11-04-two-lessons.json).
 
 ## What would make this stronger
 
