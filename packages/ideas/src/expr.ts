@@ -150,3 +150,23 @@ export function names(src: string): string[] {
   }
   return [...out].sort();
 }
+
+// The expression as a sequence of tokens, for comparing structure.
+export function tokens(src: string): string[] {
+  return lex(src).map((t) => (t.k === "num" ? `#${String(t.v)}` : `${t.k}:${t.v}`));
+}
+
+// Replaces whole identifiers, never parts of longer names.
+export function rename(src: string, from: string, to: string): string {
+  return src.replace(new RegExp(`(?<![\\w.])${from}(?!\\w)`, "g"), to);
+}
+
+// True when the expression is a single parameter name and nothing else.
+export function bare(src: string): string | undefined {
+  try {
+    const t = lex(src);
+    return t.length === 1 && t[0]?.k === "id" ? t[0].v : undefined;
+  } catch {
+    return undefined;
+  }
+}

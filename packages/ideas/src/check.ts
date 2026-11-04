@@ -4,29 +4,23 @@
 import { evaluatePoint } from "@vibloom/chem";
 import type { Claim } from "@vibloom/contracts";
 import { compare, evaluate } from "./expr";
-import type { ArithmeticSpec, CheckResult, CheckSpec, SimulationSpec } from "./types";
+import type { ArithmeticSpec, CheckError, CheckResult, CheckSpec, SimulationSpec } from "./types";
 
 export const SIM_PARAMS = ["s", "q", "eps", "eps_prime"] as const;
 
-export function runCheck(
-  spec: CheckSpec,
-  scope: Record<string, number>,
-): CheckResult | { error: string } {
+export function runCheck(spec: CheckSpec, scope: Record<string, number>): CheckResult | CheckError {
   return spec.kind === "oregonator" ? simulate(spec, scope) : arithmetic(spec, scope);
 }
 
 // The chemistry engine's own protocol (stiff solver, robust classification)
 // decides; the model chose only which question to ask.
-function simulate(
-  spec: SimulationSpec,
-  scope: Record<string, number>,
-): CheckResult | { error: string } {
+function simulate(spec: SimulationSpec, scope: Record<string, number>): CheckResult | CheckError {
   const inputs: Record<string, number> = {};
   for (const k of SIM_PARAMS) {
     const v = scope[k];
+    if (v !== undefined) inputs[k] = v;
     if (v === undefined || !Number.isFinite(v) || v <= 0)
-      return { error: `the experiment needs a positive ${k}` };
-    inputs[k] = v;
+      return { error: `the experiment needs a positive ${k}`, inputs };
   }
   const point = { s: inputs.s ?? NaN, eps_prime: inputs.eps_prime ?? NaN };
   const claim: Claim =
@@ -48,9 +42,12 @@ function simulate(
   try {
     const e = evaluatePoint(claim, { q: inputs.q ?? NaN, eps: inputs.eps ?? NaN }, point, "far");
     if (e.execution.status !== "completed")
-      return { error: `the solver stopped: ${e.execution.status}` };
+      return { error: `the solver stopped: ${e.execution.status}`, inputs };
     if (e.outcome !== "holds" && e.outcome !== "fails") {
-      return { error: `the experiment was ${e.outcome ?? "inconclusive"}; nothing is concluded` };
+      return {
+        error: `the experiment was ${e.outcome ?? "inconclusive"}; nothing is concluded`,
+        inputs,
+      };
     }
     const full = e.runs.full;
     const reduced = e.runs.reduced;
@@ -78,20 +75,17 @@ function simulate(
       },
     };
   } catch (err) {
-    return { error: (err instanceof Error ? err.message : String(err)).slice(0, 200) };
+    return { error: (err instanceof Error ? err.message : String(err)).slice(0, 200), inputs };
   }
 }
 
-function arithmetic(
-  spec: ArithmeticSpec,
-  scope: Record<string, number>,
-): CheckResult | { error: string } {
+function arithmetic(spec: ArithmeticSpec, scope: Record<string, number>): CheckResult | CheckError {
   const inputs: Record<string, number> = {};
   try {
     const value = evaluate(spec.value, scope, inputs);
     const limit = evaluate(spec.limit, scope, inputs);
     if (!Number.isFinite(value) || !Number.isFinite(limit)) {
-      return { error: "the expressions did not give finite numbers" };
+      return { error: "the expressions did not give finite numbers", inputs };
     }
     return {
       pass: compare(value, spec.op, limit),
@@ -102,7 +96,7 @@ function arithmetic(
       inputs,
     };
   } catch (e) {
-    return { error: (e instanceof Error ? e.message : String(e)).slice(0, 200) };
+    return { error: (e instanceof Error ? e.message : String(e)).slice(0, 200), inputs };
   }
 }
 

@@ -3,9 +3,10 @@
 
 import { canonical, sha256 } from "@vibloom/engine";
 import { runCheck } from "./check";
-import { MAX_EXPR, names, OPS, type Op } from "./expr";
+import { bare, MAX_EXPR, names, OPS, rename, tokens, type Op } from "./expr";
 import { AXES, type GrownNode } from "./protocol";
 import type {
+  CheckError,
   CheckResult,
   EventBody,
   IdeaEvent,
@@ -28,12 +29,13 @@ export type Status =
   | "argued"
   | "bedrock"
   | "proposed"
-  | "unverified";
+  | "unverified"
+  | "partial";
 
 export class IdeaTree {
   readonly events: IdeaEvent[] = [];
   readonly nodes = new Map<string, IdeaNode>();
-  readonly results = new Map<string, CheckResult | { error: string }>();
+  readonly results = new Map<string, CheckResult | CheckError>();
   // Experiment results read from a log and not yet re-run in this browser.
   readonly unconfirmed = new Set<string>();
   // Visuals Muse designed for a node, latest last.
@@ -234,7 +236,47 @@ export class IdeaTree {
   scope(): Record<string, number> {
     const out: Record<string, number> = {};
     for (const n of this.nodes.values()) for (const p of n.params) out[p.name] = p.value;
+    return { ...out, ...this.outputs() };
+  }
+
+  // What confirmed experiments measured, readable by formulas as
+  // <key>_period_full and <key>_period_reduced (key: the node's last id part),
+  // so a claim about the period rests on the run, not on a restated number.
+  outputs(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const [id, r] of this.results) {
+      // Unconfirmed runs still feed formulas, so a log reproduces; what reads
+      // them stays unverified through its basis until they are confirmed.
+      if ("error" in r || !r.sim) continue;
+      const key = outputKey(id);
+      if (r.sim.periods.full !== undefined) out[`${key}_period_full`] = r.sim.periods.full;
+      if (r.sim.periods.reduced !== undefined) out[`${key}_period_reduced`] = r.sim.periods.reduced;
+    }
     return out;
+  }
+
+  private pendingOutputs(): Set<string> {
+    const out = new Set<string>();
+    for (const id of this.unconfirmed) {
+      const key = outputKey(id);
+      out.add(`${key}_period_full`);
+      out.add(`${key}_period_reduced`);
+    }
+    return out;
+  }
+
+  // A check that compares a number the node simply assumed against another
+  // of its own numbers computes nothing (a stated "achieved 60 s" against a
+  // target of 60 s): it can argue, never hold or fail.
+  restates(id: string): boolean {
+    const n = this.nodes.get(id);
+    const c = n?.check;
+    if (!n || !c || c.kind === "oregonator") return false;
+    const a = bare(c.value);
+    const b = bare(c.limit);
+    if (a === undefined || b === undefined) return false;
+    const own = (x: string) => n.params.find((p) => p.name === x);
+    return own(a)?.origin === "assumed" && own(b) !== undefined;
   }
 
   // Assumed numbers the node's check relies on.
@@ -254,31 +296,40 @@ export class IdeaTree {
       return ground === "broken" ? "affected" : ground === "unknown" ? "unverified" : "goal";
     if (n.proposed) return "proposed";
     const r = this.results.get(id);
-    if (r && "error" in r) return "unverified";
+    const scope = this.scope();
+    const changed = (inputs?: Record<string, number>) =>
+      Object.entries(inputs ?? {}).some(([k, v]) => scope[k] !== v);
+    if (r && "error" in r) return changed(r.inputs) ? "stale" : "unverified";
     if (this.unconfirmed.has(id)) return "unverified";
+    // A verdict computed from a run not yet reproduced here is not a verdict yet.
+    if (r && Object.keys(r.inputs).some((k) => this.pendingOutputs().has(k))) return "unverified";
+    if (r && this.restates(id)) return ground === "broken" ? "affected" : "argued";
     if (r) {
-      const scope = this.scope();
-      if (Object.entries(r.inputs).some(([k, v]) => scope[k] !== v)) return "stale";
+      if (changed(r.inputs)) return "stale";
       if (!r.pass) return "broken";
     }
     if (ground === "broken") return "affected";
-    // A green check is only as good as what it rests on.
-    if (r) return ground === "unknown" ? "unverified" : "holds";
+    // A passing comparison is only as good as what it rests on: unconfirmed
+    // premises make it unverified, merely argued ones make it partial.
+    if (r) return ground === "unknown" ? "unverified" : ground === "partial" ? "partial" : "holds";
     if (n.role === "bedrock") return "bedrock";
     return n.risk === "high" ? "at_risk" : "argued";
   }
 
   // What a node rests on (its children and basis): broken if any premise is
-  // broken, unknown if any could not be confirmed with current values.
-  private premises(id: string, seen: Set<string>): "ok" | "unknown" | "broken" {
+  // broken, unknown if any could not be confirmed with current values,
+  // partial if some are only argued.
+  private premises(id: string, seen: Set<string>): "ok" | "partial" | "unknown" | "broken" {
     if (seen.has(id)) return "ok";
     seen.add(id);
     const n = this.nodes.get(id);
-    let out: "ok" | "unknown" | "broken" = "ok";
+    let out: "ok" | "partial" | "unknown" | "broken" = "ok";
     for (const c of [...this.children(id).map((x) => x.id), ...(n?.basis ?? [])]) {
       const s = this.status(c, new Set(seen));
       if (s === "broken" || s === "affected") return "broken";
       if (s === "stale" || s === "unverified") out = "unknown";
+      else if (out === "ok" && ["argued", "at_risk", "proposed", "partial"].includes(s))
+        out = "partial";
     }
     return out;
   }
@@ -310,6 +361,7 @@ export class IdeaTree {
       while (this.nodes.has(id) || keys.has(id)) id += "x";
       keys.set(g.key, id);
       const params: Param[] = [];
+      const renamed = new Map<string, string>();
       const uses: string[] = [];
       const suggestions: Param[] = [];
       for (const raw of g.params.slice(0, 12)) {
@@ -328,6 +380,8 @@ export class IdeaTree {
         if (existing && existing.unit.trim().toLowerCase() !== p.unit.trim().toLowerCase()) {
           let alt = `${p.name}_${p.unit.replace(/\W+/g, "_").toLowerCase()}`.slice(0, 64);
           while (taken.has(alt)) alt += "_";
+          // This node's own formula meant its own quantity, in its own unit.
+          renamed.set(p.name, alt);
           p.name = alt;
         }
         if (!taken.has(p.name)) {
@@ -345,7 +399,11 @@ export class IdeaTree {
           suggestions.push(p);
         }
       }
-      const c = g.check;
+      const c = { ...g.check };
+      for (const [from, to] of renamed) {
+        c.value = rename(c.value, from, to);
+        c.limit = rename(c.limit, from, to);
+      }
       const question = c.question ?? "";
       const tolerance = c.tolerance ?? NaN;
       const experiment =
@@ -401,6 +459,18 @@ export class IdeaTree {
         expanded: false,
       });
     }
+    // A formula that reads an experiment's output rests on that experiment.
+    const byKey = new Map<string, string>();
+    for (const n of [...this.nodes.values(), ...out]) byKey.set(outputKey(n.id), n.id);
+    for (const n of out) {
+      const c = n.check;
+      if (!c || c.kind === "oregonator") continue;
+      for (const name of [...safeNames(c.value), ...safeNames(c.limit)]) {
+        const m = /^(.+)_period_(full|reduced)$/.exec(name);
+        const target = m ? byKey.get(m[1] ?? "") : undefined;
+        if (target && target !== n.id && !n.basis.includes(target)) n.basis.push(target);
+      }
+    }
     // Basis may name siblings by key or existing nodes by id; anything else
     // is dropped.
     for (const n of out) {
@@ -417,7 +487,8 @@ export class IdeaTree {
     if (!r || !this.unconfirmed.has(id)) return;
     this.unconfirmed.delete(id);
     const close = (a?: number, b?: number) =>
-      a === b || (a !== undefined && b !== undefined && Math.abs(a - b) <= 1e-6 * Math.abs(b));
+      a === b ||
+      (a !== undefined && b !== undefined && Math.abs(a - b) <= EXPERIMENT_TOLERANCE * Math.abs(b));
     const same =
       "error" in again
         ? "error" in r
@@ -457,36 +528,39 @@ export class IdeaTree {
     fixes: { id: string; value: string; limit: string }[],
   ): { node: string; value: string; limit: string }[] {
     const failing = new Map(this.broken().map((b) => [b.id, b]));
-    // A repair fixes syntax only: every known quantity the original read is
-    // still read, nothing new is added except in place of a misspelled name,
-    // and every constant stays the same. Anything else is a different question.
+    // A repair may only replace a misspelled name with a known one, token for
+    // token: same operators, same sides, same constants, same structure.
+    // Anything else would be a different question.
     const known = new Set(Object.keys(this.scope()));
-    const ids = (src: string) => src.replace(/\bp\./g, "").match(/[A-Za-z_]\w*/g) ?? [];
-    const nums = (src: string) => (src.match(/\d+\.?\d*(e[+-]?\d+)?/gi) ?? []).sort().join();
-    const parses = (src: string) => {
+    const substitution = (before: string, after: string) => {
+      let a: string[];
+      let b: string[];
       try {
-        names(src);
-        return true;
+        a = tokens(before);
+        b = tokens(after);
       } catch {
         return false;
       }
+      if (a.length !== b.length) return false;
+      let changed = 0;
+      for (let i = 0; i < a.length; i++) {
+        const x = a[i] ?? "";
+        const y = b[i] ?? "";
+        if (x === y) continue;
+        const wrong = x.startsWith("id:") && !known.has(x.slice(3));
+        if (!wrong || !y.startsWith("id:") || !known.has(y.slice(3))) return false;
+        changed++;
+      }
+      return changed >= 0;
     };
     return fixes
       .filter((f) => {
         const b = failing.get(f.id);
         if (!b || f.value.length > MAX_EXPR || f.limit.length > MAX_EXPR) return false;
-        if (!parses(f.value) || !parses(f.limit)) return false;
-        const before = [...ids(b.value), ...ids(b.limit)];
-        const after = [...names(f.value), ...names(f.limit)];
-        const kept = before.filter((x) => known.has(x));
-        const unknownBefore = new Set(before.filter((x) => !known.has(x))).size;
-        const added = after.filter((x) => !kept.includes(x));
         return (
-          after.length > 0 &&
-          after.every((x) => known.has(x)) &&
-          kept.every((x) => after.includes(x)) &&
-          new Set(added).size <= unknownBefore &&
-          nums(b.value + " " + b.limit) === nums(f.value + " " + f.limit)
+          substitution(b.value, f.value) &&
+          substitution(b.limit, f.limit) &&
+          names(f.value + "+" + f.limit).every((x) => known.has(x))
         );
       })
       .map((f) => ({ node: f.id, value: f.value, limit: f.limit }));
@@ -515,6 +589,21 @@ export class IdeaTree {
         x.params.map((p) => `${p.name} = ${String(p.value)} ${p.unit}`),
       ),
     });
+  }
+}
+
+// Periods measured by the same experiment in Node 22 and Chromium differed by
+// up to 2.7e-6 relative (docs/validation.md); 1e-4 leaves a wide margin while
+// staying far below any tolerance a claim uses. The verdict must match exactly.
+export const EXPERIMENT_TOLERANCE = 1e-4;
+
+export const outputKey = (id: string) => (id.split(".").at(-1) ?? id).replace(/-/g, "_");
+
+function safeNames(src: string): string[] {
+  try {
+    return names(src);
+  } catch {
+    return [];
   }
 }
 

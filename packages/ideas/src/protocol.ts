@@ -53,6 +53,16 @@ Protocol (follow it exactly; it keeps trees comparable between people):
   sure parameters named exactly s, q, eps and eps_prime exist (typical: q
   7.62e-5, eps 0.0099, eps_prime 1e-4 to 0.02, s 0.5 to 2). The engine runs the
   stiff solver and decides. Otherwise check.kind is "arithmetic" (or "none").
+  Periods from the Oregonator are in dimensionless time, not seconds. A claim
+  about seconds needs an explicit external time-scale parameter with a source
+  (for example tau_seconds) and a formula that reads the measured period:
+  after an experiment node with key K runs, formulas can read K_period_full
+  and K_period_reduced (for example "abs(K_period_full * tau_seconds -
+  target_s)" <= "tolerance_s"). Never put a "measured" or "achieved" number in
+  params: what an experiment or a formula should establish is never assumed.
+- A check must compute something. Never compare a number you assumed for the
+  outcome with its target; never test stability by subtracting two assumed
+  values. If it cannot be computed, use kind "none" and argue it.
 - role "bedrock" only for laws of nature, axioms, definitions or measured
   constants. Bedrock can still be questioned later.
 - criticality: critical if the goal fails without it. risk: how likely it is to

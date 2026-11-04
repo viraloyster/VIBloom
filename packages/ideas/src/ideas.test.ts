@@ -170,8 +170,8 @@ describe("idea tree", () => {
     t.append("person", { type: "set_param", name: "strength", value: 60, source: "adopted" });
     expect(t.status("skin")).toBe("stale");
     run(t, "skin");
-    expect(t.status("skin")).toBe("holds");
-    expect(t.status("goal")).toBe("goal");
+    // It passes, but its new premises are only argued: backing incomplete.
+    expect(t.status("skin")).toBe("partial");
   });
 
   it("refuses a log that defines a parameter twice", () => {
@@ -256,6 +256,7 @@ describe("idea tree", () => {
     t.append("muse", { type: "grow", under: "cost", nodes: under, summary: "", usage });
     const cost = t.nodes.get("cost");
     if (!cost) throw new Error("missing");
+    cost.basis = [];
     cost.check = { description: "", value: "1", op: "<=", limit: "2", unit: "" };
     run(t, "cost");
     run(t, "cost.child");
@@ -303,6 +304,161 @@ describe("idea tree", () => {
       }),
     ).toThrow(/already exists/);
     expect(t.nodes.size).toBe(before);
+  });
+});
+
+describe("round three", () => {
+  it("never lets a check that restates its own assumption hold", () => {
+    const t = new IdeaTree();
+    t.append("person", { type: "goal", text: "A one minute clock", mode: "standard" });
+    const nodes = t.admit("goal", [
+      grown("minute", {
+        params: [
+          { ...p("demonstrated_period_s", 60, "assumed", "s"), kind: "external" },
+          { ...p("target_period_s", 60, "assumed", "s"), kind: "requirement" },
+        ],
+        check: {
+          kind: "arithmetic",
+          description: "",
+          value: "demonstrated_period_s",
+          op: "<=",
+          limit: "target_period_s",
+          unit: "s",
+        },
+      }),
+    ]);
+    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    run(t, "minute");
+    expect(t.status("minute")).toBe("argued");
+  });
+
+  it("refuses a repair that swaps the sides of a comparison", () => {
+    const t = new IdeaTree();
+    t.append("person", { type: "goal", text: "g", mode: "standard" });
+    const nodes = t.admit("goal", [
+      grown("beam", {
+        params: [p("load", 5), p("strength", 3)],
+        check: {
+          kind: "arithmetic",
+          description: "",
+          value: "load",
+          op: "<=",
+          limit: "strenght",
+          unit: "",
+        },
+      }),
+    ]);
+    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    run(t, "beam");
+    expect(t.admitFixes([{ id: "beam", value: "strength", limit: "load" }])).toEqual([]);
+    expect(t.admitFixes([{ id: "beam", value: "load * 1", limit: "strength" }])).toEqual([]);
+    expect(t.admitFixes([{ id: "beam", value: "load", limit: "strength" }])).toHaveLength(1);
+  });
+
+  it("points a node's formula at its own renamed quantity", () => {
+    const t = planted();
+    const [pa] = t.admit("skin", [
+      grown("pa", {
+        params: [p("strength", 12, "assumed", "Pa"), p("pa_load", 1, "assumed", "Pa")],
+        check: {
+          kind: "arithmetic",
+          description: "",
+          value: "pa_load",
+          op: "<=",
+          limit: "strength",
+          unit: "Pa",
+        },
+      }),
+    ]);
+    expect(pa?.check?.kind !== "oregonator" && pa?.check?.limit).toBe("strength_pa");
+  });
+
+  it("retries an experiment that failed once its values change", () => {
+    const t = new IdeaTree();
+    t.append("person", { type: "goal", text: "clock", mode: "standard" });
+    const nodes = t.admit("goal", [
+      grown("osc", {
+        params: [
+          { ...p("s", -1, "assumed", ""), kind: "design" },
+          { ...p("q", 7.62e-5, "reference", ""), kind: "external" },
+          { ...p("eps", 0.0099, "reference", ""), kind: "external" },
+          { ...p("eps_prime", 1e-4, "reference", ""), kind: "external" },
+        ],
+        check: {
+          kind: "oregonator",
+          question: "oscillates",
+          tolerance: 0.05,
+          description: "",
+          value: "",
+          op: "none",
+          limit: "",
+          unit: "",
+        },
+      }),
+    ]);
+    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    const spec = t.nodes.get("osc")?.check;
+    if (!spec) throw new Error("missing");
+    t.append("engine", { type: "check", node: "osc", result: runCheck(spec, t.scope()) });
+    t.confirm("osc", runCheck(spec, t.scope()));
+    expect(t.status("osc")).toBe("unverified");
+    t.append("person", { type: "set_param", name: "s", value: 1, source: "fix" });
+    expect(t.status("osc")).toBe("stale");
+  });
+
+  it("lets a formula read an experiment's measured period and rest on it", () => {
+    const t = new IdeaTree();
+    t.append("person", { type: "goal", text: "clock", mode: "standard" });
+    const nodes = t.admit("goal", [
+      grown("osc", {
+        params: [
+          { ...p("s", 1, "reference", ""), kind: "design" },
+          { ...p("q", 7.62e-5, "reference", ""), kind: "external" },
+          { ...p("eps", 0.0099, "reference", ""), kind: "external" },
+          { ...p("eps_prime", 1e-4, "reference", ""), kind: "external" },
+        ],
+        check: {
+          kind: "oregonator",
+          question: "oscillates",
+          tolerance: 0.05,
+          description: "",
+          value: "",
+          op: "none",
+          limit: "",
+          unit: "",
+        },
+      }),
+      grown("minute", {
+        params: [
+          { ...p("tau_seconds", 3, "assumed", "s"), kind: "external" },
+          { ...p("target_s", 60, "assumed", "s"), kind: "requirement" },
+        ],
+        check: {
+          kind: "arithmetic",
+          description: "",
+          value: "abs(osc_period_full * tau_seconds - target_s)",
+          op: "<=",
+          limit: "6",
+          unit: "s",
+        },
+      }),
+    ]);
+    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    expect(t.nodes.get("minute")?.basis).toEqual(["osc"]);
+    const spec = t.nodes.get("osc")?.check;
+    if (!spec) throw new Error("missing");
+    const r = runCheck(spec, t.scope());
+    t.append("engine", { type: "check", node: "osc", result: r });
+    t.confirm("osc", runCheck(spec, t.scope()));
+    expect(t.scope().osc_period_full).toBeGreaterThan(5);
+    run(t, "minute");
+    const m = t.results.get("minute");
+    expect(m && !("error" in m) && m.inputs.osc_period_full).toBeGreaterThan(5);
+    // The whole log reopens; what reads the run waits for its confirmation.
+    const copy = IdeaTree.replay(structuredClone(t.events));
+    expect(copy.status("minute")).toBe("unverified");
+    copy.confirm("osc", runCheck(spec, copy.scope()));
+    expect(["holds", "broken", "partial"]).toContain(copy.status("minute"));
   });
 });
 

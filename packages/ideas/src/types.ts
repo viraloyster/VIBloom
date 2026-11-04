@@ -67,6 +67,13 @@ export interface CheckResult {
   };
 }
 
+// A check that could not be evaluated keeps the values it was given, so a
+// later change to them retries it.
+export interface CheckError {
+  error: string;
+  inputs?: Record<string, number>;
+}
+
 export interface IdeaNode {
   id: string;
   parent: string | null;
@@ -103,7 +110,7 @@ export interface Usage {
 export type EventBody =
   | { type: "goal"; text: string; mode: Mode }
   | { type: "grow"; under: string; nodes: IdeaNode[]; summary: string; usage: Usage }
-  | { type: "check"; node: string; result: CheckResult | { error: string } }
+  | { type: "check"; node: string; result: CheckResult | CheckError }
   | { type: "repair"; fixes: { node: string; value: string; limit: string }[]; usage: Usage }
   | { type: "set_param"; name: string; value: number; source: string }
   | { type: "view"; node: string; title: string; html: string; usage: Usage }
