@@ -352,7 +352,7 @@ function gear() {
 
 function nodeData(id: string) {
   const n = tree.nodes.get(id);
-  return n ? { ...viewData(tree, n), lessons: lessonsFor(id) } : {};
+  return n ? { ...viewData(tree, n), lessons: tree.lessonsForModel(id) } : {};
 }
 
 // The project lives in this browser too, so a reload does not lose it. A
@@ -569,27 +569,6 @@ function explain(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-// What Muse is shown of past lessons: only decided ones, with the verified
-// contrast apart from the interpretation it supported.
-const lessonsFor = (id: string) =>
-  tree.lessons
-    .filter((l) => l.node === id)
-    .flatMap((l) => {
-      const d = tree.decided(l);
-      if (!d) return [];
-      return [
-        {
-          id: l.id,
-          state: tree.lessonState(l),
-          finding: `at ${JSON.stringify(l.basis)} it ${l.observed}; with ${l.test.param} = ${String(l.test.value)} it ${d.outcome}`,
-          supported_interpretation: l.candidates[d.supported]?.explanation ?? "",
-          scope: l.candidates[d.supported]?.scope ?? "",
-          contradicted: l.candidates.filter((_, i) => i !== d.supported).map((c) => c.explanation),
-          still_open: l.open,
-        },
-      ];
-    });
-
 // The anticipation loop on one experiment: Muse commits to a prediction, the
 // engine runs, and a surprise makes Muse propose two explanations that one
 // more run tells apart. The engine decides which one the evidence supports.
@@ -611,7 +590,7 @@ async function investigate(id: string) {
           question: spec.question,
           tolerance: spec.tolerance,
           values: inputs,
-          lessons: lessonsFor(id),
+          lessons: tree.lessonsForModel(id),
         }),
         mode: tree.mode,
         effort: "low",
@@ -675,7 +654,7 @@ async function investigate(id: string) {
             relative_difference: result.value,
             definition: "|full - reduced| / reduced",
           },
-          lessons: lessonsFor(id),
+          lessons: tree.lessonsForModel(id),
         }),
         mode: tree.mode,
         effort: "medium",

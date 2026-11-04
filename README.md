@@ -114,7 +114,10 @@ score; a handful of predictions is not a calibration. In the recorded
 session, Muse expected the reduction to keep the period at eps_prime 2e-4
 (85%); the engine measured a 55% difference, and the test at eps_prime 2e-5
 (3.9%) was consistent with the time-scale explanation and contradicted the
-structural one.
+structural one. A first measured evaluation, with and without that lesson,
+is in [docs/evaluation.md](docs/evaluation.md): it helps on new points
+(accuracy 29% to 54%, Brier 0.51 to 0.21) and still falls short of a trivial
+baseline.
 
 A check whose claimed result is an assumed number (an "achieved 60 s" set by
 hand, declared by Muse or named like one) is shown as argued, never as

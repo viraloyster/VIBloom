@@ -690,6 +690,30 @@ export class IdeaTree {
     return Object.entries(l.basis).every(([k, v]) => now[k] === v) ? "current" : "invalidated";
   }
 
+  // What the model is shown of past lessons on a node: only decided ones,
+  // the verified contrast apart from the interpretation it was consistent with.
+  lessonsForModel(node: string) {
+    return this.lessons
+      .filter((l) => l.node === node)
+      .flatMap((l) => {
+        const d = this.decided(l);
+        if (!d) return [];
+        return [
+          {
+            id: l.id,
+            state: this.lessonState(l),
+            finding: `at ${JSON.stringify(l.basis)} it ${l.observed}; with ${l.test.param} = ${String(l.test.value)} it ${d.outcome}`,
+            supported_interpretation: l.candidates[d.supported]?.explanation ?? "",
+            scope: l.candidates[d.supported]?.scope ?? "",
+            contradicted: l.candidates
+              .filter((_, i) => i !== d.supported)
+              .map((c) => c.explanation),
+            still_open: l.open,
+          },
+        ];
+      });
+  }
+
   // Each prediction against the run it was settled by, for good. Accuracy is
   // the share right; the Brier score (0 best, 0.25 a coin) also weighs the
   // stated confidence. Unreproduced runs are pending and not counted.

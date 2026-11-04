@@ -1,5 +1,11 @@
 {
   "extends": "./tsconfig.base.json",
-  "include": ["packages/*/src", "apps/*/src", "vitest.config.ts", "eslint.config.mjs"],
+  "include": [
+    "packages/*/src",
+    "packages/*/eval",
+    "apps/*/src",
+    "vitest.config.ts",
+    "eslint.config.mjs"
+  ],
   "exclude": ["apps/api", "apps/web"]
 }

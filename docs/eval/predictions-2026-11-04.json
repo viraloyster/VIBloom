@@ -1,0 +1,1318 @@
+{
+  "reps": 2,
+  "points": [
+    [
+      "1,0.0000762,0.01,0.0002",
+      {
+        "outcome": "fails",
+        "difference": 0.5501362852068709
+      }
+    ],
+    [
+      "1,0.0000762,0.01,0.00002",
+      {
+        "outcome": "holds",
+        "difference": 0.03916181411710353
+      }
+    ],
+    [
+      "0.75,0.0000762,0.01,0.00001",
+      {
+        "outcome": "holds",
+        "difference": 0.02125983168731192
+      }
+    ],
+    [
+      "0.75,0.0000762,0.01,0.00005",
+      {
+        "outcome": "fails",
+        "difference": 0.08456046663918565
+      }
+    ],
+    [
+      "0.75,0.0000762,0.01,0.0002",
+      {
+        "outcome": "fails",
+        "difference": 0.5330845160383287
+      }
+    ],
+    [
+      "0.75,0.0000762,0.01,0.001",
+      {
+        "outcome": "fails",
+        "difference": 3.8074950239114274
+      }
+    ],
+    [
+      "1,0.0000762,0.01,0.00001",
+      {
+        "outcome": "holds",
+        "difference": 0.02203944673364504
+      }
+    ],
+    [
+      "1,0.0000762,0.01,0.00005",
+      {
+        "outcome": "fails",
+        "difference": 0.08704711885211604
+      }
+    ],
+    [
+      "1,0.0000762,0.01,0.001",
+      {
+        "outcome": "fails",
+        "difference": 4.009941257499526
+      }
+    ],
+    [
+      "1.5,0.0000762,0.01,0.00001",
+      {
+        "outcome": "holds",
+        "difference": 0.023265814060011054
+      }
+    ],
+    [
+      "1.5,0.0000762,0.01,0.00005",
+      {
+        "outcome": "fails",
+        "difference": 0.08970536922364204
+      }
+    ],
+    [
+      "1.5,0.0000762,0.01,0.0002",
+      {
+        "outcome": "fails",
+        "difference": 0.5669870654367529
+      }
+    ],
+    [
+      "1.5,0.0000762,0.01,0.001",
+      {
+        "outcome": "fails",
+        "difference": 4.438853493994439
+      }
+    ],
+    [
+      "2,0.0000762,0.01,0.00001",
+      {
+        "outcome": "holds",
+        "difference": 0.02510266748401076
+      }
+    ],
+    [
+      "2,0.0000762,0.01,0.00005",
+      {
+        "outcome": "fails",
+        "difference": 0.09244381657518339
+      }
+    ],
+    [
+      "2,0.0000762,0.01,0.0002",
+      {
+        "outcome": "fails",
+        "difference": 0.5865095299064178
+      }
+    ],
+    ["2,0.0000762,0.01,0.001", "the experiment was not_applicable; nothing is concluded"]
+  ],
+  "groups": {
+    "without lesson, seen points": {
+      "n": 4,
+      "unanswered": 0,
+      "accuracy": 0.5,
+      "brier": 0.36734999999999995,
+      "meanConfidence": 0.87,
+      "citedLesson": 0,
+      "cost": 0.013443600000000002,
+      "meanSeconds": 7.87525
+    },
+    "without lesson, new points": {
+      "n": 28,
+      "unanswered": 0,
+      "accuracy": 0.2857142857142857,
+      "brier": 0.5098964285714287,
+      "meanConfidence": 0.8496428571428575,
+      "citedLesson": 0,
+      "cost": 0.09745395,
+      "meanSeconds": 7.639928571428571
+    },
+    "with lesson, seen points": {
+      "n": 4,
+      "unanswered": 0,
+      "accuracy": 1,
+      "brier": 0.05687500000000001,
+      "meanConfidence": 0.8125,
+      "citedLesson": 2,
+      "cost": 0.0136954,
+      "meanSeconds": 6.24
+    },
+    "with lesson, new points": {
+      "n": 28,
+      "unanswered": 0,
+      "accuracy": 0.5357142857142857,
+      "brier": 0.2109357142857143,
+      "meanConfidence": 0.6735714285714284,
+      "citedLesson": 0,
+      "cost": 0.13290159999999998,
+      "meanSeconds": 8.74682142857143
+    }
+  },
+  "excluded": [
+    ["2,0.0000762,0.01,0.001", "the experiment was not_applicable; nothing is concluded"]
+  ],
+  "rows": [
+    {
+      "point": {
+        "s": 1,
+        "q": 0.0000762,
+        "eps": 0.01,
+        "eps_prime": 0.0002
+      },
+      "seen": true,
+      "withLesson": false,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 0.5501362852068709,
+      "cost": 0.0029019000000000002,
+      "ms": 9954,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "s": 1,
+        "q": 0.0000762,
+        "eps": 0.01,
+        "eps_prime": 0.0002
+      },
+      "seen": true,
+      "withLesson": true,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 0.5501362852068709,
+      "cost": 0.0022141,
+      "ms": 3873,
+      "expect": "fails",
+      "confidence": 0.95,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "s": 1,
+        "q": 0.0000762,
+        "eps": 0.01,
+        "eps_prime": 0.00002
+      },
+      "seen": true,
+      "withLesson": false,
+      "rep": 0,
+      "truth": "holds",
+      "difference": 0.03916181411710353,
+      "cost": 0.00356915,
+      "ms": 7738,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "s": 1,
+        "q": 0.0000762,
+        "eps": 0.01,
+        "eps_prime": 0.00002
+      },
+      "seen": true,
+      "withLesson": true,
+      "rep": 0,
+      "truth": "holds",
+      "difference": 0.03916181411710353,
+      "cost": 0.0043276,
+      "ms": 7436,
+      "expect": "holds",
+      "confidence": 0.6,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 0.75,
+        "eps_prime": 0.00001
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 0,
+      "truth": "holds",
+      "difference": 0.02125983168731192,
+      "cost": 0.00341495,
+      "ms": 6848,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 0.75,
+        "eps_prime": 0.00001
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 0,
+      "truth": "holds",
+      "difference": 0.02125983168731192,
+      "cost": 0.0071107,
+      "ms": 12314,
+      "expect": "holds",
+      "confidence": 0.6,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 0.75,
+        "eps_prime": 0.00005
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 0.08456046663918565,
+      "cost": 0.0035934499999999998,
+      "ms": 6819,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 0.75,
+        "eps_prime": 0.00005
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 0.08456046663918565,
+      "cost": 0.0040294499999999995,
+      "ms": 5999,
+      "expect": "holds",
+      "confidence": 0.6,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 0.75,
+        "eps_prime": 0.0002
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 0.5330845160383287,
+      "cost": 0.0038739499999999997,
+      "ms": 7016,
+      "expect": "holds",
+      "confidence": 0.88,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 0.75,
+        "eps_prime": 0.0002
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 0.5330845160383287,
+      "cost": 0.0049432,
+      "ms": 9353,
+      "expect": "holds",
+      "confidence": 0.55,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 0.75,
+        "eps_prime": 0.001
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 3.8074950239114274,
+      "cost": 0.00400445,
+      "ms": 8082,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 0.75,
+        "eps_prime": 0.001
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 3.8074950239114274,
+      "cost": 0.00557095,
+      "ms": 9560,
+      "expect": "holds",
+      "confidence": 0.6,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1,
+        "eps_prime": 0.00001
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 0,
+      "truth": "holds",
+      "difference": 0.02203944673364504,
+      "cost": 0.00275315,
+      "ms": 5504,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1,
+        "eps_prime": 0.00001
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 0,
+      "truth": "holds",
+      "difference": 0.02203944673364504,
+      "cost": 0.0069923500000000005,
+      "ms": 11783,
+      "expect": "holds",
+      "confidence": 0.75,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1,
+        "eps_prime": 0.00005
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 0.08704711885211604,
+      "cost": 0.0039006500000000003,
+      "ms": 7660,
+      "expect": "holds",
+      "confidence": 0.92,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1,
+        "eps_prime": 0.00005
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 0.08704711885211604,
+      "cost": 0.0055813500000000005,
+      "ms": 9619,
+      "expect": "holds",
+      "confidence": 0.55,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1,
+        "eps_prime": 0.001
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 4.009941257499526,
+      "cost": 0.0035386999999999997,
+      "ms": 10462,
+      "expect": "holds",
+      "confidence": 0.75,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1,
+        "eps_prime": 0.001
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 4.009941257499526,
+      "cost": 0.0038545999999999997,
+      "ms": 6616,
+      "expect": "fails",
+      "confidence": 0.8,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1.5,
+        "eps_prime": 0.00001
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 0,
+      "truth": "holds",
+      "difference": 0.023265814060011054,
+      "cost": 0.0039504499999999994,
+      "ms": 8286,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1.5,
+        "eps_prime": 0.00001
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 0,
+      "truth": "holds",
+      "difference": 0.023265814060011054,
+      "cost": 0.0032304499999999997,
+      "ms": 5253,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1.5,
+        "eps_prime": 0.00005
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 0.08970536922364204,
+      "cost": 0.0025989499999999996,
+      "ms": 5435,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1.5,
+        "eps_prime": 0.00005
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 0.08970536922364204,
+      "cost": 0.00457345,
+      "ms": 8005,
+      "expect": "holds",
+      "confidence": 0.6,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1.5,
+        "eps_prime": 0.0002
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 0.5669870654367529,
+      "cost": 0.00394195,
+      "ms": 8478,
+      "expect": "holds",
+      "confidence": 0.8,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1.5,
+        "eps_prime": 0.0002
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 0.5669870654367529,
+      "cost": 0.00519395,
+      "ms": 9539,
+      "expect": "holds",
+      "confidence": 0.55,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1.5,
+        "eps_prime": 0.001
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 4.438853493994439,
+      "cost": 0.00381745,
+      "ms": 7823,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1.5,
+        "eps_prime": 0.001
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 4.438853493994439,
+      "cost": 0.0050907,
+      "ms": 8661,
+      "expect": "fails",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 2,
+        "eps_prime": 0.00001
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 0,
+      "truth": "holds",
+      "difference": 0.02510266748401076,
+      "cost": 0.00456365,
+      "ms": 10128,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 2,
+        "eps_prime": 0.00001
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 0,
+      "truth": "holds",
+      "difference": 0.02510266748401076,
+      "cost": 0.0045826,
+      "ms": 8024,
+      "expect": "holds",
+      "confidence": 0.75,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 2,
+        "eps_prime": 0.00005
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 0.09244381657518339,
+      "cost": 0.00447015,
+      "ms": 9228,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 2,
+        "eps_prime": 0.00005
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 0.09244381657518339,
+      "cost": 0.00287835,
+      "ms": 5280,
+      "expect": "holds",
+      "confidence": 0.62,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 2,
+        "eps_prime": 0.0002
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 0.5865095299064178,
+      "cost": 0.0037604,
+      "ms": 7982,
+      "expect": "holds",
+      "confidence": 0.82,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 2,
+        "eps_prime": 0.0002
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 0,
+      "truth": "fails",
+      "difference": 0.5865095299064178,
+      "cost": 0.0050076,
+      "ms": 10680,
+      "expect": "fails",
+      "confidence": 0.55,
+      "uses": []
+    },
+    {
+      "point": {
+        "s": 1,
+        "q": 0.0000762,
+        "eps": 0.01,
+        "eps_prime": 0.0002
+      },
+      "seen": true,
+      "withLesson": false,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 0.5501362852068709,
+      "cost": 0.0028849,
+      "ms": 5757,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "s": 1,
+        "q": 0.0000762,
+        "eps": 0.01,
+        "eps_prime": 0.0002
+      },
+      "seen": true,
+      "withLesson": true,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 0.5501362852068709,
+      "cost": 0.0021460999999999997,
+      "ms": 4651,
+      "expect": "fails",
+      "confidence": 0.95,
+      "uses": ["lesson-1"]
+    },
+    {
+      "point": {
+        "s": 1,
+        "q": 0.0000762,
+        "eps": 0.01,
+        "eps_prime": 0.00002
+      },
+      "seen": true,
+      "withLesson": false,
+      "rep": 1,
+      "truth": "holds",
+      "difference": 0.03916181411710353,
+      "cost": 0.00408765,
+      "ms": 8052,
+      "expect": "holds",
+      "confidence": 0.88,
+      "uses": []
+    },
+    {
+      "point": {
+        "s": 1,
+        "q": 0.0000762,
+        "eps": 0.01,
+        "eps_prime": 0.00002
+      },
+      "seen": true,
+      "withLesson": true,
+      "rep": 1,
+      "truth": "holds",
+      "difference": 0.03916181411710353,
+      "cost": 0.0050076,
+      "ms": 9000,
+      "expect": "holds",
+      "confidence": 0.75,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 0.75,
+        "eps_prime": 0.00001
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 1,
+      "truth": "holds",
+      "difference": 0.02125983168731192,
+      "cost": 0.0037119,
+      "ms": 8062,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 0.75,
+        "eps_prime": 0.00001
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 1,
+      "truth": "holds",
+      "difference": 0.02125983168731192,
+      "cost": 0.0035821,
+      "ms": 6301,
+      "expect": "holds",
+      "confidence": 0.75,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 0.75,
+        "eps_prime": 0.00005
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 0.08456046663918565,
+      "cost": 0.0024071500000000003,
+      "ms": 4728,
+      "expect": "holds",
+      "confidence": 0.92,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 0.75,
+        "eps_prime": 0.00005
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 0.08456046663918565,
+      "cost": 0.00407085,
+      "ms": 8495,
+      "expect": "holds",
+      "confidence": 0.65,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 0.75,
+        "eps_prime": 0.0002
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 0.5330845160383287,
+      "cost": 0.0034824,
+      "ms": 7268,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 0.75,
+        "eps_prime": 0.0002
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 0.5330845160383287,
+      "cost": 0.0057241,
+      "ms": 11455,
+      "expect": "holds",
+      "confidence": 0.55,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 0.75,
+        "eps_prime": 0.001
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 3.8074950239114274,
+      "cost": 0.0036214,
+      "ms": 8808,
+      "expect": "holds",
+      "confidence": 0.8,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 0.75,
+        "eps_prime": 0.001
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 3.8074950239114274,
+      "cost": 0.0034746,
+      "ms": 7027,
+      "expect": "fails",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1,
+        "eps_prime": 0.00001
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 1,
+      "truth": "holds",
+      "difference": 0.02203944673364504,
+      "cost": 0.0029656500000000002,
+      "ms": 6884,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1,
+        "eps_prime": 0.00001
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 1,
+      "truth": "holds",
+      "difference": 0.02203944673364504,
+      "cost": 0.00571735,
+      "ms": 11621,
+      "expect": "holds",
+      "confidence": 0.8,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1,
+        "eps_prime": 0.00005
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 0.08704711885211604,
+      "cost": 0.00308465,
+      "ms": 6993,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1,
+        "eps_prime": 0.00005
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 0.08704711885211604,
+      "cost": 0.00496935,
+      "ms": 9338,
+      "expect": "holds",
+      "confidence": 0.6,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1,
+        "eps_prime": 0.001
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 4.009941257499526,
+      "cost": 0.00608445,
+      "ms": 13475,
+      "expect": "holds",
+      "confidence": 0.75,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1,
+        "eps_prime": 0.001
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 4.009941257499526,
+      "cost": 0.007475600000000001,
+      "ms": 14280,
+      "expect": "fails",
+      "confidence": 0.65,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1.5,
+        "eps_prime": 0.00001
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 1,
+      "truth": "holds",
+      "difference": 0.023265814060011054,
+      "cost": 0.00255165,
+      "ms": 5605,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1.5,
+        "eps_prime": 0.00001
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 1,
+      "truth": "holds",
+      "difference": 0.023265814060011054,
+      "cost": 0.0038371,
+      "ms": 6532,
+      "expect": "holds",
+      "confidence": 0.7,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1.5,
+        "eps_prime": 0.00005
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 0.08970536922364204,
+      "cost": 0.0022584000000000003,
+      "ms": 5430,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1.5,
+        "eps_prime": 0.00005
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 0.08970536922364204,
+      "cost": 0.0042791,
+      "ms": 7964,
+      "expect": "holds",
+      "confidence": 0.6,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1.5,
+        "eps_prime": 0.0002
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 0.5669870654367529,
+      "cost": 0.0030404,
+      "ms": 6589,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1.5,
+        "eps_prime": 0.0002
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 0.5669870654367529,
+      "cost": 0.00490385,
+      "ms": 9012,
+      "expect": "fails",
+      "confidence": 0.62,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1.5,
+        "eps_prime": 0.001
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 4.438853493994439,
+      "cost": 0.00369365,
+      "ms": 9294,
+      "expect": "holds",
+      "confidence": 0.75,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 1.5,
+        "eps_prime": 0.001
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 4.438853493994439,
+      "cost": 0.004566850000000001,
+      "ms": 9289,
+      "expect": "fails",
+      "confidence": 0.7,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 2,
+        "eps_prime": 0.00001
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 1,
+      "truth": "holds",
+      "difference": 0.02510266748401076,
+      "cost": 0.00382415,
+      "ms": 9080,
+      "expect": "holds",
+      "confidence": 0.9,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 2,
+        "eps_prime": 0.00001
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 1,
+      "truth": "holds",
+      "difference": 0.02510266748401076,
+      "cost": 0.0027466,
+      "ms": 5102,
+      "expect": "holds",
+      "confidence": 0.82,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 2,
+        "eps_prime": 0.00005
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 0.09244381657518339,
+      "cost": 0.0023451500000000003,
+      "ms": 6131,
+      "expect": "holds",
+      "confidence": 0.8,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 2,
+        "eps_prime": 0.00005
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 0.09244381657518339,
+      "cost": 0.0034096,
+      "ms": 7074,
+      "expect": "holds",
+      "confidence": 0.65,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 2,
+        "eps_prime": 0.0002
+      },
+      "seen": false,
+      "withLesson": false,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 0.5865095299064178,
+      "cost": 0.00220065,
+      "ms": 5820,
+      "expect": "holds",
+      "confidence": 0.85,
+      "uses": []
+    },
+    {
+      "point": {
+        "q": 0.0000762,
+        "eps": 0.01,
+        "s": 2,
+        "eps_prime": 0.0002
+      },
+      "seen": false,
+      "withLesson": true,
+      "rep": 1,
+      "truth": "fails",
+      "difference": 0.5865095299064178,
+      "cost": 0.00550485,
+      "ms": 10735,
+      "expect": "holds",
+      "confidence": 0.7,
+      "uses": []
+    }
+  ],
+  "total": 0.25749455
+}
