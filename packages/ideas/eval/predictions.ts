@@ -3,8 +3,11 @@
 // settles first; Muse predicts each point blind with no lesson, with the
 // recorded lesson as outcomes only, and with its measured contrast, using the
 // prompt the app uses. The lesson's own points are reported apart, so recall
-// is not counted as learning. Baselines: always "fails", and a constant
-// probability taken from an earlier, separate grid.
+// is not counted as learning. Baselines: always "fails", a constant
+// probability taken from an earlier, separate grid, and a rule with no model
+// at all that interpolates the lesson's two measured gaps in eps_prime
+// (log-log) and calls "fails" above the tolerance. If that rule matches Muse,
+// the lesson's numbers did the work, not Muse.
 //
 //   npx vite-node packages/ideas/eval/predictions.ts -- grid.json [reps] [out.json]
 //
@@ -23,12 +26,13 @@ const gridFile = process.argv[2] ?? "packages/ideas/eval/grid-2.json";
 const reps = Number(process.argv[3] ?? 2);
 const out = process.argv[4] ?? "eval-predictions.json";
 const spec2 = JSON.parse(await readFile(new URL(gridFile, root), "utf8")) as {
-  q: number;
-  eps: number;
+  q: number | number[];
+  eps: number | number[];
   s: number[];
   eps_prime: number[];
   base_rate_from: string;
 };
+const list = (x: number | number[]) => (Array.isArray(x) ? x : [x]);
 const earlier = JSON.parse(await readFile(new URL(spec2.base_rate_from, root), "utf8")) as {
   rows: { seen: boolean; truth: Outcome }[];
 };
@@ -51,11 +55,16 @@ const node = lesson && base.nodes.get(lesson.node);
 const spec = node?.check;
 if (!lesson || !node || spec?.kind !== "oregonator") throw new Error("the example has no lesson");
 
-const fixed = { q: spec2.q, eps: spec2.eps };
 const seen = [lesson.basis, { ...lesson.basis, [lesson.test.param]: lesson.test.value }];
 const grid: Record<string, number>[] = [];
-for (const s of spec2.s)
-  for (const eps_prime of spec2.eps_prime) grid.push({ ...fixed, s, eps_prime });
+for (const q of list(spec2.q))
+  for (const eps of list(spec2.eps))
+    for (const s of spec2.s)
+      for (const eps_prime of spec2.eps_prime) grid.push({ q, eps, s, eps_prime });
+// Whether a point shares every value with the lesson except eps_prime, the
+// one parameter its test changed.
+const onLessonLine = (v: Record<string, number>) =>
+  SIM_PARAMS.every((k) => k === "eps_prime" || v[k] === lesson.basis[k]);
 const key = (v: Record<string, number>) => SIM_PARAMS.map((k) => String(v[k])).join(",");
 const seenKeys = new Set(seen.map(key));
 const points = [...seen, ...grid.filter((g) => !seenKeys.has(key(g)))];
@@ -192,8 +201,49 @@ const outcomes = fresh.flatMap((v) => {
   return t && typeof t !== "string" ? [t.outcome] : [];
 });
 const holdsShare = outcomes.filter((o) => o === "holds").length / outcomes.length;
+// The model-free rule: log(gap) linear in log(eps_prime) through the lesson's
+// two runs, everything else ignored.
+const gapOf = (seq: number | undefined) => {
+  const r = base.runs.find((x) => x.seq === seq)?.result;
+  return r && !("error" in r) ? { ep: r.inputs.eps_prime ?? NaN, gap: r.value } : undefined;
+};
+const [a, b] = [gapOf(lesson.surprise), gapOf(lesson.run)];
+if (!a || !b) throw new Error("the lesson has no measured gaps");
+const slope = Math.log(b.gap / a.gap) / Math.log(b.ep / a.ep);
+const interpolated = (v: Record<string, number>): Outcome =>
+  a.gap * ((v.eps_prime ?? NaN) / a.ep) ** slope <= spec.tolerance ? "holds" : "fails";
+const ruleRows = fresh.flatMap((v) => {
+  const t = truth.get(key(v));
+  return t && typeof t !== "string" ? [{ v, right: interpolated(v) === t.outcome }] : [];
+});
+const ruleOn = (rs: typeof ruleRows) =>
+  rs.length ? rs.filter((r) => r.right).length / rs.length : NaN;
+// Muse's accuracy on the same split, so the comparison is like for like.
+const museOn = (line: boolean) =>
+  Object.fromEntries(
+    CONDITIONS.map((c) => {
+      const rs = rows.filter(
+        (r) => r.condition === c && !r.seen && r.expect && onLessonLine(r.point) === line,
+      );
+      return [c, rs.length ? rs.filter((r) => r.expect === r.truth).length / rs.length : NaN];
+    }),
+  );
+const split = {
+  onLessonLine: {
+    points: ruleRows.filter((r) => onLessonLine(r.v)).length,
+    interpolation: ruleOn(ruleRows.filter((r) => onLessonLine(r.v))),
+    muse: museOn(true),
+  },
+  offLessonLine: {
+    points: ruleRows.filter((r) => !onLessonLine(r.v)).length,
+    interpolation: ruleOn(ruleRows.filter((r) => !onLessonLine(r.v))),
+    muse: museOn(false),
+  },
+};
 const baselines = {
   points: outcomes.length,
+  interpolation: { slope, accuracy: ruleOn(ruleRows) },
+  split,
   alwaysFails: { accuracy: 1 - holdsShare, brier: holdsShare },
   baseRate: {
     probabilityHolds: baseRate,
