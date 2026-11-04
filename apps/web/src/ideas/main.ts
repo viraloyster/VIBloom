@@ -161,6 +161,12 @@ function landing() {
     "Recorded: Muse surprised, then learns",
   );
   replayLesson.addEventListener("click", () => void playRecorded("period-reduction"));
+  const replaySearch = el(
+    "button",
+    { class: "ghost-btn" },
+    "Recorded: searching nearby recipes with the map",
+  );
+  replaySearch.addEventListener("click", () => void playRecorded("recipe-search"));
   let saved: { events: IdeaEvent[]; refused?: Refusal[] } | undefined;
   try {
     saved = JSON.parse(localStorage.getItem(PROJECT_STORE) ?? "null") as typeof saved;
@@ -291,6 +297,7 @@ function landing() {
           { class: "watch" },
           el("span", { class: "fine" }, "Watch Muse work, no key needed:"),
           replayChem,
+          replaySearch,
           replayLesson,
           replay,
         ),

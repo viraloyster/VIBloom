@@ -11,7 +11,7 @@ import { IdeaTree } from "../src/tree";
 import type { IdeaEvent, Refusal } from "../src/types";
 
 const dir = new URL("../../../apps/web/public/examples/", import.meta.url);
-const SESSIONS = ["chemical-clock", "period-reduction", "cardboard-airliner"];
+const SESSIONS = ["chemical-clock", "recipe-search", "period-reduction", "cardboard-airliner"];
 const pct = (x: number) => `${(100 * x).toFixed(1)}%`;
 let failures = 0;
 
@@ -24,6 +24,10 @@ for (const name of SESSIONS) {
   console.log(`\n${name}: ${String(data.events.length)} events, hash chain verified`);
   console.log(`  goal: ${t.goal.split("\n")[0] ?? ""}`);
   const started = Date.now();
+  const via = (seq: number) => {
+    const b = data.events[seq]?.body;
+    return b?.type === "check" && b.via === "map" ? " (chosen from the recipe map)" : "";
+  };
   for (const run of t.runs) {
     const spec = t.nodes.get(run.node)?.check;
     if (!spec) continue;
@@ -37,7 +41,7 @@ for (const name of SESSIONS) {
     const ok = run.state === "confirmed";
     if (!ok) failures++;
     console.log(
-      `  #${String(run.seq)} ${run.purpose} ${run.node}: recorded ${said}; ${ok ? "reproduced" : "DID NOT REPRODUCE"}`,
+      `  #${String(run.seq)} ${run.purpose} ${run.node}${via(run.seq)}: recorded ${said}; ${ok ? "reproduced" : "DID NOT REPRODUCE"}`,
     );
   }
   for (const p of t.predictions) {

@@ -910,7 +910,12 @@ describe("streamed array items", () => {
 
 describe("recorded sessions", () => {
   const dir = new URL("../../../apps/web/public/examples/", import.meta.url);
-  for (const name of ["cardboard-airliner", "chemical-clock", "period-reduction"]) {
+  for (const name of [
+    "cardboard-airliner",
+    "chemical-clock",
+    "period-reduction",
+    "recipe-search",
+  ]) {
     it(`${name} reopens and its experiments reproduce`, async () => {
       const { readFile } = await import("node:fs/promises");
       const data = JSON.parse(await readFile(new URL(`${name}.json`, dir), "utf8")) as {

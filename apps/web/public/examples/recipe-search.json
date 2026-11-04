@@ -1,0 +1,524 @@
+{
+  "format": "vibloom-ideas-1",
+  "events": [
+    {
+      "seq": 0,
+      "prev": "0000000000000000000000000000000000000000000000000000000000000000",
+      "actor": "person",
+      "body": {
+        "type": "goal",
+        "text": "Ce-catalysed BZ oscillator, 0.06 M bromate, 0.02 M malonic acid, 0.8 M acid: find a recipe near this one with a period of 60 s +/- 10 s where the two-variable Oregonator stays within 10% of the full model's period.",
+        "mode": "standard"
+      },
+      "hash": "e0237ac3e2693343101cc99815ecde2cafab3a76c7dc3d39d4226f1c7066b45a"
+    },
+    {
+      "seq": 1,
+      "prev": "e0237ac3e2693343101cc99815ecde2cafab3a76c7dc3d39d4226f1c7066b45a",
+      "actor": "muse:muse-spark-1.3",
+      "body": {
+        "type": "grow",
+        "under": "goal",
+        "nodes": [
+          {
+            "id": "full-oscillates",
+            "parent": "goal",
+            "title": "Full model oscillates",
+            "statement": "The full three-variable Oregonator for this cerium recipe sustains oscillations rather than settling to a steady state.",
+            "axis": "principles",
+            "role": "assumption",
+            "criticality": "critical",
+            "risk": "medium",
+            "rationale": "Without a limit cycle in the full model there is no period to match and no 60 s target.",
+            "params": [
+              {
+                "name": "bromate",
+                "kind": "design",
+                "value": 0.06,
+                "unit": "M",
+                "origin": "assumed",
+                "source": ""
+              },
+              {
+                "name": "malonic_acid",
+                "kind": "design",
+                "value": 0.02,
+                "unit": "M",
+                "origin": "assumed",
+                "source": ""
+              },
+              {
+                "name": "acid",
+                "kind": "design",
+                "value": 0.8,
+                "unit": "M",
+                "origin": "assumed",
+                "source": ""
+              },
+              {
+                "name": "s",
+                "kind": "external",
+                "value": 1,
+                "unit": "1",
+                "origin": "assumed",
+                "source": ""
+              }
+            ],
+            "uses": [],
+            "suggestions": [],
+            "check": {
+              "kind": "oregonator",
+              "description": "Run stiff Oregonator solver derived from recipe; passes if limit cycle detected.",
+              "question": "oscillates",
+              "tolerance": 0.05,
+              "op": "<=",
+              "unit": ""
+            },
+            "basis": [],
+            "proposed": false,
+            "expanded": false
+          },
+          {
+            "id": "reduction-keeps-period",
+            "parent": "goal",
+            "title": "Reduction preserves period",
+            "statement": "The two-variable Oregonator keeps the full oscillation period to within ten percent for this recipe.",
+            "axis": "methods",
+            "role": "assumption",
+            "criticality": "critical",
+            "risk": "high",
+            "rationale": "Fast-variable elimination is only valid when the reduced period tracks the full period; this is the 10 percent claim.",
+            "params": [],
+            "uses": [],
+            "suggestions": [],
+            "check": {
+              "kind": "oregonator",
+              "description": "Run full versus reduced Oregonator; passes if periods agree within tolerance.",
+              "question": "reduction_keeps_period",
+              "tolerance": 0.1,
+              "op": "<=",
+              "unit": ""
+            },
+            "basis": [],
+            "proposed": false,
+            "expanded": false
+          },
+          {
+            "id": "period-sixty-seconds",
+            "parent": "goal",
+            "title": "Period hits sixty seconds",
+            "statement": "The full oscillation cycle between activator maxima, seen as colour changes, repeats every sixty seconds within ten seconds.",
+            "axis": "requirements",
+            "role": "assumption",
+            "criticality": "critical",
+            "risk": "high",
+            "rationale": "The goal demands a 60 s colour-change cycle within 10 s; the solver period must compute it, not assume it.",
+            "params": [
+              {
+                "name": "target_period_s",
+                "kind": "requirement",
+                "value": 60,
+                "unit": "s",
+                "origin": "assumed",
+                "source": ""
+              },
+              {
+                "name": "period_tolerance_s",
+                "kind": "requirement",
+                "value": 10,
+                "unit": "s",
+                "origin": "assumed",
+                "source": ""
+              }
+            ],
+            "uses": [],
+            "suggestions": [],
+            "check": {
+              "description": "Compares solver full-cycle period in seconds, between activator maxima, to target.",
+              "value": "abs(reduction_keeps_period_period_full_s - target_period_s)",
+              "op": "<=",
+              "limit": "period_tolerance_s",
+              "unit": "s"
+            },
+            "basis": ["reduction-keeps-period"],
+            "proposed": false,
+            "expanded": false
+          },
+          {
+            "id": "near-recipe-range",
+            "parent": "goal",
+            "title": "Near means nearby concentrations",
+            "statement": "A recipe within about a factor of two in each reagent of the stated mixture counts as near this one.",
+            "axis": "constraints",
+            "role": "assumption",
+            "criticality": "major",
+            "risk": "medium",
+            "rationale": "Adjustment is allowed but unbounded search would trivialize the task; nearness must be bounded.",
+            "params": [],
+            "uses": [],
+            "suggestions": [],
+            "basis": [],
+            "proposed": false,
+            "expanded": false
+          },
+          {
+            "id": "chemistry-maps-to-oregonator",
+            "parent": "goal",
+            "title": "Recipe maps to Oregonator",
+            "statement": "Field rate constants map this cerium bromate malonic acid mixture onto the Oregonator scaling without extra inhibition.",
+            "axis": "principles",
+            "role": "assumption",
+            "criticality": "major",
+            "risk": "medium",
+            "rationale": "Oregonator parameters are derived from recipe via literature rate constants; side reactions or cerium speciation could break it.",
+            "params": [],
+            "uses": [],
+            "suggestions": [],
+            "basis": [],
+            "proposed": false,
+            "expanded": false
+          },
+          {
+            "id": "reagents-stay-in-solution",
+            "parent": "goal",
+            "title": "Mixture stays workable",
+            "statement": "Bromate, malonic acid and acid at these levels stay dissolved and support cerium catalysed cycling.",
+            "axis": "materials",
+            "role": "assumption",
+            "criticality": "minor",
+            "risk": "low",
+            "rationale": "Precipitation, gas evolution, or catalyst loss would stop oscillations even if the model predicts them.",
+            "params": [],
+            "uses": [],
+            "suggestions": [],
+            "basis": [],
+            "proposed": false,
+            "expanded": false
+          }
+        ],
+        "summary": "Read as adjusting concentrations around 0.06 M bromate / 0.02 M malonic acid / 0.8 M acid to hit a 60 s colour-change cycle with an accurate 2-variable reduction, not as fitting seconds by rescaling time. Main alternative would be keeping the recipe fixed and tuning only the stoichiometric factor.",
+        "usage": {
+          "model": "muse-spark-1.3",
+          "input": 1885,
+          "cached": 1777,
+          "output": 3508,
+          "reasoning": 2070,
+          "cost": 0.01531055
+        }
+      },
+      "hash": "4c368ac4a6fc65c1c69ef2e298167aaa47658781dcb42247fcdbad5084416a8b"
+    },
+    {
+      "seq": 2,
+      "prev": "4c368ac4a6fc65c1c69ef2e298167aaa47658781dcb42247fcdbad5084416a8b",
+      "actor": "muse:muse-spark-1.3",
+      "body": {
+        "type": "predict",
+        "id": "p1",
+        "node": "full-oscillates",
+        "inputs": {
+          "s": 1,
+          "q": 7.61904761904762e-5,
+          "eps": 0.00992063492063492,
+          "eps_prime": 1.984126984126984e-5
+        },
+        "expect": "holds",
+        "confidence": 0.85,
+        "reason": "With s=1, eps~0.01 and q~8e-5 the scaled cerium Oregonator lies in the classic limit-cycle window rather than a steady state.",
+        "uses": [],
+        "usage": {
+          "model": "muse-spark-1.3",
+          "input": 556,
+          "cached": 113,
+          "output": 843,
+          "reasoning": 775,
+          "cost": 0.0041534499999999995
+        }
+      },
+      "hash": "565996a3c3e9450af70b3f9243004f98575698a87a3076d3f5319af5c4ae2173"
+    },
+    {
+      "seq": 3,
+      "prev": "565996a3c3e9450af70b3f9243004f98575698a87a3076d3f5319af5c4ae2173",
+      "actor": "engine",
+      "body": {
+        "type": "check",
+        "node": "full-oscillates",
+        "result": {
+          "pass": true,
+          "value": 0,
+          "limit": 0,
+          "op": "<=",
+          "unit": "",
+          "inputs": {
+            "s": 1,
+            "q": 7.61904761904762e-5,
+            "eps": 0.00992063492063492,
+            "eps_prime": 1.984126984126984e-5,
+            "time_scale_s": 50,
+            "recipe_version": 2
+          },
+          "engine": 1,
+          "sim": {
+            "outcome": "holds",
+            "periods": {
+              "full": 7.738186832817241
+            },
+            "observations": {
+              "full": "oscillation"
+            }
+          }
+        }
+      },
+      "hash": "062adbb917cbf39f61c8f3176276c7d6409dfe2bbacb6312e300c07a9ca17cab"
+    },
+    {
+      "seq": 4,
+      "prev": "062adbb917cbf39f61c8f3176276c7d6409dfe2bbacb6312e300c07a9ca17cab",
+      "actor": "muse:muse-spark-1.3",
+      "body": {
+        "type": "predict",
+        "id": "p2",
+        "node": "reduction-keeps-period",
+        "inputs": {
+          "s": 1,
+          "q": 7.61904761904762e-5,
+          "eps": 0.00992063492063492,
+          "eps_prime": 1.984126984126984e-5
+        },
+        "expect": "holds",
+        "confidence": 0.92,
+        "reason": "With eps_prime/eps ~0.002 the Y variable is much faster than X and adiabatic elimination to two variables preserves the limit-cycle period.",
+        "uses": [],
+        "usage": {
+          "model": "muse-spark-1.3",
+          "input": 555,
+          "cached": 113,
+          "output": 550,
+          "reasoning": 489,
+          "cost": 0.0029069499999999997
+        }
+      },
+      "hash": "a6fdd029c8c53bc8d58bc2362609e45dcb2611f5d08664d0566aefd52319b43f"
+    },
+    {
+      "seq": 5,
+      "prev": "a6fdd029c8c53bc8d58bc2362609e45dcb2611f5d08664d0566aefd52319b43f",
+      "actor": "engine",
+      "body": {
+        "type": "check",
+        "node": "reduction-keeps-period",
+        "result": {
+          "pass": true,
+          "value": 0.03904301246558454,
+          "limit": 0.1,
+          "op": "<=",
+          "unit": "",
+          "inputs": {
+            "s": 1,
+            "q": 7.61904761904762e-5,
+            "eps": 0.00992063492063492,
+            "eps_prime": 1.984126984126984e-5,
+            "time_scale_s": 50,
+            "recipe_version": 2
+          },
+          "engine": 1,
+          "sim": {
+            "outcome": "holds",
+            "periods": {
+              "full": 7.738186832817241,
+              "reduced": 7.4474172291048895
+            },
+            "observations": {
+              "full": "oscillation",
+              "reduced": "oscillation"
+            }
+          }
+        }
+      },
+      "hash": "a03f9b9f344f402434a1b8f3800bdf09cde141ae8f8760e7a357a8095ec5855f"
+    },
+    {
+      "seq": 6,
+      "prev": "a03f9b9f344f402434a1b8f3800bdf09cde141ae8f8760e7a357a8095ec5855f",
+      "actor": "engine",
+      "body": {
+        "type": "check",
+        "node": "period-sixty-seconds",
+        "result": {
+          "pass": false,
+          "value": 326.909341640862,
+          "limit": 10,
+          "op": "<=",
+          "unit": "s",
+          "inputs": {
+            "reduction_keeps_period_period_full_s": 386.909341640862,
+            "target_period_s": 60,
+            "period_tolerance_s": 10
+          }
+        }
+      },
+      "hash": "d0cafdfaafe365da1de93189006ccc96b0e0383e49305e07cf59abd7e35e10dd"
+    },
+    {
+      "seq": 7,
+      "prev": "d0cafdfaafe365da1de93189006ccc96b0e0383e49305e07cf59abd7e35e10dd",
+      "actor": "person",
+      "body": {
+        "type": "set_param",
+        "name": "bromate",
+        "value": 0.879,
+        "source": "recipe map"
+      },
+      "hash": "3ab0249ae512449514dce2551eff2d43d8ba17004d2cfd18d279f70a3796d727"
+    },
+    {
+      "seq": 8,
+      "prev": "3ab0249ae512449514dce2551eff2d43d8ba17004d2cfd18d279f70a3796d727",
+      "actor": "person",
+      "body": {
+        "type": "set_param",
+        "name": "malonic_acid",
+        "value": 0.136,
+        "source": "recipe map"
+      },
+      "hash": "67d5e667840f6adea29430832e90e289821d36f787dea174b7492136857afd45"
+    },
+    {
+      "seq": 9,
+      "prev": "67d5e667840f6adea29430832e90e289821d36f787dea174b7492136857afd45",
+      "actor": "engine",
+      "body": {
+        "type": "check",
+        "node": "reduction-keeps-period",
+        "result": {
+          "pass": true,
+          "value": 0.02330770919065407,
+          "limit": 0.1,
+          "op": "<=",
+          "unit": "",
+          "inputs": {
+            "s": 1,
+            "q": 7.61904761904762e-5,
+            "eps": 0.00460479982664283,
+            "eps_prime": 9.209599653285661e-6,
+            "time_scale_s": 7.352941176470588,
+            "recipe_version": 2
+          },
+          "engine": 1,
+          "sim": {
+            "outcome": "holds",
+            "periods": {
+              "full": 7.430589355902583,
+              "reduced": 7.261344060213836
+            },
+            "observations": {
+              "full": "oscillation",
+              "reduced": "oscillation"
+            }
+          }
+        },
+        "via": "map"
+      },
+      "hash": "76bb2eec5e6c67340f7a44155107bdd99e49c8887488767eca60c217d53b5a22"
+    },
+    {
+      "seq": 10,
+      "prev": "76bb2eec5e6c67340f7a44155107bdd99e49c8887488767eca60c217d53b5a22",
+      "actor": "engine",
+      "body": {
+        "type": "check",
+        "node": "full-oscillates",
+        "result": {
+          "pass": true,
+          "value": 0,
+          "limit": 0,
+          "op": "<=",
+          "unit": "",
+          "inputs": {
+            "s": 1,
+            "q": 7.61904761904762e-5,
+            "eps": 0.00460479982664283,
+            "eps_prime": 9.209599653285661e-6,
+            "time_scale_s": 7.352941176470588,
+            "recipe_version": 2
+          },
+          "engine": 1,
+          "sim": {
+            "outcome": "holds",
+            "periods": {
+              "full": 7.430589355902583
+            },
+            "observations": {
+              "full": "oscillation"
+            }
+          }
+        }
+      },
+      "hash": "beeea3d1f67c8f557559b7757ab95a4f8529a1b9a0818e5030639d386bde80e0"
+    },
+    {
+      "seq": 11,
+      "prev": "beeea3d1f67c8f557559b7757ab95a4f8529a1b9a0818e5030639d386bde80e0",
+      "actor": "engine",
+      "body": {
+        "type": "check",
+        "node": "period-sixty-seconds",
+        "result": {
+          "pass": true,
+          "value": 5.363313559539833,
+          "limit": 10,
+          "op": "<=",
+          "unit": "s",
+          "inputs": {
+            "reduction_keeps_period_period_full_s": 54.63668644046017,
+            "target_period_s": 60,
+            "period_tolerance_s": 10
+          }
+        }
+      },
+      "hash": "6bf434aab0010e825950a756a692241223f88432b5897192e152e5dfbaa78233"
+    },
+    {
+      "seq": 12,
+      "prev": "6bf434aab0010e825950a756a692241223f88432b5897192e152e5dfbaa78233",
+      "actor": "muse:muse-spark-1.3",
+      "body": {
+        "type": "chat",
+        "focus": "reduction-keeps-period",
+        "question": "The starting recipe ran at 6.4 min. What did the recipe change do to eps and eps_prime, why does the reduction still agree here, and which change would break it?",
+        "answer": "VIBloom computed holds for both the old and new recipe, with the gap smaller on the new one. My reasoning is the bromate rise outpaced the malonic rise, so eps and eps_prime roughly halved and stayed <<1. That keeps the fast-variable separation intact, hence continued agreement. Reversing that \u2014 much lower bromate, much higher malonic, or lower acid \u2014 would push eps and q up and break it; open chemistry-maps-to-oregonator next.",
+        "cites": ["reduction-keeps-period", "chemistry-maps-to-oregonator", "period-sixty-seconds"],
+        "asked": {
+          "bromate": 0.879,
+          "malonic_acid": 0.136,
+          "acid": 0.8,
+          "s": 1,
+          "target_period_s": 60,
+          "period_tolerance_s": 10,
+          "q": 7.61904761904762e-5,
+          "eps": 0.00460479982664283,
+          "eps_prime": 9.209599653285661e-6,
+          "time_scale_s": 7.352941176470588,
+          "recipe_version": 2,
+          "full_oscillates_period_full": 7.430589355902583,
+          "full_oscillates_period_full_s": 54.63668644046017,
+          "reduction_keeps_period_period_full": 7.430589355902583,
+          "reduction_keeps_period_period_reduced": 7.261344060213836,
+          "reduction_keeps_period_period_full_s": 54.63668644046017,
+          "reduction_keeps_period_period_reduced_s": 53.39223573686644
+        },
+        "usage": {
+          "model": "muse-spark-1.3",
+          "input": 1427,
+          "cached": 113,
+          "output": 1479,
+          "reasoning": 1310,
+          "cost": 0.0079452
+        }
+      },
+      "hash": "88d36dd6fc584681062a7cf5514571132358a373d8c4d5d1b054a7c218c5e7b2"
+    }
+  ],
+  "refused": []
+}
