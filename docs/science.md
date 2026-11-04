@@ -63,12 +63,15 @@ q         = 2 k1 k4 / (k2 k3)
 tau       = k5 [MA] t,  so  time_scale_s = 1 / (k5 [MA])
 ```
 
-The effective rate constants (k1 1.28, k2 3e6, k3 33.6, k4 3000, k5 1, in M
-and s) reproduce the scaled values [2] gives for 0.06 M bromate, 0.02 M
-malonic acid and 0.8 M acid (the `FIELD_2007` set) to within 0.2%; a test
-checks it. Their dependence on acidity is an assumption: proton orders 2, 1
-and 1 for k1, k2 and k3. `s` (the stoichiometric factor f) is not set by the
-recipe and stays an assumption of the tree.
+The rate constants are Field's [2], each a coefficient times the proton
+concentration: k1 = 2 [H+]^2, k2 = 3e6 [H+], k3 = 42 [H+], k4 = 3000 [H+],
+k5 = 1 (M, s). For 0.06 M bromate, 0.02 M malonic acid and 0.8 M acid they
+give the scaled values of [2] (the `FIELD_2007` set) to within 0.2%. Doubling
+the acid doubles `q` and halves `eps` and `eps_prime`; tests check both the
+reference recipe and that dependence. `s` (the stoichiometric factor f) is not
+set by the recipe and stays an assumption of the tree. Every run records the
+version of this conversion (`RECIPE_VERSION`); a run made under another
+version is shown as stale.
 
 A period in seconds is the model period times `time_scale_s`. The Oregonator
 is semi-quantitative: these seconds are the model's, and a real beaker can

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FIELD_2007 } from "./oregonator";
-import { fromRecipe } from "./recipe";
+import { fromRecipe, RATE_CONSTANTS } from "./recipe";
 
 const rel = (a: number, b: number) => Math.abs(a - b) / Math.abs(b);
 
@@ -13,12 +13,22 @@ describe("a real recipe", () => {
     expect(p.time_scale_s).toBeCloseTo(50);
   });
 
-  it("follows the assumed proton orders and refuses an impossible recipe", () => {
+  it("uses Field's constants at the reference acidity", () => {
+    const at = (c: { k: number; protons: number }, h: number) => c.k * h ** c.protons;
+    expect(at(RATE_CONSTANTS.k2, 0.8)).toBeCloseTo(2.4e6);
+    expect(at(RATE_CONSTANTS.k4, 0.8)).toBeCloseTo(2400);
+    expect(at(RATE_CONSTANTS.k3, 0.8)).toBeCloseTo(33.6);
+    expect(at(RATE_CONSTANTS.k1, 0.8)).toBeCloseTo(1.28);
+  });
+
+  it("changes with acidity as Field's rate laws imply, and refuses an impossible recipe", () => {
     const base = fromRecipe({ bromate: 0.06, malonic_acid: 0.02, acid: 0.8 });
     const acid = fromRecipe({ bromate: 0.06, malonic_acid: 0.02, acid: 1.6 });
-    expect(rel(acid.q, base.q)).toBeLessThan(1e-12);
+    // Doubling the acid: q doubles, eps and eps_prime halve, seconds stay.
+    expect(rel(acid.q, base.q * 2)).toBeLessThan(1e-12);
     expect(rel(acid.eps, base.eps / 2)).toBeLessThan(1e-12);
-    expect(rel(acid.eps_prime, base.eps_prime / 4)).toBeLessThan(1e-12);
+    expect(rel(acid.eps_prime, base.eps_prime / 2)).toBeLessThan(1e-12);
+    expect(acid.time_scale_s).toBeCloseTo(base.time_scale_s);
     expect(() => fromRecipe({ bromate: 0, malonic_acid: 0.02, acid: 0.8 })).toThrow(/bromate/);
   });
 });

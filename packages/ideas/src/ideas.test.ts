@@ -992,6 +992,21 @@ describe("a real recipe in the tree", () => {
     t.append("person", { type: "set_param", name: "malonic_acid", value: 0.04, source: "edit" });
     expect(t.scope().time_scale_s).toBeCloseTo(25);
     expect(t.status("clock")).toBe("stale");
+    // Evidence computed under another version of the conversion is stale.
+    const fresh = runCheck(spec, t.scope());
+    if ("error" in fresh) throw new Error(fresh.error);
+    expect(fresh.inputs.recipe_version).toBe(t.scope().recipe_version);
+    t.append("engine", { type: "check", node: "clock", result: fresh });
+    t.confirm(seqOf(t, "clock"), fresh);
+    expect(t.status("clock")).toBe("holds");
+    const older = IdeaTree.replay(structuredClone(t.events));
+    const last = older.latestRun("clock");
+    if (!last || "error" in last.result) throw new Error("no run");
+    older.results.set("clock", {
+      ...last.result,
+      inputs: { ...last.result.inputs, recipe_version: 1 },
+    });
+    expect(older.status("clock")).toBe("stale");
     // A derived value is not anyone's to set by hand.
     expect(() =>
       t.append("person", { type: "set_param", name: "eps", value: 0.01, source: "edit" }),

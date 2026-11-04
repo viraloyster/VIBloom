@@ -1,7 +1,7 @@
 // Evaluating a check: the model's expressions are parsed by the engine's own
 // arithmetic language, and the engine, not the model, decides pass or fail.
 
-import { evaluatePoint, fromRecipe } from "@vibloom/chem";
+import { evaluatePoint, fromRecipe, RECIPE_VERSION } from "@vibloom/chem";
 import type { Claim } from "@vibloom/contracts";
 import { compare, evaluate } from "./expr";
 import type { ArithmeticSpec, CheckError, CheckResult, CheckSpec, SimulationSpec } from "./types";
@@ -25,6 +25,7 @@ function simulate(spec: SimulationSpec, scope: Record<string, number>): CheckRes
   // A recipe's time scale travels with the run, so its period in seconds is
   // part of what was recorded.
   if (scope.time_scale_s !== undefined) inputs.time_scale_s = scope.time_scale_s;
+  if (scope.recipe_version !== undefined) inputs.recipe_version = scope.recipe_version;
   const point = { s: inputs.s ?? NaN, eps_prime: inputs.eps_prime ?? NaN };
   const claim: Claim =
     spec.question === "reduction_keeps_period"
@@ -175,7 +176,10 @@ export function recipeDerived(values: Record<string, number>): Record<string, nu
   if (bromate === undefined || malonic_acid === undefined || acid === undefined) return {};
   try {
     const all = fromRecipe({ bromate, malonic_acid, acid }) as unknown as Record<string, number>;
-    return Object.fromEntries(Object.entries(all).filter(([k]) => values[k] === undefined));
+    return {
+      ...Object.fromEntries(Object.entries(all).filter(([k]) => values[k] === undefined)),
+      recipe_version: RECIPE_VERSION,
+    };
   } catch {
     return {};
   }

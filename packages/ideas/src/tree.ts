@@ -548,9 +548,14 @@ export class IdeaTree {
     if (n.proposed) return "proposed";
     const r = this.results.get(id);
     const scope = this.scope();
+    // A run made under another version of the recipe conversion (or before
+    // versions were recorded) is evidence about other numbers.
     const changed = (inputs?: Record<string, number>) =>
-      Object.entries(inputs ?? {}).some(([k, v]) => scope[k] !== v);
+      Object.entries(inputs ?? {}).some(([k, v]) => !same(scope[k], v)) ||
+      (inputs?.time_scale_s !== undefined && inputs.recipe_version !== scope.recipe_version);
     if (r && "error" in r) return changed(r.inputs) ? "stale" : "unverified";
+    // Values that moved on make a run stale whether or not it reproduced.
+    if (r && changed(r.inputs)) return "stale";
     if (this.unconfirmed.has(id)) return "unverified";
     // A verdict computed from a run not yet reproduced here is not a verdict yet.
     if (r && Object.keys(r.inputs).some((k) => this.pendingOutputs().has(k))) return "unverified";
@@ -781,7 +786,7 @@ export class IdeaTree {
     if (runs.includes("failed")) return "failed";
     if (runs.includes("pending")) return "unverified";
     const now = this.scope();
-    return Object.entries(l.basis).every(([k, v]) => now[k] === v) ? "current" : "invalidated";
+    return Object.entries(l.basis).every(([k, v]) => same(now[k], v)) ? "current" : "invalidated";
   }
 
   // What the model is shown of past lessons on a node: only decided ones.
@@ -813,7 +818,7 @@ export class IdeaTree {
       .flatMap((l) => {
         const d = this.decided(l);
         if (!d) return [];
-        const here = SIM_PARAMS.every((k) => l.basis[k] === now[k]);
+        const here = SIM_PARAMS.every((k) => same(l.basis[k], now[k]));
         return [
           {
             id: l.id,
@@ -987,10 +992,18 @@ const OUTCOME =
 const pick = (x: Record<string, number>) =>
   Object.fromEntries(SIM_PARAMS.map((k) => [k, x[k] ?? NaN]));
 
+// Equal values, or the same derived value rounded differently: a recipe
+// conversion rewritten with identical mathematics must not change history.
+export function same(a: number | undefined, b: number | undefined): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  return Math.abs(a - b) <= 1e-12 * Math.max(Math.abs(a), Math.abs(b));
+}
+
 // Whether a run's inputs are the given values for every experiment parameter.
 // A failed run may lack the inputs it never reached.
 function sameRun(inputs: Record<string, number>, values: Record<string, number>, partial = false) {
-  return SIM_PARAMS.every((k) => (inputs[k] === undefined ? partial : inputs[k] === values[k]));
+  return SIM_PARAMS.every((k) => (inputs[k] === undefined ? partial : same(inputs[k], values[k])));
 }
 
 export const outputKey = (id: string) => (id.split(".").at(-1) ?? id).replace(/-/g, "_");

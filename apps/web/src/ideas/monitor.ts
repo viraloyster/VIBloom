@@ -376,6 +376,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
         eps: "eps",
         eps_prime: "eps prime",
         time_scale_s: "seconds per model time unit",
+        recipe_version: "conversion version",
       };
       out.push(
         el("p", { class: "eyebrow" }, "Computed from the recipe"),
