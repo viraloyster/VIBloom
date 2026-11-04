@@ -379,6 +379,15 @@ h1 {
   opacity: 0.85;
 }
 
+/* A new root fades in while it slides out from its parent. */
+.root {
+  transition: opacity 0.9s ease;
+}
+
+.root.growing {
+  opacity: 0;
+}
+
 .link {
   fill: none;
   stroke: rgb(255 255 255 / 14%);

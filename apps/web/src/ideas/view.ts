@@ -88,37 +88,91 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
   const canvas = svg("svg", { class: "canvas", "aria-label": "Idea tree" }, stage);
   host.append(canvas);
 
-  let view = { x: 0, y: 0, k: 1 };
+  let view = { x: 0, y: 0, k: 0.8 };
   let target = { ...view };
+  // Until a person pans or zooms, the camera keeps the whole tree in frame.
+  let autoFit = true;
   const seen = new Set<string>();
   let selected: string | undefined;
   let working: string | undefined;
-  let positions = new Map<string, Pos>();
+  let goals = new Map<string, Pos>();
+  // Drawn positions glide toward the layout, so a reflow never jumps.
+  const drawn = new Map<string, Pos>();
+  const groups = new Map<string, SVGGElement>();
+  const paths = new Map<string, { el: SVGPathElement; parent: string }>();
+  let links: { el: SVGPathElement; a: string; b: string }[] = [];
 
-  const apply = () => {
+  const ease = (a: number, b: number, f: number) => (Math.abs(b - a) < 0.05 ? b : a + (b - a) * f);
+
+  const fit = () => {
+    const r = canvas.getBoundingClientRect();
+    if (r.width === 0 || goals.size === 0) return;
+    const xs = [...goals.values()].map((p) => p.x);
+    const ys = [...goals.values()].map((p) => p.y);
+    const minX = Math.min(...xs, -CROWN_W / 2) - 130;
+    const maxX = Math.max(...xs, CROWN_W / 2) + 130;
+    const minY = -CROWN_H - 30;
+    const maxY = Math.max(...ys) + 90;
+    const k = Math.min(1.1, (r.width - 40) / (maxX - minX), (r.height - 110) / (maxY - minY));
+    // The stage origin sits at 42% of the height; aim the box centre at the screen centre.
+    target = {
+      x: -((minX + maxX) / 2) * k,
+      y: r.height / 2 + 30 - r.height * 0.42 - ((minY + maxY) / 2) * k,
+      k,
+    };
+  };
+
+  const tick = () => {
+    view = {
+      x: ease(view.x, target.x, 0.12),
+      y: ease(view.y, target.y, 0.12),
+      k: ease(view.k, target.k, 0.12),
+    };
     const r = canvas.getBoundingClientRect();
     stage.setAttribute(
       "transform",
       `translate(${String(r.width / 2 + view.x)} ${String(r.height * 0.42 + view.y)}) scale(${String(view.k)})`,
     );
-  };
-  // Eased camera, so focusing a node glides instead of jumping.
-  const tick = () => {
-    view = {
-      x: view.x + (target.x - view.x) * 0.14,
-      y: view.y + (target.y - view.y) * 0.14,
-      k: view.k + (target.k - view.k) * 0.14,
-    };
-    apply();
+    let moved = false;
+    for (const [id, goal] of goals) {
+      const cur = drawn.get(id);
+      if (!cur) continue;
+      const nx = ease(cur.x, goal.x, 0.16);
+      const ny = ease(cur.y, goal.y, 0.16);
+      if (nx === cur.x && ny === cur.y) continue;
+      moved = true;
+      cur.x = nx;
+      cur.y = ny;
+      groups.get(id)?.setAttribute("transform", `translate(${String(nx)} ${String(ny)})`);
+    }
+    if (moved) {
+      for (const [id, { el: path, parent }] of paths) {
+        const p = drawn.get(id);
+        const q = drawn.get(parent);
+        if (p && q)
+          path.setAttribute(
+            "d",
+            rootPath(q.x, q.y + (parent === "goal" ? 0 : 10), p.x, p.y - 8, id),
+          );
+      }
+      for (const l of links) l.el.setAttribute("d", linkPath(l.a, l.b));
+    }
     requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
+
+  const linkPath = (a: string, b: string) => {
+    const p = drawn.get(a) ?? { x: 0, y: 0 };
+    const q = drawn.get(b) ?? { x: 0, y: 0 };
+    return `M${String(p.x)},${String(p.y)} Q${String((p.x + q.x) / 2)},${String(Math.max(p.y, q.y) + 80)} ${String(q.x)},${String(q.y)}`;
+  };
 
   canvas.addEventListener(
     "wheel",
     (e) => {
       e.preventDefault();
-      const k = Math.min(2.2, Math.max(0.25, target.k * Math.exp(-e.deltaY * 0.0015)));
+      autoFit = false;
+      const k = Math.min(2.2, Math.max(0.2, target.k * Math.exp(-e.deltaY * 0.0012)));
       const r = canvas.getBoundingClientRect();
       const mx = e.clientX - r.left - r.width / 2;
       const my = e.clientY - r.top - r.height * 0.42;
@@ -133,14 +187,25 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
   let drag: { x: number; y: number } | undefined;
   canvas.addEventListener("pointerdown", (e) => {
     if ((e.target as Element).closest(".node")) return;
+    autoFit = false;
     drag = { x: e.clientX - target.x, y: e.clientY - target.y };
     canvas.setPointerCapture(e.pointerId);
   });
   canvas.addEventListener("pointermove", (e) => {
-    if (drag) target = { ...target, x: e.clientX - drag.x, y: e.clientY - drag.y };
+    if (!drag) return;
+    // Panning follows the pointer directly; easing here feels like lag.
+    target = { ...target, x: e.clientX - drag.x, y: e.clientY - drag.y };
+    view = { ...target };
   });
   canvas.addEventListener("pointerup", () => {
     drag = undefined;
+  });
+  canvas.addEventListener("dblclick", () => {
+    autoFit = true;
+    fit();
+  });
+  window.addEventListener("resize", () => {
+    if (autoFit) fit();
   });
 
   const chip = (n: IdeaNode | Ghost, status: Status | "ghost", id: string) => {
@@ -172,16 +237,13 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
 
   return {
     render(tree, ghosts = []) {
-      positions = place(tree, ghosts);
+      goals = place(tree, ghosts);
       roots.replaceChildren();
       marks.replaceChildren();
+      groups.clear();
+      paths.clear();
       const fresh: SVGPathElement[] = [];
-      const all: {
-        id: string;
-        parent: string | null;
-        node: IdeaNode | Ghost;
-        status: Status | "ghost";
-      }[] = [
+      const all = [
         ...[...tree.nodes.values()].map((n) => ({
           id: n.id,
           parent: n.parent,
@@ -195,14 +257,26 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
           status: "ghost" as const,
         })),
       ];
+      // A real node takes over where its ghost was drawn.
+      for (const g of ghosts) drawn.delete(`ghost:${g.key}`);
+      for (const { id, parent } of all) {
+        if (drawn.has(id)) continue;
+        // New roots start at their parent and slide out.
+        const from = drawn.get(parent ?? "") ?? goals.get(id) ?? { x: 0, y: 0 };
+        drawn.set(id, { ...from });
+      }
+      for (const id of [...drawn.keys()]) if (!goals.has(id)) drawn.delete(id);
       for (const { id, parent, node, status } of all) {
-        const p = positions.get(id);
+        const p = drawn.get(id);
         if (!p) continue;
         if (parent) {
-          const q = positions.get(parent) ?? { x: 0, y: 0 };
-          const d = rootPath(q.x, q.y + (parent === "goal" ? 0 : 10), p.x, p.y - 8, id);
-          const path = svg("path", { d, class: `root ${status}` });
+          const q = drawn.get(parent) ?? { x: 0, y: 0 };
+          const path = svg("path", {
+            d: rootPath(q.x, q.y + (parent === "goal" ? 0 : 10), p.x, p.y - 8, id),
+            class: `root ${status}`,
+          });
           roots.append(path);
+          paths.set(id, { el: path, parent });
           if (!seen.has(id)) fresh.push(path);
         }
         const g = chip(node, status, id);
@@ -211,31 +285,25 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
         if (id === selected) g.classList.add("selected");
         if (id === working) g.classList.add("working");
         marks.append(g);
+        groups.set(id, g);
       }
+      links = [];
       for (const n of tree.nodes.values()) {
         for (const b of n.basis) {
-          const a = positions.get(n.id);
-          const c = positions.get(b);
-          if (a && c)
-            roots.append(
-              svg("path", {
-                d: `M${String(a.x)},${String(a.y)} Q${String((a.x + c.x) / 2)},${String(Math.max(a.y, c.y) + 80)} ${String(c.x)},${String(c.y)}`,
-                class: "link",
-              }),
-            );
+          if (!drawn.has(n.id) || !drawn.has(b)) continue;
+          const path = svg("path", { d: linkPath(n.id, b), class: "link" });
+          roots.append(path);
+          links.push({ el: path, a: n.id, b });
         }
       }
-      // A root grows from its parent: the stroke is drawn in over its length.
       for (const path of fresh) {
-        const len = path.getTotalLength();
-        path.style.strokeDasharray = String(len);
-        path.style.strokeDashoffset = String(len);
+        path.classList.add("growing");
         requestAnimationFrame(() => {
-          path.style.transition = "stroke-dashoffset 1.1s cubic-bezier(.2,.7,.2,1)";
-          path.style.strokeDashoffset = "0";
+          path.classList.remove("growing");
         });
       }
       for (const { id } of all) if (!id.startsWith("ghost:")) seen.add(id);
+      if (autoFit) fit();
     },
     select(id) {
       selected = id;
@@ -243,12 +311,12 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
         g.classList.toggle("selected", g.getAttribute("data-id") === id);
     },
     focus(id) {
-      const p = positions.get(id);
+      const p = goals.get(id);
       if (!p) return;
-      const k = Math.max(target.k, 0.9);
-      // Leave room for the side panel on wide screens.
+      autoFit = false;
+      // Keep the zoom; only bring the node into view, beside the side panel.
       const shift = window.innerWidth > 900 ? 200 : 0;
-      target = { x: -p.x * k - shift, y: -p.y * k + 60, k };
+      target = { ...target, x: -p.x * target.k - shift, y: -p.y * target.k + 40 };
     },
     busy(id) {
       working = id;
