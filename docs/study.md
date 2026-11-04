@@ -160,7 +160,8 @@ parameter value. Mean score over 33 answers: 0.82.
 - Which roots fail: 2 of 4 cases right in every run, two at 2 of 3.
 - Foundations of a root: the weakest, 0.33 to 1 of the foundations cited.
 - These answers were given before chat requests were read by Muse first;
-  that change (every run in the tree, roots chosen for the question) is
+  that change (roots chosen for the question, runs at the values it names
+  first) is
   tested in the recorded recipe search, not in this study.
 
 ## What the study does not cover
