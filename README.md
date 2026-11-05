@@ -15,6 +15,7 @@ built from a real recipe.
 Built during the Meta Global AI Developer Hackathon, from November 2, 2026
 (first commit). More details in [HACKATHON.md](HACKATHON.md).
 
+- **Demo video (3 min):** https://youtu.be/edE10uiFSOw
 - **Live app:** https://viraloyster.github.io/VIBloom/ (four recorded
   sessions replay without a key; with your own Meta Model API key, run new
   ones)
