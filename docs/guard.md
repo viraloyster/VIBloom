@@ -230,6 +230,50 @@ default). The agent or person that writes invariants runs with `VIBLOOM_ROLE=ver
 one allowed to change protected tests and the map. Keeping them apart means the
 code is never judged by tests its own author could quietly relax.
 
+## A worked example
+
+A counter whose `total` must always equal what `add()` added, with a second
+function, `bad()`, that moves `total` on its own. The map holds the invariant,
+an assumption resting on it and an intention resting on the assumption:
+
+```solidity
+contract Counter {
+    uint256 public total;
+    uint256 public added;
+    function add(uint256 x) external { x = x % 1000; added += x; total += x; }
+    function bad(uint256 x) external { total += x % 3; }
+}
+
+function invariant_totalMatchesAdded() public view {
+    assertEq(c.total(), c.added(), "total drifted from added");
+}
+```
+
+The fuzzer finds the drift, and the guard carries it up the map:
+
+```
+$ vibloom check
+Run 1: 3 test results recorded.
+BROKEN       inv.total-matches-added   total always equals the sum of what add() added
+holds        inv.total-bounded         total never overflows a sane bound
+UNSUPPORTED  asm.only-add-moves-total  Only add() changes total
+AT RISK      int.accounting-is-exact   Accounting is exact: every unit of total is traceable
+```
+
+An agent asked to make the suite pass has two ways out. Editing the invariant
+is denied, by the Claude Code hook while it works and by `vibloom precommit` and
+code owners when it tries to commit:
+
+```
+VIBloom: test/Counter.t.sol is guarded. Only the verifier role may change
+protected tests and the roots map. If the test is wrong, say so and explain
+why; do not change it to make it pass.
+```
+
+Fixing the code is the other. As soon as `src/Counter.sol` changes, every node
+watching it is pending review, and the commit check refuses it until the tests
+run again; after `bad()` is removed and the suite runs, all four nodes hold.
+
 ## Limits
 
 - The Bash check is a heuristic on the command text, not a sandbox: a script
