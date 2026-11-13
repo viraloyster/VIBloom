@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -87,6 +88,30 @@ describe("vibloom", () => {
     expect(r.code).toBe(1);
     expect(r.err).toMatch(/recorded with an error: the runner printed no JSON report/);
     expect(cli(dir, ["status"]).out).toMatch(/untested/);
+  });
+
+  it("refuses a commit of untested code or of a protected test, with git and no agent involved", () => {
+    const dir = project();
+    cli(dir, ["init"]);
+    const mapPath = join(dir, ".vibloom/roots.json");
+    const map = JSON.parse(readFileSync(mapPath, "utf8")) as { runner: string[] };
+    map.runner = ["node", "runner.cjs"];
+    writeFileSync(mapPath, JSON.stringify(map));
+    const git = (...args: string[]) => spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+    git("init", "-q");
+    writeFileSync(join(dir, "src/C.sol"), "contract C { }");
+
+    git("add", "src/C.sol");
+    expect(cli(dir, ["precommit"]).err).toMatch(/inv\.sum \[untested\]/);
+
+    cli(dir, ["run"]);
+    expect(cli(dir, ["precommit"]).code).toBe(0);
+
+    writeFileSync(join(dir, "test/C.t.sol"), "contract CT { function invariant_sum() public { } }");
+    git("add", "test/C.t.sol");
+    const r = cli(dir, ["precommit"]);
+    expect(r.code).toBe(1);
+    expect(r.err).toMatch(/test\/C\.t\.sol is guarded/);
   });
 
   it("does nothing in a project without a map", () => {

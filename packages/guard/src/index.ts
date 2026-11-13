@@ -9,4 +9,6 @@ export type { RunEntry } from "./log.ts";
 export { nextEntry, readLog } from "./log.ts";
 export type { Kind, RootNode, RootsMap, Stance, TestRef } from "./map.ts";
 export { parseMap, serializeMap } from "./map.ts";
+export type { GateResult } from "./gate.ts";
+export { precommit } from "./gate.ts";
 export { main } from "./cli.ts";

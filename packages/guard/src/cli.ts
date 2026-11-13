@@ -16,6 +16,7 @@ import { context } from "./context.ts";
 import { derive, label, troubled, type NodeView } from "./derive.ts";
 import { forgeFilters, parseForge, RunnerOutputError } from "./forge.ts";
 import { sha256 } from "./hash.ts";
+import { precommit } from "./gate.ts";
 import { postTool, preTool, stop, type HookInput, type HookOutput } from "./hooks.ts";
 import { nextEntry, readLog, type RunEntry } from "./log.ts";
 import {
@@ -202,8 +203,12 @@ const USAGE = `vibloom: assumptions, invariants and intentions for a code projec
   vibloom check [-- args]    run, then exit 1 if any node needs attention (for CI)
   vibloom context [file]     what an agent should know before touching a file
   vibloom verify             check the run log's hash chain
-  vibloom hooks              print the Claude Code hooks configuration
-  vibloom hook <event>       used by Claude Code: pre-tool, post-tool or stop
+  vibloom precommit          refuse a commit that changes guarded files or leaves a node
+                             broken or untested since its files changed (any agent, any editor)
+
+Optional, for Claude Code:
+  vibloom hooks              print the hooks configuration for .claude/settings.json
+  vibloom hook <event>       called by those hooks: pre-tool, post-tool or stop
 
 Set VIBLOOM_ROLE=verifier for the one agent or person allowed to change
 protected tests and the map.`;
@@ -297,6 +302,23 @@ export function main(argv: readonly string[], io: Io): number {
         ),
       );
       return 0;
+    }
+    if (cmd === "precommit") {
+      const git = spawnSync("git", ["diff", "--cached", "--name-only", "-z"], {
+        cwd: root,
+        encoding: "utf8",
+      });
+      if (git.status !== 0) {
+        io.err(`git diff --cached failed: ${git.stderr.trim()}`);
+        return 1;
+      }
+      const staged = git.stdout.split("\0").filter(Boolean);
+      const role = io.env.VIBLOOM_ROLE === "verifier" ? "verifier" : "builder";
+      const r = precommit(loadMap(root), views(root), staged, role, loadLog(root).problems);
+      if (r.ok) return 0;
+      io.err(`VIBloom refused the commit:\n- ${r.problems.join("\n- ")}`);
+      io.err("Run `vibloom run` after changing code; only the verifier changes protected tests.");
+      return 1;
     }
     if (cmd === "verify") {
       const { entries, problems } = loadLog(root);

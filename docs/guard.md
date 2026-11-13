@@ -7,7 +7,11 @@ every test run in a hash-chained log, and derives from those runs whether each
 node still stands. An agent reads the map; it can never set a state.
 
 The first runner is Foundry (`forge test --json`). No model is involved: the
-guard is deterministic and runs the same with or without AI.
+guard is deterministic and runs the same with or without AI, and it does not
+depend on any particular agent. Claude Code, Codex, Cursor, Aider, any other
+tool or a person editing by hand all go through the same map, the same log and
+the same commit check. Integrations for a specific agent, such as the Claude
+Code hooks below, are optional extras on top.
 
 ## The map
 
@@ -96,16 +100,42 @@ vibloom run -- --mt X   # run the tests (extra args go to the runner), record, s
 vibloom check           # run, then exit 1 if any node needs attention: for CI
 vibloom context [file]  # what an agent should know before touching a file
 vibloom verify          # check the log's hash chain
-vibloom hooks           # print the Claude Code hooks configuration
+vibloom precommit       # the commit check, for .git/hooks/pre-commit
+vibloom hooks           # optional: print the Claude Code hooks configuration
 ```
 
 From this repository: `node packages/guard/bin/vibloom.ts <command>` (Node
 22.18 or later runs the TypeScript directly; nothing to build).
 
-## With Claude Code
+## With any agent
 
-Add the output of `vibloom hooks` to the project's `.claude/settings.json`.
-The hooks do three things:
+Three pieces work the same whatever writes the code:
+
+- **Context**: give the agent the output of `vibloom context <file>` before it
+  touches a file, in its prompt, rules file or tool call. It has full detail for
+  the nodes that file touches, what they rest on and what rests on them, and one
+  line for every other node, troubled ones first.
+- **The commit check**: put `vibloom precommit` in `.git/hooks/pre-commit`:
+
+  ```sh
+  #!/bin/sh
+  exec vibloom precommit
+  ```
+
+  It refuses a commit that changes a protected test, a path in `protect` or the
+  map (unless `VIBLOOM_ROLE=verifier`), that leaves a node broken, unsupported
+  or pending review, that includes an invariant that has never run, or that
+  comes with a run log failing verification. After changing code, run
+  `vibloom run` and commit the new log entry with it.
+
+- **CI**: `vibloom check` runs the tests, records the run and exits 1 if any node
+  needs attention, so the same rules hold on every pull request.
+
+## Optional: Claude Code
+
+Claude Code can call the guard while it works instead of only at commit time.
+Add the output of `vibloom hooks` to the project's `.claude/settings.json`. The
+hooks do three things:
 
 - **Before a tool runs**: an edit to a protected test, to a path in `protect`
   or to `.vibloom/` is denied unless `VIBLOOM_ROLE=verifier`. Shell commands
@@ -121,14 +151,14 @@ The hooks do three things:
   attempt, which the guard lets through so the session cannot loop; the state
   stays visible in `vibloom status`.
 
-`vibloom context <file>` gives an agent full detail for the nodes that file
-touches, what they rest on and what rests on them, and one line for every other
-node, troubled ones first.
+Other agents with a hook or plugin system can get the same behaviour by calling
+`vibloom hook pre-tool`, `post-tool` and `stop` with the same JSON input, or by
+calling `vibloom status` and `vibloom run` directly.
 
-### Two roles
+## Two roles
 
-The agent that writes code runs as the builder (the default). The agent or
-person that writes invariants runs with `VIBLOOM_ROLE=verifier` and is the only
+Whatever the tools, the agent that writes code runs as the builder (the
+default). The agent or person that writes invariants runs with `VIBLOOM_ROLE=verifier` and is the only
 one allowed to change protected tests and the map. Keeping them apart means the
 code is never judged by tests its own author could quietly relax.
 
