@@ -18,6 +18,8 @@ runs and decides, and every conclusion stays linked to what it rests on. Read
   `docs/architecture.md`. Import boundaries are enforced by lint.
 - `apps/web`: static app; `index.html` is the idea tree, `bench.html` the
   chemistry bench. `apps/api`: Cloudflare Worker behind the bench.
+- `packages/guard`: VIBloom for code projects and the agents working in them;
+  Node only. See [docs/guard.md](docs/guard.md).
 - `tools/reference`: the only Python, used to generate SciPy reference data.
 
 ## Commands
