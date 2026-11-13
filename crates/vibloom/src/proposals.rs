@@ -1,0 +1,285 @@
+//! What agents propose. An agent never writes the map: its proposal is kept
+//! apart, as hypothetical, until a person accepts it into the map or rejects it.
+
+use crate::map::{
+    Kind, RootNode, RootsMap, Stance, TestRef, parse_map, safe_path, serialize_map, valid_id,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashSet;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Proposal {
+    pub id: String,
+    pub at: String,
+    pub kind: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub depends_on: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub watch: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test: Option<TestRef>,
+    /// Who proposed it, as the agent described itself; informational only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Decision {
+    pub decide: String,
+    pub decision: String,
+    pub at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct Book {
+    pub proposals: Vec<Proposal>,
+    pub decisions: Vec<Decision>,
+}
+
+impl Book {
+    pub fn read(text: &str) -> Self {
+        let mut book = Self::default();
+        for line in text.lines().filter(|l| !l.trim().is_empty()) {
+            let Ok(v) = serde_json::from_str::<Value>(line) else {
+                continue;
+            };
+            if v.get("decide").is_some() {
+                if let Ok(d) = serde_json::from_value(v) {
+                    book.decisions.push(d);
+                }
+            } else if let Ok(p) = serde_json::from_value(v) {
+                book.proposals.push(p);
+            }
+        }
+        book
+    }
+
+    pub fn pending(&self) -> Vec<&Proposal> {
+        let decided: HashSet<&str> = self.decisions.iter().map(|d| d.decide.as_str()).collect();
+        self.proposals
+            .iter()
+            .filter(|p| !decided.contains(p.id.as_str()))
+            .collect()
+    }
+
+    pub fn next_id(&self) -> String {
+        format!("p{}", self.proposals.len() + 1)
+    }
+}
+
+pub struct Draft {
+    pub kind: String,
+    pub title: String,
+    pub detail: Option<String>,
+    pub depends_on: Vec<String>,
+    pub watch: Vec<String>,
+    pub test: Option<TestRef>,
+    pub by: Option<String>,
+}
+
+/// Checks a draft against the map as it is, so a person only ever reviews
+/// proposals that could be accepted.
+pub fn propose(
+    map: &RootsMap,
+    book: &Book,
+    draft: Draft,
+    at: String,
+) -> Result<Proposal, Vec<String>> {
+    let mut errors = Vec::new();
+    let kind = Kind::parse(&draft.kind);
+    if kind.is_none() {
+        errors.push("kind must be one of assumption, invariant, intention".into());
+    }
+    if draft.title.trim().is_empty() {
+        errors.push("title is required".into());
+    }
+    let ids: HashSet<&str> = map.nodes.iter().map(|n| n.id.as_str()).collect();
+    for d in &draft.depends_on {
+        if !ids.contains(d.as_str()) {
+            errors.push(format!(
+                "depends on unknown {d}; propose that node first or depend on one in the map"
+            ));
+        }
+    }
+    if !draft.watch.iter().all(|w| safe_path(w)) {
+        errors.push("watch must list relative paths inside the repository".into());
+    }
+    if let Some(t) = &draft.test
+        && (!safe_path(&t.file) || t.name.trim().is_empty())
+    {
+        errors.push("test needs a relative file and a name".into());
+    }
+    if kind == Some(Kind::Invariant) && draft.test.is_none() {
+        errors.push("an invariant needs a test".into());
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    Ok(Proposal {
+        id: book.next_id(),
+        at,
+        kind: draft.kind,
+        title: draft.title.trim().to_string(),
+        detail: draft.detail.filter(|d| !d.trim().is_empty()),
+        depends_on: draft.depends_on,
+        watch: draft.watch,
+        test: draft.test,
+        by: draft.by,
+    })
+}
+
+fn slug(title: &str) -> String {
+    let mut s = String::new();
+    for c in title.to_lowercase().chars() {
+        if c.is_ascii_alphanumeric() {
+            s.push(c);
+        } else if !s.ends_with('-') && !s.is_empty() {
+            s.push('-');
+        }
+    }
+    let s: String = s.trim_end_matches('-').chars().take(40).collect();
+    let s = s.trim_end_matches('-').to_string();
+    if s.is_empty() { "node".into() } else { s }
+}
+
+/// The map with the proposal added. Assumptions enter as hypothetical; the
+/// person adopts them later by editing the map.
+pub fn accept(map: &RootsMap, p: &Proposal) -> Result<(RootsMap, String), Vec<String>> {
+    let Some(kind) = Kind::parse(&p.kind) else {
+        return Err(vec!["the proposal's kind is not valid".into()]);
+    };
+    let prefix = match kind {
+        Kind::Assumption => "asm",
+        Kind::Invariant => "inv",
+        Kind::Intention => "int",
+    };
+    let base = format!("{prefix}.{}", slug(&p.title));
+    let ids: HashSet<&str> = map.nodes.iter().map(|n| n.id.as_str()).collect();
+    let mut id = base.clone();
+    let mut i = 2;
+    while ids.contains(id.as_str()) {
+        id = format!("{base}-{i}");
+        i += 1;
+    }
+    debug_assert!(valid_id(&id));
+    let mut out = map.clone();
+    out.nodes.push(RootNode {
+        id: id.clone(),
+        kind,
+        title: p.title.clone(),
+        detail: p.detail.clone(),
+        stance: if kind == Kind::Assumption {
+            Stance::Hypothetical
+        } else {
+            Stance::Adopted
+        },
+        test: p.test.as_ref().map(|t| TestRef {
+            name: t.name.split('(').next().unwrap_or(&t.name).to_string(),
+            ..t.clone()
+        }),
+        watch: p.watch.clone(),
+        depends_on: p.depends_on.clone(),
+        protected: kind == Kind::Invariant,
+    });
+    // The result must still be a valid map, checked the same way as one
+    // written by hand.
+    let reparsed: Value =
+        serde_json::from_str(&serialize_map(&out)).map_err(|e| vec![e.to_string()])?;
+    let checked = parse_map(&reparsed)?;
+    Ok((checked, id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn map() -> RootsMap {
+        parse_map(&json!({
+            "version": 1,
+            "nodes": [{ "id": "inv.sum", "kind": "invariant", "title": "sum",
+                        "test": { "file": "test/C.t.sol", "name": "invariant_sum" } }]
+        }))
+        .expect("valid")
+    }
+
+    fn draft(kind: &str, title: &str, deps: &[&str]) -> Draft {
+        Draft {
+            kind: kind.into(),
+            title: title.into(),
+            detail: None,
+            depends_on: deps.iter().map(|d| (*d).to_string()).collect(),
+            watch: vec![],
+            test: None,
+            by: Some("claude".into()),
+        }
+    }
+
+    #[test]
+    fn checks_a_draft_against_the_map() {
+        let book = Book::default();
+        let p = propose(
+            &map(),
+            &book,
+            draft("assumption", "Only add() moves total", &["inv.sum"]),
+            "t".into(),
+        )
+        .expect("valid");
+        assert_eq!(p.id, "p1");
+        let errs = propose(
+            &map(),
+            &book,
+            draft("invariant", " ", &["nope"]),
+            "t".into(),
+        )
+        .expect_err("invalid");
+        assert_eq!(errs.len(), 3);
+        assert!(errs[0].starts_with("title is required"));
+    }
+
+    #[test]
+    fn accepts_into_the_map_as_hypothetical_with_a_unique_id() {
+        let p = propose(
+            &map(),
+            &Book::default(),
+            draft("assumption", "Only add() moves total!", &["inv.sum"]),
+            "t".into(),
+        )
+        .expect("valid");
+        let (m, id) = accept(&map(), &p).expect("accepted");
+        assert_eq!(id, "asm.only-add-moves-total");
+        let n = m.nodes.last().expect("node");
+        assert_eq!(n.stance, Stance::Hypothetical);
+        assert_eq!(n.depends_on, vec!["inv.sum"]);
+        let (m2, id2) = accept(&m, &p).expect("accepted again");
+        assert_eq!(id2, "asm.only-add-moves-total-2");
+        assert_eq!(m2.nodes.len(), 3);
+    }
+
+    #[test]
+    fn tracks_what_is_still_pending() {
+        let text = [
+            json!({ "id": "p1", "at": "t", "kind": "assumption", "title": "a" }),
+            json!({ "id": "p2", "at": "t", "kind": "intention", "title": "b" }),
+            json!({ "decide": "p1", "decision": "reject", "at": "t" }),
+        ]
+        .iter()
+        .map(|v| format!("{v}\n"))
+        .collect::<String>();
+        let book = Book::read(&text);
+        assert_eq!(
+            book.pending()
+                .iter()
+                .map(|p| p.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["p2"]
+        );
+        assert_eq!(book.next_id(), "p3");
+    }
+}

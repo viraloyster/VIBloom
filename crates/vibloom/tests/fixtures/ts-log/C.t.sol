@@ -1,0 +1,1 @@
+contract CT { function invariant_sum() public {} function invariant_bound() public {} }

@@ -3,7 +3,6 @@
   "include": [
     "packages/*/src",
     "packages/*/eval",
-    "packages/*/bin",
     "apps/*/src",
     "vitest.config.ts",
     "eslint.config.mjs"

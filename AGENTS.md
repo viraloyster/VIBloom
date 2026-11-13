@@ -18,8 +18,9 @@ runs and decides, and every conclusion stays linked to what it rests on. Read
   `docs/architecture.md`. Import boundaries are enforced by lint.
 - `apps/web`: static app; `index.html` is the idea tree, `bench.html` the
   chemistry bench. `apps/api`: Cloudflare Worker behind the bench.
-- `packages/guard`: VIBloom for code projects and the agents working in them;
-  Node only. See [docs/guard.md](docs/guard.md).
+- `crates/vibloom`: VIBloom for code projects and the agents working in them,
+  in Rust: one binary with the CLI, the hooks and the MCP server. See
+  [docs/guard.md](docs/guard.md).
 - `tools/reference`: the only Python, used to generate SciPy reference data.
 
 ## Commands
@@ -31,6 +32,7 @@ npm test
 npm run build                 # the static app (dist/), deployable anywhere
 npm run dev -w @vibloom/api   # Worker and Durable Object on a local workerd
 npm run dev                   # interface with hot reload, proxying /api
+cargo fmt --all --check && cargo clippy --all-targets -- -D warnings && cargo test
 ```
 
 CI runs the same commands. A change is done when both pass.
@@ -55,6 +57,7 @@ CI runs the same commands. A change is done when both pass.
 
 - English only, ASCII only: use `->`, `-`, `...` and straight quotes.
   `npm run check:text` enforces it.
+- Rust: no `unsafe`, no `unwrap` outside tests, clippy clean with `-D warnings`.
 - Comments say why, only where it is not obvious.
 - Commit messages: one short imperative line, for example
   `Add stiff solver step control`.

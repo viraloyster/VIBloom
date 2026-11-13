@@ -239,9 +239,9 @@ that domain has instruments that can settle its questions.
   only to api.meta.ai. The session budget limits the tab, not your account.
   Standard mode keeps your content out of Meta's training; contributor mode is
   about 20 times cheaper and allows it.
-- **On a code project:** the guard keeps the project's assumptions,
-  invariants and intentions, records every test run and stops an agent from
-  calling a task done while an invariant is broken. See
+- **On a code project:** the `vibloom` binary keeps the project's
+  assumptions, invariants and intentions, records every test run and stops any
+  agent, or person, from merging work while an invariant is broken. See
   [docs/guard.md](docs/guard.md).
 - **Locally:** `npm ci && npm run dev`. `npm test` runs the tests;
   `npm run verify` re-runs the recorded sessions.
@@ -252,7 +252,7 @@ that domain has instruments that can settle its questions.
 apps/web          static app: idea tree (index.html), chemistry bench (bench.html)
 apps/api          Cloudflare Worker and Durable Objects (region claims, search)
 packages/ideas    the tree: protocol, engine rules, Muse client, evaluation, verify
-packages/guard    VIBloom for code: roots map, run log, Claude Code hooks
+crates/vibloom    VIBloom for code (Rust): roots map, run log, commit check, MCP
 packages/chem     stiff solver, Oregonator models, recipe conversion, classifier
 packages/         also contracts, engine (hashing, log), search, agent
 tools/reference   SciPy reference data generator

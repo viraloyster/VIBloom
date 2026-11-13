@@ -1,6 +1,6 @@
 # VIBloom for code
 
-The guard (`packages/guard`, command `vibloom`) brings VIBloom's roots to a
+The guard (`crates/vibloom`, a single Rust binary called `vibloom`) brings VIBloom's roots to a
 code project and to the AI agents working in it. It keeps a map of what the
 project assumes, what must always hold and what each change intends, records
 every test run in a hash-chained log, and derives from those runs whether each
@@ -90,6 +90,14 @@ breaks it, and nothing after the break is trusted. A run whose output is not a
 report (a compilation error, a missing binary) is recorded as an error, never
 as a pass.
 
+## Install
+
+```bash
+cargo install --locked --git https://github.com/viraloyster/VIBloom vibloom
+```
+
+One binary, no runtime to install. A hook call takes about 2 ms.
+
 ## Commands
 
 ```bash
@@ -101,11 +109,13 @@ vibloom check           # run, then exit 1 if any node needs attention: for CI
 vibloom context [file]  # what an agent should know before touching a file
 vibloom verify          # check the log's hash chain
 vibloom precommit       # the commit check, for .git/hooks/pre-commit
+vibloom proposals       # what agents proposed and nobody decided yet
+vibloom proposals accept p1 | reject p1
+vibloom mcp             # serve the map to any MCP client over stdio
 vibloom hooks           # optional: print the Claude Code hooks configuration
 ```
 
-From this repository: `node packages/guard/bin/vibloom.ts <command>` (Node
-22.18 or later runs the TypeScript directly; nothing to build).
+From this repository: `cargo run -p vibloom -- <command>`.
 
 ## With any agent
 
@@ -131,6 +141,32 @@ Three pieces work the same whatever writes the code:
 - **CI**: `vibloom check` runs the tests, records the run and exits 1 if any node
   needs attention, so the same rules hold on every pull request. See below.
 
+## Over MCP
+
+`vibloom mcp` serves the map to any client that speaks the Model Context
+Protocol over stdio (Claude Code, Codex, Cursor and others). Register it the
+way the client registers a local server, with the project as the working
+directory, for example:
+
+```bash
+claude mcp add vibloom -- vibloom mcp
+```
+
+| Tool        | What it does                                                              |
+| ----------- | ------------------------------------------------------------------------- |
+| `status`    | the derived state of every node                                           |
+| `context`   | what to know before touching a file                                       |
+| `run`       | run the tests and record the run; only forge's test filters are accepted  |
+| `verify`    | check the log's hash chain                                                |
+| `propose`   | propose an assumption, invariant or intention, kept apart as hypothetical |
+| `proposals` | what is still pending                                                     |
+
+There is no tool to accept a proposal, set a state or edit the record. A
+proposal waits in `.vibloom/proposals.jsonl` until a person runs
+`vibloom proposals accept <id>`, which checks it against the map as it is and
+adds it (an assumption enters as hypothetical), or `reject <id>`. Models
+propose; people and code decide.
+
 ## Where the rules are enforced
 
 Everything above runs on the machine where the code is written, and anything
@@ -155,16 +191,11 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
       - uses: foundry-rs/foundry-toolchain@v1
-      - name: Get VIBloom at a pinned commit
-        run: |
-          git clone https://github.com/viraloyster/VIBloom "$RUNNER_TEMP/vibloom"
-          git -C "$RUNNER_TEMP/vibloom" checkout <commit>
+      - name: Install VIBloom at a pinned commit
+        run: cargo install --locked --git https://github.com/viraloyster/VIBloom --rev <commit> vibloom
       - name: Check
-        run: node "$RUNNER_TEMP/vibloom/packages/guard/bin/vibloom.ts" check --base "origin/${{ github.base_ref }}"
+        run: vibloom check --base "origin/${{ github.base_ref }}"
 ```
 
 `check --base` does two things before running the tests:
@@ -226,8 +257,8 @@ calling `vibloom status` and `vibloom run` directly.
 ## Two roles
 
 Whatever the tools, the agent that writes code runs as the builder (the
-default). The agent or person that writes invariants runs with `VIBLOOM_ROLE=verifier` and is the only
-one allowed to change protected tests and the map. Keeping them apart means the
+default). The agent or person that writes invariants runs with
+`VIBLOOM_ROLE=verifier` and is the only one allowed to change protected tests and the map. Keeping them apart means the
 code is never judged by tests its own author could quietly relax.
 
 ## A worked example
@@ -289,6 +320,8 @@ run again; after `bad()` is removed and the suite runs, all four nodes hold.
   map says: it keeps the written assumptions and invariants from being skipped
   or weakened, and shows what is left unsupported when something changes. It
   does not discover a dependency nobody wrote down.
+- `.vibloom/proposals.jsonl` is not hash-chained: it holds suggestions, not
+  evidence, and nothing in it counts until a person accepts it into the map.
 - Only Foundry's JSON report is read today. Another runner needs a parser that
   returns the same outcomes.
 - After a test command, the guard re-runs that subset once more. On a large

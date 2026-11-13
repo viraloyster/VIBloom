@@ -10,8 +10,6 @@ const boundaries = {
   search: ["contracts"],
   agent: ["contracts", "engine"],
   ideas: ["engine", "chem", "contracts"],
-  // Node-only: the guard reads files and runs the test runner.
-  guard: [],
 };
 const packages = Object.keys(boundaries);
 

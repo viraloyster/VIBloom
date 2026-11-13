@@ -8,3 +8,4 @@ coverage/
 __pycache__/
 .venv/
 *.tsbuildinfo
+/target/
