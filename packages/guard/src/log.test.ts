@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nextEntry, readLog, type RunEntry } from "./log.ts";
+import { extendsLog, nextEntry, readLog, type RunEntry } from "./log.ts";
 
 const body = (status: "pass" | "fail") => ({
   at: "2026-11-13T00:00:00.000Z",
@@ -47,5 +47,29 @@ describe("run log", () => {
     const r = readLog(text([a!, { ...b!, prev: fake.hash }]));
     expect(r.entries).toEqual([a]);
     expect(r.problems[0]).toMatch(/does not follow/);
+  });
+});
+
+describe("extendsLog", () => {
+  it("accepts a branch that only added runs", () => {
+    const [a, b] = chain();
+    expect(extendsLog([a!], [a!, b!])).toEqual([]);
+    expect(extendsLog([], [a!])).toEqual([]);
+  });
+
+  it("rejects a log regenerated from scratch, even with a valid chain of its own", () => {
+    const [a] = chain();
+    const regenerated = nextEntry(undefined, { ...body("pass"), at: "2026-11-14T00:00:00.000Z" });
+    expect(readLog(text([regenerated])).problems).toEqual([]);
+    expect(extendsLog([a!], [regenerated])).toEqual([
+      "run 1 differs from the base: the log was rewritten, not extended",
+    ]);
+  });
+
+  it("rejects a log that lost runs", () => {
+    const [a, b] = chain();
+    expect(extendsLog([a!, b!], [a!])).toEqual([
+      "the log has 1 runs, fewer than the 2 on the base",
+    ]);
   });
 });

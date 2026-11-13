@@ -114,6 +114,39 @@ describe("vibloom", () => {
     expect(r.err).toMatch(/test\/C\.t\.sol is guarded/);
   });
 
+  it("in CI, refuses a branch whose log rewrote the base's instead of extending it", () => {
+    const dir = project();
+    cli(dir, ["init"]);
+    const mapPath = join(dir, ".vibloom/roots.json");
+    const map = JSON.parse(readFileSync(mapPath, "utf8")) as { runner: string[] };
+    map.runner = ["node", "runner.cjs"];
+    writeFileSync(mapPath, JSON.stringify(map));
+    writeFileSync(join(dir, "src/C.sol"), "contract C { }");
+    const git = (...args: string[]) =>
+      spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+        cwd: dir,
+        encoding: "utf8",
+      });
+    git("init", "-q");
+    cli(dir, ["run"]);
+    git("add", "-A");
+    git("commit", "-q", "-m", "base");
+    git("branch", "base");
+
+    cli(dir, ["run"]);
+    expect(cli(dir, ["check", "--base", "base"]).code).toBe(0);
+
+    // Regenerate the whole log: a valid chain, but not the base's.
+    writeFileSync(join(dir, ".vibloom/log.jsonl"), "");
+    cli(dir, ["run"]);
+    expect(cli(dir, ["verify"]).code).toBe(0);
+    const r = cli(dir, ["check", "--base", "base"]);
+    expect(r.code).toBe(1);
+    expect(r.err).toMatch(/rewritten, not extended/);
+
+    expect(cli(dir, ["check", "--base", "nope"]).err).toMatch(/nope is not a commit here/);
+  });
+
   it("does nothing in a project without a map", () => {
     const dir = mkdtempSync(join(tmpdir(), "vibloom-none-"));
     expect(cli(dir, ["hook", "pre-tool"], JSON.stringify({ cwd: dir, tool_name: "Edit" }))).toEqual(

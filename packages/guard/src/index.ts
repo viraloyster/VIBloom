@@ -6,7 +6,7 @@ export { forgeFilters, parseForge } from "./forge.ts";
 export type { HookInput, HookOutput, Role } from "./hooks.ts";
 export { guarded, postTool, preTool, stop } from "./hooks.ts";
 export type { RunEntry } from "./log.ts";
-export { nextEntry, readLog } from "./log.ts";
+export { extendsLog, nextEntry, readLog } from "./log.ts";
 export type { Kind, RootNode, RootsMap, Stance, TestRef } from "./map.ts";
 export { parseMap, serializeMap } from "./map.ts";
 export type { GateResult } from "./gate.ts";

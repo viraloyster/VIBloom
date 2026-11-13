@@ -129,7 +129,75 @@ Three pieces work the same whatever writes the code:
   `vibloom run` and commit the new log entry with it.
 
 - **CI**: `vibloom check` runs the tests, records the run and exits 1 if any node
-  needs attention, so the same rules hold on every pull request.
+  needs attention, so the same rules hold on every pull request. See below.
+
+## Where the rules are enforced
+
+Everything above runs on the machine where the code is written, and anything
+that controls that machine can get around it: set `VIBLOOM_ROLE`, skip the git
+hook, or rewrite `.vibloom/log.jsonl` from scratch with a valid chain of its
+own. The boundary an agent cannot cross is on the server: a protected branch on
+GitHub that only accepts pull requests that pass `vibloom check` and, for
+guarded files, a review by their owner.
+
+### The check on every pull request
+
+`.github/workflows/vibloom.yml`:
+
+```yaml
+name: vibloom
+on: pull_request
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: Get VIBloom at a pinned commit
+        run: |
+          git clone https://github.com/viraloyster/VIBloom "$RUNNER_TEMP/vibloom"
+          git -C "$RUNNER_TEMP/vibloom" checkout <commit>
+      - name: Check
+        run: node "$RUNNER_TEMP/vibloom/packages/guard/bin/vibloom.ts" check --base "origin/${{ github.base_ref }}"
+```
+
+`check --base` does two things before running the tests:
+
+- It reads the log on the base branch from git, not from the pull request, and
+  refuses the pull request if its log does not keep every base run unchanged
+  and in order. A log regenerated from scratch has a valid chain of its own but
+  fails here.
+- Then it runs the tests on the CI machine and records that run, so the result
+  that decides is the one CI produced, not one recorded on the author's machine.
+
+Pin the VIBloom commit: the check is only as trustworthy as the code that runs it.
+
+### Owners for guarded files
+
+`.github/CODEOWNERS`, listing the map, the log and every protected test:
+
+```
+/.vibloom/            @your-handle
+/test/Counter.t.sol   @your-handle
+```
+
+### Branch protection
+
+On the main branch, in the repository settings:
+
+- require a pull request before merging, with review from Code Owners;
+- require the `vibloom / guard` status check to pass;
+- do not allow bypassing these settings.
+
+With that in place, an agent with full control of its own machine can still
+write any code, but it cannot merge a change that breaks an invariant, rewrites
+the record or edits a protected test without the owner's review.
 
 ## Optional: Claude Code
 
@@ -168,7 +236,15 @@ code is never judged by tests its own author could quietly relax.
   that writes to a protected file indirectly is not caught. The log's hash chain
   and `git diff` still show what changed.
 - The role comes from an environment variable; it separates honest agents, it
-  does not authenticate them.
+  does not authenticate them. Code owners and branch protection are the
+  boundary that does.
+- The log's hash chain proves the log was not edited after the fact, not that it
+  was never regenerated. `check --base` against a protected branch is what
+  anchors it.
+- Passing tests does not prove a global property. The guard knows only what the
+  map says: it keeps the written assumptions and invariants from being skipped
+  or weakened, and shows what is left unsupported when something changes. It
+  does not discover a dependency nobody wrote down.
 - Only Foundry's JSON report is read today. Another runner needs a parser that
   returns the same outcomes.
 - After a test command, the guard re-runs that subset once more. On a large

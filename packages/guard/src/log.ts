@@ -63,3 +63,20 @@ export function readLog(text: string): ReadLog {
   }
   return { entries, problems };
 }
+
+// A branch may only add runs to the log it started from. Its log must keep
+// every base entry, unchanged and in order; a regenerated log, even one whose
+// own chain is valid, does not.
+export function extendsLog(base: readonly RunEntry[], head: readonly RunEntry[]): string[] {
+  if (head.length < base.length) {
+    return [
+      `the log has ${String(head.length)} runs, fewer than the ${String(base.length)} on the base`,
+    ];
+  }
+  for (const [i, b] of base.entries()) {
+    if (head[i]?.hash !== b.hash) {
+      return [`run ${String(b.seq)} differs from the base: the log was rewritten, not extended`];
+    }
+  }
+  return [];
+}

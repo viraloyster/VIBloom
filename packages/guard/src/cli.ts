@@ -18,7 +18,7 @@ import { forgeFilters, parseForge, RunnerOutputError } from "./forge.ts";
 import { sha256 } from "./hash.ts";
 import { precommit } from "./gate.ts";
 import { postTool, preTool, stop, type HookInput, type HookOutput } from "./hooks.ts";
-import { nextEntry, readLog, type RunEntry } from "./log.ts";
+import { extendsLog, nextEntry, readLog, type RunEntry } from "./log.ts";
 import {
   DEFAULT_RUNNER,
   LOG_PATH,
@@ -200,7 +200,9 @@ const USAGE = `vibloom: assumptions, invariants and intentions for a code projec
   vibloom scan               add invariant tests the map does not list yet
   vibloom status             the derived state of every node (exit 1 if any needs attention)
   vibloom run [-- args]      run the tests, record the run, show what changed
-  vibloom check [-- args]    run, then exit 1 if any node needs attention (for CI)
+  vibloom check [--base ref] [-- args]
+                             run, then exit 1 if any node needs attention (for CI); with
+                             --base, first require the log to extend the one on that commit
   vibloom context [file]     what an agent should know before touching a file
   vibloom verify             check the run log's hash chain
   vibloom precommit          refuse a commit that changes guarded files or leaves a node
@@ -223,7 +225,18 @@ export interface Io {
 
 export function main(argv: readonly string[], io: Io): number {
   const [cmd, ...rest] = argv;
-  const extra = rest[0] === "--" ? rest.slice(1) : rest;
+  // Our options come first; anything else, or anything after "--", goes to the runner.
+  let base: string | undefined;
+  const extra: string[] = [];
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i] ?? "";
+    if (a === "--") {
+      extra.push(...rest.slice(i + 1));
+      break;
+    }
+    if (a === "--base" && cmd === "check") base = rest[++i];
+    else extra.push(a);
+  }
   try {
     if (!cmd || cmd === "help" || cmd === "--help") {
       io.out(USAGE);
@@ -281,6 +294,15 @@ export function main(argv: readonly string[], io: Io): number {
       io.out(table(vs));
       return vs.some(troubled) || problems.length ? 1 : 0;
     }
+    if (cmd === "check" && base !== undefined) {
+      const problems = checkBase(root, base);
+      if (problems.length) {
+        io.err(
+          `VIBloom: the run log does not extend the one on ${base}:\n- ${problems.join("\n- ")}`,
+        );
+        return 1;
+      }
+    }
     if (cmd === "run" || cmd === "check") {
       const before = new Map(views(root).map((v) => [v.id, label(v)]));
       const { entry, views: vs } = run(root, extra);
@@ -335,6 +357,21 @@ export function main(argv: readonly string[], io: Io): number {
     io.err(e instanceof Error ? e.message : String(e));
     return 1;
   }
+}
+
+// The log on the base commit, read from git rather than the working tree, so
+// a branch cannot change what it is compared against.
+function checkBase(root: string, ref: string): string[] {
+  const git = (...args: string[]) => spawnSync("git", args, { cwd: root, encoding: "utf8" });
+  if (git("rev-parse", "--verify", "--quiet", `${ref}^{commit}`).status !== 0) {
+    return [`${ref} is not a commit here (in CI, fetch the base branch first)`];
+  }
+  const shown = git("show", `${ref}:./${LOG_PATH}`);
+  const base = readLog(shown.status === 0 ? shown.stdout : "");
+  if (base.problems.length) return base.problems.map((p) => `base log: ${p}`);
+  const head = loadLog(root);
+  if (head.problems.length) return head.problems;
+  return extendsLog(base.entries, head.entries);
 }
 
 function scan(root: string, map: RootsMap): ReturnType<typeof addFound> {
