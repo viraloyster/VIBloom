@@ -39,31 +39,3 @@ export type {
   RootNode,
   SourceNode,
 } from "./roots";
-export type { Check } from "./schema";
-export {
-  ParseError,
-  any,
-  bool,
-  check,
-  fail,
-  int,
-  isObj,
-  list,
-  num,
-  numbers,
-  oneOf,
-  pin,
-  shape,
-  str,
-  text,
-} from "./schema";
-export type {
-  Decision,
-  DecisionAction,
-  Prediction,
-  ProposedCandidate,
-  ProposedAssumption,
-  ProposedClaim,
-  ProposedDependency,
-} from "./decisions";
-export { MAX_STRESS_BUDGET, parseDecision } from "./decisions";

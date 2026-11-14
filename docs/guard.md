@@ -137,8 +137,10 @@ a mocha reporter such as `mocha-junit-reporter` set in `hardhat.config`.)
 | MISSING        | its test ran once, but the latest run of the whole suite did not include it   |
 | off            | switched off by a person; a choice, not a problem                             |
 
-Every state but holds and off needs attention: `status` and `check` exit 1,
-the commit check refuses and the agent is sent back. A test that never ran,
+Every state in the table but holds and off needs attention: `status` and
+`check` exit 1, the commit check refuses and the agent is sent back. (A node
+with no test of its own shows its stance, adopted or hypothetical, while what
+it rests on is sound.) A test that never ran,
 was skipped or went missing is not evidence, so a mistyped test name or a
 deleted invariant can never read as passing. What rests on such a node is
 pending review.

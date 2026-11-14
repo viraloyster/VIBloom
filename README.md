@@ -17,7 +17,7 @@ passes the same checks as anything written by hand.
 Started during the Meta Global AI Developer Hackathon (November 2026); the
 hackathon version is described in [HACKATHON.md](HACKATHON.md).
 
-## Two domains, one core
+## Two domains
 
 Both keep a hash-chained log and derive every state from it, so a broken
 premise marks everything resting on it.
@@ -110,7 +110,7 @@ crates/vibloom    VIBloom for code (Rust): roots map, run log, commit check, MCP
 apps/web          static app: the idea tree for chemistry
 packages/ideas    the tree: protocol, engine rules, optional AI client
 packages/chem     stiff solver, Oregonator models, recipe conversion, classifier
-packages/engine   hashing, event log, write gate, derived status
+packages/engine   canonical JSON and hashing
 packages/contracts shared types and boundary validation
 tools/reference   SciPy reference data generator
 examples/         a Foundry vault and a pytest ledger set up with the guard

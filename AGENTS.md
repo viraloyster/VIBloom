@@ -10,7 +10,7 @@ optionally, an AI from any provider) propose them, deterministic code runs the
 checks and derives every state, and each conclusion stays linked to what it
 rests on. Two domains share that core: code (`crates/vibloom`, first) and
 chemistry (the web app). Read [docs/architecture.md](docs/architecture.md)
-before changing the engine, [docs/guard.md](docs/guard.md) before changing the
+before changing the tree, [docs/guard.md](docs/guard.md) before changing the
 guard and [docs/science.md](docs/science.md) before changing the chemistry.
 
 ## Layout

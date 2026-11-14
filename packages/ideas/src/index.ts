@@ -26,7 +26,6 @@ export {
 } from "./protocol";
 export { numbersIn, unsupportedNumbers } from "./numbers";
 export { BudgetExceeded, estimate, estimateTokens, Ledger, used } from "./cost";
-export { ArrayItems } from "./stream";
 export {
   Model,
   ModelError,

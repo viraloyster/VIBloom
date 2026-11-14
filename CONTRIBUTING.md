@@ -5,7 +5,7 @@ judged by whether they keep its results honest and reproducible.
 
 - Read [AGENTS.md](AGENTS.md) for the layout, the commands and the rules (they
   apply to people too), and [docs/architecture.md](docs/architecture.md)
-  before changing the engine.
+  before changing the tree.
 - `npm run check` and `npm test` must pass, and so must `cargo fmt --all
 --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test`.
 - A fix comes with a test that would have caught it, next to the code.

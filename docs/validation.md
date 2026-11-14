@@ -71,11 +71,3 @@ A point is classified only when three runs agree: the base run, a run with
 tighter tolerances, and a run with a doubled horizon. The horizon adapts to the
 estimated period within fixed limits on simulated time and work; if the
 criteria do not stabilise, the point is inconclusive.
-
-## Control tests
-
-The test suite must fail for each of these degenerate implementations:
-
-- a write gate that rejects every command;
-- a source parser that always abstains;
-- a classifier that always answers inconclusive.

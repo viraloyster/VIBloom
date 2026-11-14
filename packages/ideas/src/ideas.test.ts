@@ -3,7 +3,6 @@ import { runCheck, SIM_PARAMS, thresholds } from "./check";
 import { evaluate } from "./expr";
 import type { GrownNode } from "./protocol";
 import { unsupportedNumbers } from "./numbers";
-import { ArrayItems } from "./stream";
 import { IdeaTree } from "./tree";
 import type { Usage } from "./types";
 
@@ -837,21 +836,6 @@ describe("predictions and lessons", () => {
     expect(t.lessonChanges(l)).toEqual(["solver"]);
     expect(t.lessonState(l)).toBe("invalidated");
     expect(t.lessonsForModel("kinetics")[0]?.applies_here).toMatch(/history/);
-  });
-});
-
-describe("streamed array items", () => {
-  it("yields each node as soon as it is complete, whatever the chunking", () => {
-    const json = JSON.stringify({
-      summary: 'a "b" {c}',
-      nodes: [{ key: "x", t: "[}" }, { key: "y" }],
-    });
-    for (const size of [1, 3, 7, json.length]) {
-      const items = new ArrayItems("nodes");
-      const out: unknown[] = [];
-      for (let i = 0; i < json.length; i += size) out.push(...items.push(json.slice(i, i + size)));
-      expect(out).toEqual([{ key: "x", t: "[}" }, { key: "y" }]);
-    }
   });
 });
 
