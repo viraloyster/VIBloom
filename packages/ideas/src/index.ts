@@ -25,17 +25,18 @@ export {
   type GrownNode,
 } from "./protocol";
 export { numbersIn, unsupportedNumbers } from "./numbers";
-export { BudgetExceeded, cost, estimate, estimateTokens, Ledger, PRICES, price } from "./cost";
+export { BudgetExceeded, estimate, estimateTokens, Ledger, used } from "./cost";
 export { ArrayItems } from "./stream";
 export {
-  Muse,
-  MuseError,
-  modelFor,
+  Model,
+  ModelError,
+  PROVIDERS,
   type AskRequest,
   type GrowReply,
   type GrowRequest,
-  type MuseConfig,
-} from "./muse";
+  type ModelConfig,
+  type Provider,
+} from "./model";
 export { IdeaTree, outputKey, type Status } from "./tree";
 export {
   axis,

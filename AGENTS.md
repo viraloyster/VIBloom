@@ -5,19 +5,20 @@ useful map too.
 
 ## Project
 
-VIBloom is a research instrument specialised in chemistry: Muse proposes
-assumptions, experiments, predictions and explanations; a deterministic engine
-runs and decides, and every conclusion stays linked to what it rests on. Read
-[docs/architecture.md](docs/architecture.md) before changing the engine and
-[docs/science.md](docs/science.md) before changing the chemistry.
+VIBloom is a layer of assumptions, invariants and intentions: people (and,
+optionally, an AI from any provider) propose them, deterministic code runs the
+checks and derives every state, and each conclusion stays linked to what it
+rests on. Two domains share that core: code (`crates/vibloom`, first) and
+chemistry (the web app). Read [docs/architecture.md](docs/architecture.md)
+before changing the engine, [docs/guard.md](docs/guard.md) before changing the
+guard and [docs/science.md](docs/science.md) before changing the chemistry.
 
 ## Layout
 
 - `packages/contracts`: shared types and boundary validation. Imports nothing.
-- `packages/engine`, `chem`, `search`, `agent`, `ideas`: see the package table in
+- `packages/engine`, `chem`, `ideas`: see the package table in
   `docs/architecture.md`. Import boundaries are enforced by lint.
-- `apps/web`: static app; `index.html` is the idea tree, `bench.html` the
-  chemistry bench. `apps/api`: Cloudflare Worker behind the bench.
+- `apps/web`: the static app (the idea tree).
 - `crates/vibloom`: VIBloom for code projects and the agents working in them,
   in Rust: one binary with the CLI, the hooks and the MCP server. See
   [docs/guard.md](docs/guard.md).
@@ -30,8 +31,7 @@ npm ci
 npm run check   # types, lint, format, text check
 npm test
 npm run build                 # the static app (dist/), deployable anywhere
-npm run dev -w @vibloom/api   # Worker and Durable Object on a local workerd
-npm run dev                   # interface with hot reload, proxying /api
+npm run dev                   # interface with hot reload
 cargo fmt --all --check && cargo clippy --all-targets -- -D warnings && cargo test
 ```
 
@@ -41,10 +41,10 @@ CI runs the same commands. A change is done when both pass.
 
 - Models propose, code decides. Model output never becomes a result, a claim
   status or an invariant without a deterministic check.
-- Every model called at runtime is a Meta model. Do not add other providers.
-- Never commit secrets. Keys come from the environment (`.dev.vars` locally,
-  Worker secrets in production) and never appear in code, tests, logs or
-  recorded fixtures.
+- AI is optional. Everything must work without it, and no provider is
+  required: new model access goes through `packages/ideas/src/model.ts`.
+- Never commit secrets. Keys are entered by the person and never appear in
+  code, tests, logs or fixtures.
 - No new runtime dependency without a strong reason. Every dependency, dataset
   and asset must have a license compatible with MIT. Do not add figures or
   tables copied from papers.

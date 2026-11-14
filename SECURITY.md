@@ -2,11 +2,13 @@
 
 ## Keys
 
-The public app runs in the browser. A Meta Model API key entered there stays
+AI is optional. The app runs in the browser; an API key entered there stays
 in the tab, or in the device's local storage only if the person asks, and is
-sent only to `api.meta.ai`. It is never written to an exported tree, a
-recording or the repository. Muse's drawings run in a sandboxed frame with no
-network, storage or key.
+sent only to the provider the person chose. It is never written to an
+exported tree or the repository. The AI's drawings run in a sandboxed frame
+with no network, storage or key.
+
+The `vibloom` binary makes no network calls and holds no keys.
 
 ## Reporting a vulnerability
 

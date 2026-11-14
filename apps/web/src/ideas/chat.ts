@@ -1,5 +1,5 @@
 // The chat: short, grounded answers. The heavy work shows in the tree and the
-// monitor; here Muse only explains, citing the roots it relied on.
+// monitor; here the AI only explains, citing the roots it relied on.
 
 import type { IdeaTree } from "@vibloom/ideas";
 import { el } from "../dom";
@@ -16,7 +16,7 @@ export function mountChat(host: HTMLElement, actions: ChatActions) {
   const input = el("input", {
     class: "chat-input",
     placeholder: "Ask about the selected root...",
-    "aria-label": "Ask Muse",
+    "aria-label": "Ask the AI",
   });
   const send = el("button", { class: "send", "aria-label": "Send" }, "Ask");
   const grow = el("button", { class: "ghost-btn expand", "aria-label": "Expand chat" }, "Expand");
@@ -37,7 +37,7 @@ export function mountChat(host: HTMLElement, actions: ChatActions) {
   // What the next question is about, always in sight above the field.
   const about = el("p", { class: "discussing" });
   host.replaceChildren(
-    el("div", { class: "chat-head" }, el("span", { class: "eyebrow" }, "Chat with Muse"), grow),
+    el("div", { class: "chat-head" }, el("span", { class: "eyebrow" }, "Chat with the AI"), grow),
     log,
     about,
     el("div", { class: "chat-bar" }, input, send),
@@ -49,7 +49,7 @@ export function mountChat(host: HTMLElement, actions: ChatActions) {
         el("span", { class: "fine" }, "Discussing: "),
         el("b", {}, short(tree.nodes.get(focus)?.title ?? tree.goal)),
       );
-      // How Muse read each request, shown with the answer it led to.
+      // How the AI read each request, shown with the answer it led to.
       const routes = tree.routes;
       const readOf = (seq: number) => {
         const r = routes.filter((x) => x.seq < seq).at(-1);
@@ -85,8 +85,8 @@ export function mountChat(host: HTMLElement, actions: ChatActions) {
           el("div", { class: "msg me" }, el("p", {}, c.question)),
           el(
             "div",
-            { class: "msg muse" },
-            el("span", { class: "who" }, "Muse", about ? el("small", {}, ` on ${about}`) : null),
+            { class: "msg ai" },
+            el("span", { class: "who" }, "The AI", about ? el("small", {}, ` on ${about}`) : null),
             ...(() => {
               const r = readOf(c.seq);
               return r ? [readLine(r, c.consulted ?? [])] : [];
@@ -102,7 +102,7 @@ export function mountChat(host: HTMLElement, actions: ChatActions) {
               ? el(
                   "p",
                   { class: "note-line warn" },
-                  `Not in the data Muse was given: ${c.unsupported.join(", ")}. Treat as unverified.`,
+                  `Not in the data the AI was given: ${c.unsupported.join(", ")}. Treat as unverified.`,
                 )
               : null,
             el(
@@ -127,8 +127,8 @@ export function mountChat(host: HTMLElement, actions: ChatActions) {
               el("div", { class: "msg me" }, el("p", {}, r.question)),
               el(
                 "div",
-                { class: "msg muse" },
-                el("span", { class: "who" }, "Muse"),
+                { class: "msg ai" },
+                el("span", { class: "who" }, "The AI"),
                 readLine(r, []),
                 el("p", {}, r.why),
               ),
@@ -145,8 +145,8 @@ export function mountChat(host: HTMLElement, actions: ChatActions) {
             el("div", { class: "msg me" }, el("p", {}, pending)),
             el(
               "div",
-              { class: "msg muse" },
-              el("span", { class: "who" }, "Muse"),
+              { class: "msg ai" },
+              el("span", { class: "who" }, "The AI"),
               el("p", { class: "typing" }, el("i", {}), el("i", {}), el("i", {})),
             ),
           ),
@@ -157,7 +157,7 @@ export function mountChat(host: HTMLElement, actions: ChatActions) {
           el(
             "p",
             { class: "chat-empty" },
-            "Ask Muse about the selected root: why it fails, what it rests on, what to test next.",
+            "Ask the AI about the selected root: why it fails, what it rests on, what to test next.",
           ),
         );
       }

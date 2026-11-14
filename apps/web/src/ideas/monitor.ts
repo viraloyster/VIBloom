@@ -1,4 +1,4 @@
-// The monitor: what is being tested in the selected root. Muse designs the
+// The monitor: what is being tested in the selected root. The AI designs the
 // visual (run in an isolated frame, fed only engine data); the instrument
 // beside it is drawn by the code from the check and its thresholds.
 
@@ -43,6 +43,9 @@ export interface MonitorActions {
   accept(id: string): void;
   reject(id: string): void;
   estimate(kind: "view" | "expand", id: string): number;
+  // Whether an AI is connected; without one, every step has a manual path.
+  ai(): boolean;
+  addRoot(under: string): void;
   busy(): boolean;
 }
 
@@ -51,7 +54,8 @@ export const fmt = (x: number) =>
     ? x.toExponential(2)
     : String(Math.round(x * 1000) / 1000);
 
-const usd = (x: number) => (x < 0.01 ? `$${x.toFixed(4)}` : `$${x.toFixed(3)}`);
+const tokens = (x: number) =>
+  x >= 1e3 ? `${(x / 1e3).toFixed(1)}k tokens` : `${String(x)} tokens`;
 const words = (name: string) => name.replace(/_/g, " ");
 
 // Everything the view may show, taken from the engine, never from the model.
@@ -113,7 +117,7 @@ export function viewData(tree: IdeaTree, n: IdeaNode) {
   };
 }
 
-// Text Muse wrote for values that have since changed: said beside it, so a
+// Text the AI wrote for values that have since changed: said beside it, so a
 // verdict about today's values is never read as about the quoted ones.
 function writtenFor(tree: IdeaTree, id: string): HTMLElement[] {
   const stale = tree.staleText(id);
@@ -138,7 +142,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
     class: "view-frame",
     sandbox: "allow-scripts",
     src: "frame.html",
-    title: "View designed by Muse",
+    title: "View designed by the AI",
   });
   let pending: { html: string; data: unknown } | undefined;
   // The frame has an opaque origin, so "*" is the only target it accepts; it
@@ -231,7 +235,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
             el(
               "span",
               { class: "actor" },
-              s.actor === "muse" ? "Muse" : s.actor === "engine" ? "Engine" : "You",
+              s.actor === "ai" ? "AI" : s.actor === "engine" ? "Engine" : "You",
             ),
             el("span", { class: "stage" }, s.stage),
           ),
@@ -281,7 +285,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
       const controls: Node[] = [];
       if (play?.recorded) {
         controls.push(
-          el("p", { class: "provenance" }, "Recorded Muse output - calculations running locally"),
+          el("p", { class: "provenance" }, "Recorded the AI output - calculations running locally"),
         );
         const row = el("div", { class: "row play" });
         if (play.playing) {
@@ -309,7 +313,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
           el(
             "p",
             { class: "fine" },
-            `${String(counts("muse"))} steps by Muse, ${String(counts("engine"))} by the engine (${String(refused)} refused), ${String(counts("person"))} by you. Muse proposes; the engine computes, runs and decides. Hover or focus a step to light its roots; open it for inputs, cost and log entry.`,
+            `${String(counts("ai"))} steps by the AI, ${String(counts("engine"))} by the engine (${String(refused)} refused), ${String(counts("person"))} by you. The AI proposes; the engine computes, runs and decides. Hover or focus a step to light its roots; open it for inputs, cost and log entry.`,
           ),
         ),
         ol,
@@ -409,7 +413,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
           { class: "provenance" },
           redraw,
           " ",
-          `Illustration by Muse: ${v.title}. Not a simulation; the numbers and verdict are in the instrument.`,
+          `Illustration by the AI: ${v.title}. Not a simulation; the numbers and verdict are in the instrument.`,
           reviewNote(tree.reviews.get(id)),
         );
         // Moving an iframe reloads it: keep it in place and swap only the line.
@@ -423,7 +427,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
         const b = el(
           "button",
           { class: "primary", disabled: actions.busy() || n.role === "goal" },
-          "Visualize with Muse",
+          "Visualize with the AI",
         );
         b.addEventListener("click", () => {
           actions.visualize(id);
@@ -437,9 +441,11 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
               {},
               n.role === "goal"
                 ? "Select a root to see what it tests."
-                : "Muse can draw what this root is testing.",
+                : actions.ai()
+                  ? "The AI can draw what this root is testing."
+                  : "Connect an AI in Settings to draw what this root is testing; the instrument below works without one.",
             ),
-            n.role === "goal"
+            n.role === "goal" || !actions.ai()
               ? null
               : el(
                   "div",
@@ -448,7 +454,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
                   el(
                     "span",
                     { class: "fine" },
-                    `about ${usd(actions.estimate("view", id))} at most`,
+                    `about ${tokens(actions.estimate("view", id))} at most`,
                   ),
                 ),
           ),
@@ -477,7 +483,11 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
               "figure",
               { class: "sketch-figure" },
               el("img", { class: "handwriting", src: tree.sketch, alt: "The handwritten goal" }),
-              el("figcaption", { class: "fine" }, "Written by hand; Muse read the goal from this."),
+              el(
+                "figcaption",
+                { class: "fine" },
+                "Written by hand; the AI read the goal from this.",
+              ),
             )
           : null,
         el(
@@ -605,7 +615,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
         el(
           "p",
           { class: "fine warn" },
-          `Muse also gave ${n.overridden.map(words).join(", ")}; the recipe sets ${n.overridden.length > 1 ? "them" : "it"}, so ${n.overridden.length > 1 ? "those values were" : "that value was"} not used.`,
+          `The AI also gave ${n.overridden.map(words).join(", ")}; the recipe sets ${n.overridden.length > 1 ? "them" : "it"}, so ${n.overridden.length > 1 ? "those values were" : "that value was"} not used.`,
         ),
       );
     const derived = tree.derived();
@@ -655,7 +665,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
           el(
             "span",
             {},
-            `Muse suggests ${words(sg.name)} = ${fmt(sg.value)} ${sg.unit}`,
+            `The AI suggests ${words(sg.name)} = ${fmt(sg.value)} ${sg.unit}`,
             sg.source ? el("small", {}, sg.source) : null,
           ),
           b,
@@ -665,6 +675,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
     if (n.check?.kind === "oregonator") out.push(...investigation(tree, n));
     if (n.check && n.check.kind !== "oregonator") {
       const byHand = n.check.description.startsWith("Written by hand:");
+      const typed = n.rationale === "written by hand";
       out.push(
         el(
           "details",
@@ -673,8 +684,10 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
             "summary",
             {},
             byHand
-              ? "Your handwritten formula, read by Muse, evaluated by VIBloom"
-              : "Formula by Muse, evaluated by VIBloom",
+              ? "Your handwritten formula, read by the AI, evaluated by VIBloom"
+              : typed
+                ? "Your formula, evaluated by VIBloom"
+                : "Formula by the AI, evaluated by VIBloom",
           ),
           byHand && tree.handwriting.has(n.id)
             ? el("img", {
@@ -688,7 +701,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
         ),
       );
     }
-    if (n.role !== "goal" && n.check?.kind !== "oregonator") {
+    if (n.role !== "goal" && n.check?.kind !== "oregonator" && actions.ai()) {
       const w = el(
         "button",
         { class: "ghost-btn", disabled: actions.busy() },
@@ -702,7 +715,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
           "div",
           { class: "row" },
           w,
-          el("span", { class: "fine" }, "Muse reads it; the engine computes it."),
+          el("span", { class: "fine" }, "The AI reads it; the engine computes it."),
         ),
       );
     }
@@ -717,11 +730,19 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
       });
       out.push(el("div", { class: "row" }, a, x));
     }
-    if (n.role !== "goal") {
+    const add = el(
+      "button",
+      { class: "ghost-btn", disabled: actions.busy() },
+      "Add a root by hand",
+    );
+    add.addEventListener("click", () => {
+      actions.addRoot(n.id);
+    });
+    if (n.role !== "goal" && actions.ai()) {
       const b = el(
         "button",
         { class: "primary", disabled: actions.busy() || n.expanded },
-        n.expanded ? "Opened" : "Open with Muse",
+        n.expanded ? "Opened" : "Open with the AI",
       );
       b.addEventListener("click", () => {
         actions.expand(n.id);
@@ -731,9 +752,16 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
           "div",
           { class: "row" },
           b,
-          el("span", { class: "fine" }, `about ${usd(actions.estimate("expand", n.id))} at most`),
+          el(
+            "span",
+            { class: "fine" },
+            `about ${tokens(actions.estimate("expand", n.id))} at most`,
+          ),
+          add,
         ),
       );
+    } else {
+      out.push(el("div", { class: "row" }, add));
     }
     return out.filter((x): x is Node => x !== null);
   }
@@ -755,8 +783,8 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
         "p",
         { class: "fine" },
         tree.results.has(n.id)
-          ? "Muse predicts before every run on its own. A run of these values is already in the log, so a prediction made now is kept but not scored."
-          : "Muse predicts first; the engine runs; a surprise makes Muse propose two explanations and one more run decides between them.",
+          ? "The AI predicts before every run on its own. A run of these values is already in the log, so a prediction made now is kept but not scored."
+          : "The AI predicts first; the engine runs; a surprise makes the AI propose two explanations and one more run decides between them.",
       ),
     );
     for (const p of tree.predictions.filter((x) => x.node === n.id)) {
@@ -808,7 +836,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
               ? ` ${intervention(l)}, it ${d.outcome}${measured(tree, l.run)}.`
               : ` Test registered first: ${words(l.test.param)} = ${fmt(l.test.value)}${state === "failed" ? ", which did not conclude or reproduce" : ", not decided yet"}.`,
           ),
-          el("p", { class: "label" }, "Muse's interpretations, before the test"),
+          el("p", { class: "label" }, "The AI's interpretations, before the test"),
           ...l.candidates.map((c, i) =>
             el(
               "p",
@@ -827,7 +855,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
             ? el(
                 "p",
                 { class: "fine warn" },
-                `Numbers Muse wrote that were not in its data: ${l.unsupported.join(", ")}.`,
+                `Numbers the AI wrote that were not in its data: ${l.unsupported.join(", ")}.`,
               )
             : null,
           el(
@@ -849,7 +877,7 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
   }
 
   function row(p: Param, shared: boolean, from?: string) {
-    // No edits while Muse is working: its answer must be about these values.
+    // No edits while the AI is working: its answer must be about these values.
     const input = el("input", {
       type: "number",
       value: String(p.value),
@@ -996,15 +1024,15 @@ function glance(tree: IdeaTree, n: IdeaNode): HTMLElement | null {
   return rows.length ? el("div", { class: "glance" }, ...rows) : null;
 }
 
-// What Muse said after looking at a picture of its own drawing.
+// What the AI said after looking at a picture of its own drawing.
 function reviewNote(r: { ok: boolean; problems: string[]; redrawn: boolean } | undefined) {
   if (!r) return null;
   return el(
     "span",
     { class: `review ${r.ok ? "ok" : "warn"}` },
     r.ok
-      ? ` Muse looked at this drawing and found it matches the data${r.redrawn ? ", after one redraw" : ""}.`
-      : ` Muse looked at this drawing and found: ${r.problems.join("; ")}.`,
+      ? ` the AI looked at this drawing and found it matches the data${r.redrawn ? ", after one redraw" : ""}.`
+      : ` the AI looked at this drawing and found: ${r.problems.join("; ")}.`,
   );
 }
 
@@ -1014,7 +1042,7 @@ function predictionsLine(tree: IdeaTree) {
   const c = tree.calibration();
   if (!c.made && !c.pending) return null;
   const parts = [
-    `Muse's predictions: ${String(c.right)} of ${String(c.made)} right`,
+    `The AI's predictions: ${String(c.right)} of ${String(c.made)} right`,
     c.brier !== undefined ? `Brier score ${c.brier.toFixed(2)} (0 best, 0.25 a coin flip)` : "",
     c.pending ? `${String(c.pending)} re-checking here` : "",
     `${String(tree.lessons.filter((l) => tree.decided(l)).length)} lesson(s) decided`,
@@ -1067,7 +1095,7 @@ function experiment(
     el(
       "p",
       { class: "fine" },
-      `At s ${fmt(r.inputs.s ?? NaN)}, q ${fmt(r.inputs.q ?? NaN)}, eps ${fmt(r.inputs.eps ?? NaN)}, eps_prime ${fmt(r.inputs.eps_prime ?? NaN)}. Computed by VIBloom's chemistry engine, checked against SciPy; the question was chosen by Muse.`,
+      `At s ${fmt(r.inputs.s ?? NaN)}, q ${fmt(r.inputs.q ?? NaN)}, eps ${fmt(r.inputs.eps ?? NaN)}, eps_prime ${fmt(r.inputs.eps_prime ?? NaN)}. Computed by VIBloom's chemistry engine, checked against SciPy; the question was chosen by the AI.`,
     ),
   );
 }
@@ -1108,7 +1136,7 @@ function gauge(r: CheckResult, backing: Param[], premiseNote: string) {
         {},
         backing.length === 0
           ? "no values"
-          : `${String(backing.length)} value${backing.length === 1 ? "" : "s"}: ${String(assumed)} assumed, ${String(backing.length - assumed)} with a source Muse named; none checked by a person`,
+          : `${String(backing.length)} value${backing.length === 1 ? "" : "s"}: ${String(assumed)} assumed, ${String(backing.length - assumed)} with a source the AI named; none checked by a person`,
       ),
       el("dt", {}, "Premises"),
       el("dd", {}, premiseNote),

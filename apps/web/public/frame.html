@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <!-- Muse's views run here: a sandboxed frame with an opaque origin and no
+    <!-- The AI's views run here: a sandboxed frame with an opaque origin and no
          network, storage or access to the page that holds the key. -->
     <meta
       http-equiv="Content-Security-Policy"
@@ -25,7 +25,7 @@
       }
     </style>
     <script>
-      // A picture of what is on screen, for Muse to check its own drawing:
+      // A picture of what is on screen, for the AI to check its own drawing:
       // the live DOM, canvases as images, drawn into a canvas through SVG.
       async function snapshot() {
         const w = innerWidth;

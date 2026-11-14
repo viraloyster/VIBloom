@@ -1,5 +1,5 @@
 // A sheet to write or sketch on (mouse, pen or finger) or to drop a photo of
-// paper. It hands back a picture for Muse to read; nothing is kept.
+// paper. It hands back a picture for the AI to read; nothing is kept.
 
 import { el } from "../dom";
 
@@ -105,7 +105,7 @@ export function openPad(opts: {
       return;
     }
     read.disabled = true;
-    status.textContent = "Muse is reading it...";
+    status.textContent = "The AI is reading it...";
     void opts.onRead(picture(canvas)).then(close, (e: unknown) => {
       read.disabled = false;
       status.textContent = e instanceof Error ? e.message : String(e);

@@ -1,5 +1,11 @@
 // Deterministic randomness for everything drawn from a seed.
 
+export function hash(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+
 export function rng(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
@@ -10,7 +16,3 @@ export function rng(seed: number): () => number {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-
-// The crown artwork (public/crown.webp): 1024 x 538 px, its trunk base at the
-// bottom centre.
-export const CROWN = { width: 1000, height: 525 } as const;

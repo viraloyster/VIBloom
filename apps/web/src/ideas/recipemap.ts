@@ -212,7 +212,7 @@ function mapBody(
       el(
         "p",
         { class: "fine" },
-        "Using it records the change and this run in the log; the other experiments then run with Muse predicting first. Predictions about what this run already settles are marked not blind.",
+        "Using it records the change and this run in the log; the other experiments then run with the AI predicting first. Predictions about what this run already settles are marked not blind.",
       ),
     );
   };

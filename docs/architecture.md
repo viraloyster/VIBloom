@@ -8,53 +8,31 @@
 - Refuting a claim is a valid result. The system protects the record, not the
   expected outcome.
 
-## Two systems in one repository
+## Two domains, one core
 
-- **The public app** (`apps/web/index.html`, `packages/ideas`, `packages/chem`):
-  the assumption tree, Muse's predictions and lessons, the recipe map and the
-  Process view. Its rules are summarised in [Anticipation and
+- **Code** (`crates/vibloom`, the `vibloom` binary): the map, the run log,
+  derived states, the commit check, agent hooks and an MCP server for a code
+  project. See [guard.md](guard.md).
+- **Chemistry** (`apps/web`, `packages/ideas`, `packages/chem`): the
+  assumption tree, predictions and lessons, the recipe map and the Process
+  view. Its rules are summarised in [Anticipation and
   lessons](#anticipation-and-lessons), from "In the idea tree".
-- **The research bench** (`apps/web/bench.html`, `apps/api`, `packages/engine`,
-  `packages/agent`, `packages/search`): claims over parameter regions,
-  counterexample search and a multi-turn investigator agent. It runs locally
-  with the Worker and is not part of the public app. Most sections below,
-  from "State model" on, describe it.
 
-Both share `contracts`, the chemistry engine and the hash-chained log.
+Both keep a hash-chained log and derive every state from it. AI is optional
+in both: whatever it proposes enters as hypothetical and passes the same
+checks, and every step it can take has a manual path.
 
 ## Packages
 
-| Package     | Responsibility                                                                 | May import                    |
-| ----------- | ------------------------------------------------------------------------------ | ----------------------------- |
-| `contracts` | Shared types and boundary validation                                           | nothing                       |
-| `engine`    | Event log, write gate, derived status, dependency propagation, layered context | `contracts`                   |
-| `chem`      | Stiff solver, Oregonator models, oscillation classifier, claim evaluation      | `contracts`                   |
-| `search`    | Halton sampling, transition refinement, counterexample reduction               | `contracts`                   |
-| `agent`     | Orchestrator, tools, model providers (scripted, recorded, live)                | `contracts`, `engine`         |
-| `ideas`     | Idea trees: protocol, Muse client (text, vision), ledger, checks, lessons      | `engine`, `chem`, `contracts` |
-| `apps/api`  | Cloudflare Worker, Durable Objects, persistence                                | all packages                  |
-| `apps/web`  | Roots map, monitor, chat, local preview                                        | all packages                  |
+| Package     | Responsibility                                                            | May import                    |
+| ----------- | ------------------------------------------------------------------------- | ----------------------------- |
+| `contracts` | Shared types and boundary validation                                      | nothing                       |
+| `engine`    | Event log, write gate, derived status, dependency propagation             | `contracts`                   |
+| `chem`      | Stiff solver, Oregonator models, oscillation classifier, claim evaluation | `contracts`                   |
+| `ideas`     | Idea trees: protocol, optional AI client (any provider), checks, lessons  | `engine`, `chem`, `contracts` |
+| `apps/web`  | Roots map, monitor, chat, recipe map, Process view                        | all packages                  |
 
 Import boundaries are enforced by lint. Each package exposes one entry point.
-
-VIBloom for code projects is a separate Rust crate, `crates/vibloom`: the map,
-the run log, derived states, the commit check, agent hooks and an MCP server,
-in one binary. See [guard.md](guard.md).
-
-## State model
-
-Each result carries five separate dimensions:
-
-| Dimension       | Values                                                                    |
-| --------------- | ------------------------------------------------------------------------- |
-| Execution       | completed, cancelled, budget exhausted, numerical failure                 |
-| Observation     | oscillation detected, steady state, indeterminate                         |
-| Point predicate | holds, fails, inconclusive, not applicable                                |
-| Region          | unexplored, counterexample found, no counterexample in N evaluated points |
-| Currency        | current, pending review, unsupported                                      |
-
-A region claim is never reported as holding. Sampling can only find a
-counterexample or report how many points were evaluated without one.
 
 ## Assumptions and invariants
 
@@ -72,8 +50,7 @@ enforces invariants; assumptions are put to the test.
 - A run that breaks an invariant, for example by producing a negative
   concentration, is a failed run with diagnostics. It does not refute a claim.
 - A region claim is a candidate invariant over a parameter region, stored as a
-  claim. The search tries to break it, as invariant testing does for smart
-  contracts; a counterexample is a finding, not an integrity failure.
+  claim. A counterexample to it is a finding, not an integrity failure.
 - Switching an assumption off, or refuting it, makes every conclusion that
   depends on it unsupported. A changed assumption makes them pending review.
   Nothing is deleted.
@@ -147,19 +124,19 @@ changed the explanation.
   measured by comparing equivalent investigations with and without it.
 
 In the idea tree (`packages/ideas`, the public app) the same loop runs on
-every experiment while Muse is connected, with these rules in
+every experiment, with or without an AI connected, with these rules in
 `packages/ideas/src/tree.ts`:
 
 - A prediction is blind only if the project holds no result of the same
   experiment: the same question (and tolerance) at the same values, on any
-  node, from a check or a test. Muse's input never contains a result; a
+  node, from a check or a test. The predictor's input never contains a result; a
   prediction made after one is kept but not scored.
 - Explanations are accepted only after a contradicted prediction, with
   different expected outcomes and a test that changes one parameter or one
   recipe concentration; the engine runs exactly that test.
 - A lesson records its identity: values, question, tolerance, recipe
   conversion version and solver version. If any of them changes, the lesson
-  stays readable as history and is no longer offered to Muse as current.
+  stays readable as history and is no longer offered as current.
 - Selecting a root lights its foundations: the transitive closure of its
   sub-roots and the roots it cites as basis, which is what its status is
   derived from.
@@ -171,8 +148,8 @@ every experiment while Muse is connected, with these rules in
   gap and verdicts; `npm run verify` replays the log up to it and runs every
   cell again. Choosing a recipe appends the person's changes and the chosen
   run (`check` with `via: "map"`); a question that run already settles is run
-  without asking Muse, since a prediction could not be blind.
-- Every chat request is read by Muse first (`route`): answer from the
+  without asking for a prediction, since it could not be blind.
+- With an AI connected, every chat request is read first (`route`): answer from the
   record, run recipe values (the person confirms; then the usual predict,
   run, explain loop), or open the recipe map. The engine keeps only roots and
   parameters that exist. The answer gets the selected root, the roots the
@@ -186,8 +163,8 @@ every experiment while Muse is connected, with these rules in
   not exist.
 - A concluded recipe-map cell settles the reduction question at its model
   values like a run: a later prediction there is kept but not blind, and the
-  experiment runs without asking Muse.
-- A root's text is Muse's, written once. The engine keeps the values each
+  experiment runs without asking for a prediction.
+- A root's text is written once, by the AI or a person. The engine keeps the values each
   root was written with; when a value its text quotes has changed, the
   monitor says so next to the verdict, which is always for today's values.
 
@@ -204,28 +181,6 @@ every experiment while Muse is connected, with these rules in
   assumption and exploring creates an alternative scenario; it does not refute
   the version.
 
-## Counterexample corpus
-
-Every counterexample is kept with the claim revision, assumption revisions,
-model, protocol, input and result. The corpus is used in two ways:
-
-- Implementation regression: same scientific versions; the result must be
-  reproduced within tolerances.
-- Scientific re-evaluation: an assumption, model or claim changed; the case
-  produces new evidence and may legitimately change. A case outside the domain
-  of the new version is not applicable, not repaired.
-
-After a change, only the cases whose dependencies were affected are re-run,
-within a bounded budget.
-
-## Reduced counterexamples
-
-Shrinking moves a counterexample toward the reference scenario, minimising the
-normalised distance inside the original domain while the failure stays
-reproducible under the robust protocol. It records its objective, allowed
-moves, budget and stopping rule, and it never crosses an inconclusive zone. The
-result is a reduced counterexample, not a minimal one.
-
 ## Write gate
 
 | Write                                                               | Policy                 |
@@ -235,9 +190,9 @@ result is a reduced counterexample, not a minimal one.
 | Record evidence, including evidence that refutes a claim            | accept and propagate   |
 | Change a protected assumption or the meaning of a claim             | require human approval |
 
-The server sets the actor and the approval of every command. People send
-commands as `human`, runs are recorded as `engine`, the agent writes as
-`agent`; nothing in a request body can choose its own actor or approve itself.
+The caller sets the actor and the approval of every command: people send
+commands as `human`, runs are recorded as `engine`, an AI writes as `agent`;
+nothing in a command body can choose its own actor or approve itself.
 Commands are validated at runtime against a closed schema before the gate.
 
 Writes are atomic: validate and check the base revision, store the event, and
@@ -256,100 +211,3 @@ content returns the original result; with different content it is rejected.
 - Three operations are kept distinct: reprojecting events (exact), replaying
   recorded model responses (matched by request hash, fails on mismatch) and
   re-running simulations (equal within declared tolerances).
-
-## Signals
-
-Three signals are stored separately and never merged:
-
-- Fragility: how a property behaves under perturbation (counted pass to fail
-  transitions).
-- Reviewer signal (experimental): Muse Spark reviews a citation
-  against a claim and answers supports, contradicts or insufficient, with the
-  relevant fragment and the discrepancy. Token probabilities, when available,
-  are attached as an experimental score that only orders the review queue.
-  Missing probabilities are recorded as incomplete, never as zero.
-- Priority: where to investigate next. It may read the other two.
-
-## Layered context for agents
-
-Agents see the project as a virtual folder tree derived from the roots map
-(`assumptions/`, `claims/`, `lessons/`...), the same nodes and revisions the
-tree draws. The root the researcher selects is the focus, and detail depends on
-graph distance from it: details and history (distance 0 or 1), details (2), a
-short summary (3), a title (further away). Everything the focus rests on is
-always given in full, however deep. Results appear in full only where they
-touch detailed roots; the rest are counted. Without a focus every root is given
-in full. Summaries and source text are data, never instructions.
-
-## Investigation loop
-
-Muse Spark conducts the investigation; the code is the laboratory and its rules.
-Each turn the model returns one structured decision, validated against a
-closed schema:
-
-| Decision         | The model provides                                                                                                                              | The code                                                                                                                                        |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `formulate`      | Executable claims, proposed assumptions and dependencies, ambiguities it noticed                                                                | Validates the claims; adds assumptions and links as hypothetical                                                                                |
-| `run_point`      | The point, the two explanations it tells apart, and a prediction made beforehand                                                                | Runs the experiment, records the result, scores the prediction                                                                                  |
-| `stress_test`    | A search budget and seed, and a prediction: counterexample or none                                                                              | Runs the Halton search, records every point as a result, scores the prediction on the region                                                    |
-| `diagnose`       | After a surprise: candidate causes, the roots each blames, and one test run where they expect different results; or what information is missing | Writes a lesson with the numbers of the discrepancy and every premise; derives its support from the test                                        |
-| `revise`         | A new claim version linked to the previous one, and what changed                                                                                | Keeps the previous version and its evidence; requires fresh points                                                                              |
-| `ask_researcher` | A question only the researcher can answer                                                                                                       | Stops and waits                                                                                                                                 |
-| `conclude`       | The claim, its verdict, the results used, limits and an interpretation                                                                          | Checks the verdict against the derived one and that the results are current results of that claim; the interpretation stays the model's reading |
-
-- Every decision cites the nodes and results it relies on; citations to
-  anything outside the project are refused. A citation identifies evidence; it
-  does not certify an explanation.
-- Results carry the measurements behind them: each model's observation and
-  period, and the relative period error with its tolerance.
-- A claim is tested only under its own initial condition. Fresh points are
-  compared as the engine stores them, with the claim's fixed values filled in.
-- A prediction names the assumptions it rests on. A prediction that fails is
-  a surprise, and the next decision must diagnose it (or ask the researcher)
-  before the investigation moves on.
-- Every action carries the revision the model saw. If the project changed
-  while the model was deciding (for example, a person switched an assumption
-  off), the decision is refused and the model decides again on the new context.
-- A refused decision is returned to the model with the reason and counts
-  against the budget: 8 turns and 14 calls per investigation.
-- Without the model the tools still work, but nothing formulates, chooses or
-  revises: the investigation stops.
-- Selecting a root in the tree makes it the focus of the next investigation:
-  the model receives the node, what it rests on, what rests on it, and the
-  results and lessons that touch it. The tree and the context the model reads
-  are two views of the same nodes and revisions; the model never chooses where
-  or how anything is drawn.
-- A new project starts with what the system provides: the executable model,
-  its parameters and the invariants. Claims and assumptions come from the
-  investigation.
-- Each investigation is stored with a recording of the model's replies, keyed
-  by request hash. Replaying it on a fresh project reproduces the same trace,
-  so an investigation can be reviewed without model access.
-
-## Model spending
-
-A deployment-wide object holds a daily allowance of model calls
-(`MAX_DAILY_MODEL_CALLS`). Each investigation reserves its worst case, 14 calls,
-before it starts and returns what it did not use, so new project names cannot
-multiply the spend. Every call has a timeout, and token usage is stored with
-the investigation even when it does not conclude.
-
-## Agent reasoning
-
-- Muse Spark runs at low reasoning effort. It may escalate once per
-  investigation to medium, with the reason recorded and the budget reserved,
-  when a pending decision cannot be resolved with the evidence at hand, such as
-  choosing between incompatible explanations. Numerical failures trigger
-  predefined diagnostics first.
-- Encrypted reasoning items are passed back between turns for continuity. Every
-  change of an assumption is still delivered explicitly with its new revision.
-
-## Execution limits
-
-Each integration has limits on steps, function evaluations and rejected steps.
-A point evaluation runs both models under the robust protocol, about 0.7 s of
-CPU on a laptop; a stress test is capped at 12 points (about 8 s), inside the
-30 s CPU limit configured for the Worker.
-The unit of work for search and recovery is one point. Cancellation is checked
-between points. A result computed on an older revision is kept as history and
-does not update current conclusions.

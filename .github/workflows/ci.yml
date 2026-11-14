@@ -18,7 +18,6 @@ jobs:
       - run: npm run check
       - run: npm test
       # Replays every recorded session and map and runs each experiment again.
-      - run: npm run verify
       - run: npm run build
 
   rust:

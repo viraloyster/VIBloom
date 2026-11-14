@@ -101,7 +101,7 @@ export interface IdeaNode {
   // Large changes the model may only suggest.
   proposed: boolean;
   expanded: boolean;
-  // Values Muse gave that the tree's recipe already sets; not used.
+  // Values the AI gave that the tree's recipe already sets; not used.
   overridden?: string[];
 }
 
@@ -111,12 +111,11 @@ export interface Usage {
   cached: number;
   output: number;
   reasoning: number;
-  cost: number;
 }
 
 export type EventBody =
-  // sketch: the handwriting Muse read the goal from, if it was written by hand.
-  | { type: "goal"; text: string; mode: Mode; sketch?: string }
+  // sketch: the handwriting the AI read the goal from, if it was written by hand.
+  | { type: "goal"; text: string; sketch?: string }
   | { type: "grow"; under: string; nodes: IdeaNode[]; summary: string; usage: Usage }
   // via "map": a run first computed in the recipe map and chosen by a person.
   | { type: "check"; node: string; result: CheckResult | CheckError; via?: "map" }
@@ -129,16 +128,16 @@ export type EventBody =
       question: string;
       answer: string;
       cites: string[];
-      // Every value as it was when Muse answered, so a later edit marks the
+      // Every value as it was when the AI answered, so a later edit marks the
       // answer as about other numbers.
       asked: Record<string, number>;
-      // The roots Muse was given in full; the whole tree's runs come with
+      // The roots the AI was given in full; the whole tree's runs come with
       // them. Absent in logs recorded before routing: the focus only.
       consulted?: string[];
       usage: Usage;
     }
   | {
-      // Muse read a request first and chose what it needs and what to do:
+      // The AI read a request first and chose what it needs and what to do:
       // answer from the record, run a recipe (the person confirms), or open
       // the recipe map. The engine checks every id and value it names.
       type: "route";
@@ -152,7 +151,7 @@ export type EventBody =
     }
   | {
       // An exploration of nearby recipes, each cell run by the engine at the
-      // tree's values then; npm run verify runs every cell again.
+      // tree's values then; replayMap runs every cell again.
       type: "map";
       node: string;
       center: Record<string, number>;
@@ -191,7 +190,7 @@ export type EventBody =
     }
   | { type: "test"; hypotheses: string; result: CheckResult | CheckError }
   | {
-      // Muse looked at a picture of its own drawing and compared it with the
+      // The AI looked at a picture of its own drawing and compared it with the
       // data the drawing was given.
       type: "review";
       node: string;
@@ -200,7 +199,7 @@ export type EventBody =
       usage: Usage;
     }
   | {
-      // A formula a person wrote by hand, as Muse read it; the engine decides
+      // A formula a person wrote by hand, as the AI read it; the engine decides
       // whether it can be computed with the tree's names.
       type: "formula";
       node: string;
@@ -243,10 +242,6 @@ export interface IdeaEvent {
   actor: string;
   body: EventBody;
 }
-
-// Standard keeps content out of Meta's training; contributor is cheaper and
-// lets Meta train on it. A person chooses.
-export type Mode = "standard" | "contributor";
 
 export type Outcome = "holds" | "fails";
 
@@ -291,7 +286,7 @@ export interface Lesson {
   open: string;
   // Sequence number of the discriminating run, once recorded.
   run?: number;
-  // Numbers in Muse's text that were not in the data it was given.
+  // Numbers in the AI's text that were not in the data it was given.
   unsupported: string[];
   // What the surprise was learned under, besides the values: the question,
   // its tolerance, the recipe conversion and the solver.
@@ -317,7 +312,7 @@ export interface Prediction {
   run?: number;
   // No result of the same experiment (question, tolerance, values; any node,
   // check or test) was in the log yet. A prediction made after one is kept,
-  // but it is not counted as foresight. Muse's input never holds a result.
+  // but it is not counted as foresight. The AI's input never holds a result.
   blind: boolean;
   // The run that already held the result, when not blind.
   prior?: number;

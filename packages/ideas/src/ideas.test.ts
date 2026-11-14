@@ -1,13 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { runCheck, SIM_PARAMS, thresholds } from "./check";
-import { BudgetExceeded, cost, Ledger } from "./cost";
 import { evaluate } from "./expr";
-import { Muse } from "./muse";
 import type { GrownNode } from "./protocol";
 import { unsupportedNumbers } from "./numbers";
 import { ArrayItems } from "./stream";
 import { IdeaTree } from "./tree";
-import type { IdeaEvent, Usage } from "./types";
+import type { Usage } from "./types";
 
 const noCheck = { description: "", value: "", op: "none", limit: "", unit: "" };
 const grown = (key: string, extra: Partial<GrownNode> = {}): GrownNode => ({
@@ -25,12 +23,11 @@ const grown = (key: string, extra: Partial<GrownNode> = {}): GrownNode => ({
   ...extra,
 });
 const usage: Usage = {
-  model: "muse-spark-1.3",
+  model: "test-model",
   input: 1,
   cached: 0,
   output: 1,
   reasoning: 0,
-  cost: 0,
 };
 const seqOf = (t: IdeaTree, id: string) => t.latestRun(id)?.seq ?? -1;
 const p = (name: string, value: number, origin = "assumed", unit = "MPa") => ({
@@ -43,7 +40,7 @@ const p = (name: string, value: number, origin = "assumed", unit = "MPa") => ({
 
 function planted() {
   const t = new IdeaTree();
-  t.append("person", { type: "goal", text: "Cardboard airliner", mode: "standard" });
+  t.append("person", { type: "goal", text: "Cardboard airliner" });
   const nodes = t.admit("goal", [
     grown("skin", {
       params: [p("stress need", 55, "reference"), p("strength", 12)],
@@ -57,7 +54,7 @@ function planted() {
     }),
     grown("cost", { risk: "low", basis: ["skin", "nowhere"] }),
   ]);
-  t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+  t.append("ai", { type: "grow", under: "goal", nodes, summary: "", usage });
   return t;
 }
 
@@ -161,7 +158,7 @@ describe("idea tree", () => {
       grown("liner", { params: [p("strength", 8, "reference"), p("liner_plies", 3)] }),
       grown("same", { params: [p("strength", 12)] }),
     ]);
-    t.append("muse", { type: "grow", under: "skin", nodes: under, summary: "", usage });
+    t.append("ai", { type: "grow", under: "skin", nodes: under, summary: "", usage });
     const liner = t.nodes.get("skin.liner");
     expect(liner?.params.map((x) => x.name)).toEqual(["liner_plies"]);
     expect(liner?.uses).toEqual(["strength"]);
@@ -181,7 +178,7 @@ describe("idea tree", () => {
     const copy = structuredClone(t.nodes.get("skin"));
     if (!copy) throw new Error("missing");
     expect(() =>
-      t.append("muse", {
+      t.append("ai", {
         type: "grow",
         under: "skin",
         nodes: [{ ...copy, id: "skin.copy", parent: "skin" }],
@@ -205,12 +202,12 @@ describe("idea tree", () => {
 
   it("keeps questioning bedrock as a proposal until a person accepts it", () => {
     const t = new IdeaTree();
-    t.append("person", { type: "goal", text: "g", mode: "standard" });
+    t.append("person", { type: "goal", text: "g" });
     const [law] = t.admit("goal", [grown("newton", { role: "bedrock" })]);
     if (!law) throw new Error("not admitted");
-    t.append("muse", { type: "grow", under: "goal", nodes: [law], summary: "", usage });
+    t.append("ai", { type: "grow", under: "goal", nodes: [law], summary: "", usage });
     const under = t.admit("newton", [grown("doubt")]);
-    t.append("muse", { type: "grow", under: "newton", nodes: under, summary: "", usage });
+    t.append("ai", { type: "grow", under: "newton", nodes: under, summary: "", usage });
     expect(t.status("newton.doubt")).toBe("proposed");
     t.append("person", { type: "reject", node: "newton.doubt" });
     expect(t.nodes.has("newton.doubt")).toBe(false);
@@ -228,7 +225,7 @@ describe("idea tree", () => {
       { id: "cost", value: "1", limit: "2" },
     ]);
     expect(fixes.map((f) => f.node)).toEqual(["skin"]);
-    t.append("muse", { type: "repair", fixes, usage });
+    t.append("ai", { type: "repair", fixes, usage });
     run(t, "skin");
     expect(t.status("skin")).toBe("broken");
   });
@@ -255,7 +252,7 @@ describe("idea tree", () => {
         check: { description: "", value: "child_need", op: "<=", limit: "2", unit: "" },
       }),
     ]);
-    t.append("muse", { type: "grow", under: "cost", nodes: under, summary: "", usage });
+    t.append("ai", { type: "grow", under: "cost", nodes: under, summary: "", usage });
     const cost = t.nodes.get("cost");
     if (!cost) throw new Error("missing");
     cost.basis = [];
@@ -297,7 +294,7 @@ describe("idea tree", () => {
       params: [{ ...p("strength", 1), kind: "external" as const }],
     };
     expect(() =>
-      t.append("muse", {
+      t.append("ai", {
         type: "grow",
         under: "skin",
         nodes: [...ok, bad as (typeof ok)[number]],
@@ -312,7 +309,7 @@ describe("idea tree", () => {
 describe("round three", () => {
   it("never lets a check that restates its own assumption hold", () => {
     const t = new IdeaTree();
-    t.append("person", { type: "goal", text: "A one minute clock", mode: "standard" });
+    t.append("person", { type: "goal", text: "A one minute clock" });
     const nodes = t.admit("goal", [
       grown("minute", {
         params: [
@@ -329,7 +326,7 @@ describe("round three", () => {
         },
       }),
     ]);
-    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    t.append("ai", { type: "grow", under: "goal", nodes, summary: "", usage });
     run(t, "minute");
     expect(t.status("minute")).toBe("argued");
   });
@@ -337,7 +334,7 @@ describe("round three", () => {
   it("keeps a check conditional when the result it claims is only assumed", () => {
     const make = (origin: string, check: { value: string; observes?: string[] }, name: string) => {
       const t = new IdeaTree();
-      t.append("person", { type: "goal", text: "A one minute clock", mode: "standard" });
+      t.append("person", { type: "goal", text: "A one minute clock" });
       const nodes = t.admit("goal", [
         grown("minute", {
           params: [
@@ -355,7 +352,7 @@ describe("round three", () => {
           },
         }),
       ]);
-      t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+      t.append("ai", { type: "grow", under: "goal", nodes, summary: "", usage });
       run(t, "minute");
       return t.status("minute");
     };
@@ -383,7 +380,7 @@ describe("round three", () => {
 
   it("refuses a repair that swaps the sides of a comparison", () => {
     const t = new IdeaTree();
-    t.append("person", { type: "goal", text: "g", mode: "standard" });
+    t.append("person", { type: "goal", text: "g" });
     const nodes = t.admit("goal", [
       grown("beam", {
         params: [p("load", 5), p("strength", 3)],
@@ -397,7 +394,7 @@ describe("round three", () => {
         },
       }),
     ]);
-    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    t.append("ai", { type: "grow", under: "goal", nodes, summary: "", usage });
     run(t, "beam");
     expect(t.admitFixes([{ id: "beam", value: "strength", limit: "load" }])).toEqual([]);
     expect(t.admitFixes([{ id: "beam", value: "load * 1", limit: "strength" }])).toEqual([]);
@@ -424,7 +421,7 @@ describe("round three", () => {
 
   it("retries an experiment that failed once its values change", () => {
     const t = new IdeaTree();
-    t.append("person", { type: "goal", text: "clock", mode: "standard" });
+    t.append("person", { type: "goal", text: "clock" });
     const nodes = t.admit("goal", [
       grown("osc", {
         params: [
@@ -445,7 +442,7 @@ describe("round three", () => {
         },
       }),
     ]);
-    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    t.append("ai", { type: "grow", under: "goal", nodes, summary: "", usage });
     const spec = t.nodes.get("osc")?.check;
     if (!spec) throw new Error("missing");
     t.append("engine", { type: "check", node: "osc", result: runCheck(spec, t.scope()) });
@@ -457,7 +454,7 @@ describe("round three", () => {
 
   it("lets a formula read an experiment's measured period and rest on it", () => {
     const t = new IdeaTree();
-    t.append("person", { type: "goal", text: "clock", mode: "standard" });
+    t.append("person", { type: "goal", text: "clock" });
     const nodes = t.admit("goal", [
       grown("osc", {
         params: [
@@ -492,7 +489,7 @@ describe("round three", () => {
         },
       }),
     ]);
-    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    t.append("ai", { type: "grow", under: "goal", nodes, summary: "", usage });
     expect(t.nodes.get("minute")?.basis).toEqual(["osc"]);
     const spec = t.nodes.get("osc")?.check;
     if (!spec) throw new Error("missing");
@@ -512,7 +509,7 @@ describe("round three", () => {
 
   it("keeps the recorded run when a confirmation differs within tolerance, so the log reopens", () => {
     const t = new IdeaTree();
-    t.append("person", { type: "goal", text: "clock", mode: "standard" });
+    t.append("person", { type: "goal", text: "clock" });
     const nodes = t.admit("goal", [
       grown("osc", {
         params: [
@@ -544,7 +541,7 @@ describe("round three", () => {
         },
       }),
     ]);
-    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    t.append("ai", { type: "grow", under: "goal", nodes, summary: "", usage });
     const spec = t.nodes.get("osc")?.check;
     if (!spec) throw new Error("missing");
     const r = runCheck(spec, t.scope());
@@ -566,7 +563,7 @@ describe("round three", () => {
 describe("chemistry experiments", () => {
   const chem = () => {
     const t = new IdeaTree();
-    t.append("person", { type: "goal", text: "A chemical clock", mode: "standard" });
+    t.append("person", { type: "goal", text: "A chemical clock" });
     const nodes = t.admit("goal", [
       grown("kinetics", {
         params: [
@@ -587,7 +584,7 @@ describe("chemistry experiments", () => {
         },
       }),
     ]);
-    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    t.append("ai", { type: "grow", under: "goal", nodes, summary: "", usage });
     return t;
   };
 
@@ -624,7 +621,7 @@ describe("chemistry experiments", () => {
 describe("predictions and lessons", () => {
   const clock = () => {
     const t = new IdeaTree();
-    t.append("person", { type: "goal", text: "A chemical clock", mode: "standard" });
+    t.append("person", { type: "goal", text: "A chemical clock" });
     const nodes = t.admit("goal", [
       grown("kinetics", {
         params: [
@@ -645,7 +642,7 @@ describe("predictions and lessons", () => {
         },
       }),
     ]);
-    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    t.append("ai", { type: "grow", under: "goal", nodes, summary: "", usage });
     return t;
   };
 
@@ -683,13 +680,13 @@ describe("predictions and lessons", () => {
 
   it("chains prediction, contradicting run, explanations and their test, and invalidates on change", () => {
     const t = clock();
-    t.append("muse", predict("holds"));
+    t.append("ai", predict("holds"));
     const spec = runNow(t);
     // At s = 1 the reduction is about 19% off: the prediction was wrong.
     t.confirm(seqOf(t, "kinetics"), runCheck(spec, t.scope()));
     expect(t.calibration()).toMatchObject({ made: 1, right: 0, surprises: 1 });
     expect(t.calibration().brier).toBeCloseTo(0.64);
-    t.append("muse", hypotheses());
+    t.append("ai", hypotheses());
     const l = t.lessons[0];
     if (!l) throw new Error("no lesson");
     expect(t.lessonState(l)).toBe("untested");
@@ -719,21 +716,19 @@ describe("predictions and lessons", () => {
   it("refuses a lesson without the history that justifies it", () => {
     const t = clock();
     // No prediction at all.
-    expect(() => t.append("muse", hypotheses())).toThrow(/unknown prediction/);
+    expect(() => t.append("ai", hypotheses())).toThrow(/unknown prediction/);
     // A prediction whose run has not happened.
-    t.append("muse", predict("holds"));
-    expect(() => t.append("muse", hypotheses())).toThrow(/no completed run/);
+    t.append("ai", predict("holds"));
+    expect(() => t.append("ai", hypotheses())).toThrow(/no completed run/);
     // A prediction for values other than the tree's.
     expect(() =>
-      t.append("muse", { ...predict("holds", "p2"), inputs: { ...inputs, s: 3 } }),
+      t.append("ai", { ...predict("holds", "p2"), inputs: { ...inputs, s: 3 } }),
     ).toThrow(/current values/);
     // A prediction that was right leaves nothing to explain.
-    t.append("muse", predict("fails", "p3"));
+    t.append("ai", predict("fails", "p3"));
     const spec = runNow(t);
-    expect(() => t.append("muse", hypotheses({ prediction: "p3", id: "h3" }))).toThrow(
-      /no surprise/,
-    );
-    t.append("muse", hypotheses());
+    expect(() => t.append("ai", hypotheses({ prediction: "p3", id: "h3" }))).toThrow(/no surprise/);
+    t.append("ai", hypotheses());
     // The test must be the registered one, and only once.
     expect(() =>
       t.append("engine", {
@@ -755,7 +750,7 @@ describe("predictions and lessons", () => {
 
   it("keeps each prediction's outcome when the experiment later runs other values", () => {
     const t = clock();
-    t.append("muse", predict("holds"));
+    t.append("ai", predict("holds"));
     const spec = runNow(t);
     t.confirm(seqOf(t, "kinetics"), runCheck(spec, t.scope()));
     t.append("person", { type: "set_param", name: "s", value: 2, source: "edit" });
@@ -765,11 +760,11 @@ describe("predictions and lessons", () => {
 
   it("refuses explanations that the test cannot tell apart", () => {
     const t = clock();
-    t.append("muse", predict("holds"));
+    t.append("ai", predict("holds"));
     runNow(t);
     const same = hypotheses();
     expect(() =>
-      t.append("muse", {
+      t.append("ai", {
         ...same,
         candidates: same.candidates.map((c) => ({ ...c, expect: "holds" as const })),
       }),
@@ -780,13 +775,13 @@ describe("predictions and lessons", () => {
     const t = clock();
     const spec = runNow(t);
     t.confirm(seqOf(t, "kinetics"), runCheck(spec, t.scope()));
-    t.append("muse", predict("holds"));
+    t.append("ai", predict("holds"));
     expect(t.predictions[0]?.blind).toBe(false);
     runNow(t);
     expect(t.calibration()).toMatchObject({ made: 0 });
     // At new values nothing was run yet: the next prediction is foresight.
     t.append("person", { type: "set_param", name: "s", value: 2, source: "edit" });
-    t.append("muse", { ...predict("holds", "p2"), inputs: { ...inputs, s: 2 } });
+    t.append("ai", { ...predict("holds", "p2"), inputs: { ...inputs, s: 2 } });
     expect(t.predictions[1]?.blind).toBe(true);
   });
 
@@ -800,32 +795,32 @@ describe("predictions and lessons", () => {
         check: { ...spec, value: "", op: "none", limit: "", unit: "" },
       }),
     ]);
-    t.append("muse", { type: "grow", under: "goal", nodes: twin, summary: "", usage });
+    t.append("ai", { type: "grow", under: "goal", nodes: twin, summary: "", usage });
     const run = runNow(t);
-    t.append("muse", { ...predict("holds"), node: "kinetics-twin" });
+    t.append("ai", { ...predict("holds"), node: "kinetics-twin" });
     expect(t.predictions[0]).toMatchObject({ blind: false, prior: seqOf(t, "kinetics") });
     // The registered test of a lesson also reveals its values.
-    t.append("muse", predict("holds", "p2"));
+    t.append("ai", predict("holds", "p2"));
     t.confirm(seqOf(t, "kinetics"), runCheck(run, t.scope()));
     t.append("engine", { type: "check", node: "kinetics", result: runCheck(run, t.scope()) });
     const h = { ...hypotheses(), prediction: "p2" };
-    expect(() => t.append("muse", h)).not.toThrow();
+    expect(() => t.append("ai", h)).not.toThrow();
     t.append("engine", {
       type: "test",
       hypotheses: "h1",
       result: runCheck(run, { ...inputs, s: 2 }),
     });
     t.append("person", { type: "set_param", name: "s", value: 2, source: "edit" });
-    t.append("muse", { ...predict("holds", "p3"), inputs: { ...inputs, s: 2 } });
+    t.append("ai", { ...predict("holds", "p3"), inputs: { ...inputs, s: 2 } });
     expect(t.predictions.find((p) => p.id === "p3")?.blind).toBe(false);
   });
 
   it("records what a lesson was learned under and stops calling it current when that changes", () => {
     const t = clock();
-    t.append("muse", predict("holds"));
+    t.append("ai", predict("holds"));
     const spec = runNow(t);
     t.confirm(seqOf(t, "kinetics"), runCheck(spec, t.scope()));
-    t.append("muse", hypotheses());
+    t.append("ai", hypotheses());
     const r = runCheck(spec, { ...inputs, s: 2 });
     t.append("engine", { type: "test", hypotheses: "h1", result: r });
     const l = t.lessons[0];
@@ -845,54 +840,6 @@ describe("predictions and lessons", () => {
   });
 });
 
-describe("cost", () => {
-  it("prices cached input apart from fresh input", () => {
-    expect(cost("muse-spark-1.3", 1e6, 0, 0)).toBeCloseTo(1.25);
-    expect(cost("muse-spark-1.3", 1e6, 1e6, 0)).toBeCloseTo(0.15);
-    expect(cost("muse-spark-1.3-contributor", 0, 0, 1e6)).toBeCloseTo(0.2);
-  });
-
-  it("reserves before sending and refuses beyond the cap", () => {
-    const l = new Ledger(0.1);
-    const a = l.reserve(0.06);
-    expect(() => l.reserve(0.06)).toThrow(BudgetExceeded);
-    l.settle(a, { ...usage, cost: 0.01 });
-    expect(l.total).toBeCloseTo(0.01);
-    const b = l.reserve(0.05);
-    // A request that may have been billed keeps its whole reservation.
-    l.fail(b);
-    expect(l.total).toBeCloseTo(0.06);
-    const c = l.reserve(0.01);
-    l.cancel(c);
-    expect(l.left).toBeCloseTo(0.04);
-  });
-
-  it("reserves from the API's own token count and the output ceiling", async () => {
-    const seen: string[] = [];
-    const fake = (url: string) => {
-      seen.push(url);
-      if (url.endsWith("/input_tokens")) {
-        return Promise.resolve(new Response(JSON.stringify({ input_tokens: 1000 })));
-      }
-      // The ledger must already hold the ceiling when the request goes out.
-      expect(ledger.left).toBeCloseTo(1 - cost("muse-spark-1.3", 1000, 0, 2000));
-      return Promise.resolve(new Response(null, { status: 401 }));
-    };
-    const ledger = new Ledger(1);
-    const muse = new Muse({ fetch: fake as typeof fetch }, ledger);
-    await expect(
-      muse.ask(
-        { instructions: "i", input: "x", mode: "standard", effort: "low", maxOutput: 2000 },
-        "t",
-        {},
-      ),
-    ).rejects.toThrow();
-    expect(seen.map((u) => u.split("/v1")[1])).toEqual(["/responses/input_tokens", "/responses"]);
-    // Refused before inference: nothing counts as spent.
-    expect(ledger.total).toBe(0);
-  });
-});
-
 describe("streamed array items", () => {
   it("yields each node as soon as it is complete, whatever the chunking", () => {
     const json = JSON.stringify({
@@ -908,36 +855,7 @@ describe("streamed array items", () => {
   });
 });
 
-describe("recorded sessions", () => {
-  const dir = new URL("../../../apps/web/public/examples/", import.meta.url);
-  for (const name of [
-    "cardboard-airliner",
-    "chemical-clock",
-    "period-reduction",
-    "recipe-search",
-  ]) {
-    it(`${name} reopens and its experiments reproduce`, async () => {
-      const { readFile } = await import("node:fs/promises");
-      const data = JSON.parse(await readFile(new URL(`${name}.json`, dir), "utf8")) as {
-        events: IdeaEvent[];
-      };
-      const t = IdeaTree.replay(data.events);
-      for (const run of t.runsToConfirm()) {
-        const spec = t.nodes.get(run.node)?.check;
-        if (!spec) throw new Error(`no check on ${run.node}`);
-        t.confirm(run.seq, runCheck(spec, { ...t.scope(), ...(run.result.inputs ?? {}) }));
-        expect(run.state).toBe("confirmed");
-      }
-      for (const l of t.lessons) expect(t.lessonState(l)).toBe("current");
-      // Every prediction was made before any run of its values, and nothing
-      // in a recording is stale under the current engine.
-      for (const p of t.predictions) expect(p.blind).toBe(true);
-      for (const n of t.nodes.values()) expect(t.status(n.id)).not.toBe("stale");
-    }, 60000);
-  }
-});
-
-describe("numbers Muse writes", () => {
+describe("numbers the AI writes", () => {
   it("flags a figure that is not in the data, and accepts honest rounding", () => {
     const data = [11.545, 7.447, 0.55014, 0.05, 2e-4];
     expect(unsupportedNumbers("the gap was 55% against a 5% tolerance", data)).toEqual([]);
@@ -955,9 +873,9 @@ describe("numbers Muse writes", () => {
 
   it("does not let an earlier answer make its own figure supported", () => {
     const t = new IdeaTree();
-    t.append("person", { type: "goal", text: "g", mode: "standard" });
+    t.append("person", { type: "goal", text: "g" });
     const nodes = t.admit("goal", [grown("beam", { params: [p("load", 5), p("strength", 3)] })]);
-    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    t.append("ai", { type: "grow", under: "goal", nodes, summary: "", usage });
     const chat = (answer: string) => ({
       type: "chat" as const,
       focus: "beam",
@@ -967,16 +885,16 @@ describe("numbers Muse writes", () => {
       asked: t.scope(),
       usage,
     });
-    t.append("muse", chat("It would need 4.2 MPa."));
-    t.append("muse", chat("As I said, 4.2 MPa."));
+    t.append("ai", chat("It would need 4.2 MPa."));
+    t.append("ai", chat("As I said, 4.2 MPa."));
     expect(t.chat.map((c) => c.unsupported)).toEqual([["4.2"], ["4.2"]]);
   });
 
   it("derives the flags from the log, so a recorded answer is checked on every replay", () => {
     const t = new IdeaTree();
-    t.append("person", { type: "goal", text: "g", mode: "standard" });
+    t.append("person", { type: "goal", text: "g" });
     const nodes = t.admit("goal", [grown("beam", { params: [p("load", 5), p("strength", 3)] })]);
-    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    t.append("ai", { type: "grow", under: "goal", nodes, summary: "", usage });
     const chat = (answer: string) => ({
       type: "chat" as const,
       focus: "beam",
@@ -986,19 +904,19 @@ describe("numbers Muse writes", () => {
       asked: t.scope(),
       usage,
     });
-    t.append("muse", chat("The load of 5 MPa exceeds 3 MPa."));
-    t.append("muse", chat("It would need 4.2 MPa."));
+    t.append("ai", chat("The load of 5 MPa exceeds 3 MPa."));
+    t.append("ai", chat("It would need 4.2 MPa."));
     const copy = IdeaTree.replay(structuredClone(t.events));
     expect(copy.chat.map((c) => c.unsupported)).toEqual([[], ["4.2"]]);
   });
 });
 
-describe("what Muse sees", () => {
+describe("what the AI sees", () => {
   const beam = () => {
     const t = new IdeaTree();
-    t.append("person", { type: "goal", text: "g", mode: "standard" });
+    t.append("person", { type: "goal", text: "g" });
     const nodes = t.admit("goal", [grown("beam", { params: [p("load", 5), p("strength", 3)] })]);
-    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    t.append("ai", { type: "grow", under: "goal", nodes, summary: "", usage });
     return t;
   };
 
@@ -1011,15 +929,15 @@ describe("what Muse sees", () => {
       check: { value, op: "<=", limit: "strength", unit: "MPa" },
       usage,
     });
-    expect(() => t.append("muse", formula("sigma"))).toThrow(/no parameter named sigma/);
-    expect(() => t.append("muse", { ...formula("load"), node: "goal" })).toThrow(/unknown root/);
-    t.append("muse", formula("load * 1.5"));
+    expect(() => t.append("ai", formula("sigma"))).toThrow(/no parameter named sigma/);
+    expect(() => t.append("ai", { ...formula("load"), node: "goal" })).toThrow(/unknown root/);
+    t.append("ai", formula("load * 1.5"));
     run(t, "beam");
     expect(t.status("beam")).toBe("broken");
     expect(t.nodes.get("beam")?.check?.description).toContain("sigma <= f_y");
   });
 
-  it("keeps what Muse found in its drawing and notes a redraw", () => {
+  it("keeps what the AI found in its drawing and notes a redraw", () => {
     const t = beam();
     const review = (ok: boolean) => ({
       type: "review" as const,
@@ -1028,21 +946,21 @@ describe("what Muse sees", () => {
       problems: ok ? [] : ["the load arrow points up"],
       usage,
     });
-    expect(() => t.append("muse", review(true))).toThrow(/no drawing/);
+    expect(() => t.append("ai", review(true))).toThrow(/no drawing/);
     const view = { type: "view" as const, node: "beam", title: "v", html: "<p></p>", usage };
-    t.append("muse", view);
-    t.append("muse", review(false));
+    t.append("ai", view);
+    t.append("ai", review(false));
     expect(t.reviews.get("beam")).toMatchObject({ ok: false, redrawn: false });
-    t.append("muse", view);
+    t.append("ai", view);
     expect(t.reviews.has("beam")).toBe(false);
-    t.append("muse", review(true));
+    t.append("ai", review(true));
     expect(t.reviews.get("beam")).toMatchObject({ ok: true, redrawn: true });
   });
 });
 
 const clockWithoutRecipe = () => {
   const t = new IdeaTree();
-  t.append("person", { type: "goal", text: "clock", mode: "standard" });
+  t.append("person", { type: "goal", text: "clock" });
   const nodes = t.admit("goal", [
     grown("clock", {
       params: [
@@ -1063,10 +981,10 @@ const clockWithoutRecipe = () => {
       },
     }),
   ]);
-  t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+  t.append("ai", { type: "grow", under: "goal", nodes, summary: "", usage });
   const spec = t.nodes.get("clock")?.check;
   if (!spec) throw new Error("missing");
-  t.append("muse", {
+  t.append("ai", {
     type: "predict",
     id: "p1",
     node: "clock",
@@ -1084,7 +1002,7 @@ const clockWithoutRecipe = () => {
 describe("a real recipe in the tree", () => {
   const recipeTree = () => {
     const t = new IdeaTree();
-    t.append("person", { type: "goal", text: "A BZ clock", mode: "standard" });
+    t.append("person", { type: "goal", text: "A BZ clock" });
     const nodes = t.admit("goal", [
       grown("clock", {
         params: [
@@ -1105,7 +1023,7 @@ describe("a real recipe in the tree", () => {
         },
       }),
     ]);
-    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    t.append("ai", { type: "grow", under: "goal", nodes, summary: "", usage });
     return t;
   };
 
@@ -1114,7 +1032,7 @@ describe("a real recipe in the tree", () => {
     const spec = t.nodes.get("clock")?.check;
     if (!spec) throw new Error("missing");
     const inputs = Object.fromEntries(SIM_PARAMS.map((k) => [k, t.scope()[k] ?? NaN]));
-    t.append("muse", {
+    t.append("ai", {
       type: "predict",
       id: "p1",
       node: "clock",
@@ -1138,7 +1056,7 @@ describe("a real recipe in the tree", () => {
       open: "",
       usage,
     });
-    t.append("muse", hyp("malonic_acid", 0.02, "h1"));
+    t.append("ai", hyp("malonic_acid", 0.02, "h1"));
     const l = t.lessons[0];
     if (!l) throw new Error("no lesson");
     expect(l.intervention).toBe("recipe");
@@ -1156,7 +1074,7 @@ describe("a real recipe in the tree", () => {
       }),
     ).toThrow(/registered/);
     t.append("engine", { type: "test", hypotheses: "h1", result: runCheck(spec, want) });
-    // A value Muse gives for something the recipe sets is set aside, not used.
+    // A value the AI gives for something the recipe sets is set aside, not used.
     const more = t.admit("goal", [
       grown("tuning", { params: [{ ...p("eps", 0.5, "assumed", ""), kind: "external" }] }),
     ]);
@@ -1165,12 +1083,12 @@ describe("a real recipe in the tree", () => {
     expect(more[0]?.suggestions).toEqual([]);
     // Without a recipe, a recipe change is refused; with one, a model change is labelled.
     const plain = clockWithoutRecipe();
-    expect(() => plain.append("muse", hyp("malonic_acid", 0.1, "h2"))).toThrow(/no recipe/);
+    expect(() => plain.append("ai", hyp("malonic_acid", 0.1, "h2"))).toThrow(/no recipe/);
   }, 60000);
 
   it("derives the model from the recipe and gives the period in seconds", () => {
     const t = new IdeaTree();
-    t.append("person", { type: "goal", text: "A BZ clock from a recipe", mode: "standard" });
+    t.append("person", { type: "goal", text: "A BZ clock from a recipe" });
     const nodes = t.admit("goal", [
       grown("clock", {
         params: [
@@ -1202,7 +1120,7 @@ describe("a real recipe in the tree", () => {
         },
       }),
     ]);
-    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    t.append("ai", { type: "grow", under: "goal", nodes, summary: "", usage });
     expect(t.nodes.get("minute")?.basis).toEqual(["clock"]);
     expect(t.derived().time_scale_s).toBeCloseTo(50);
     expect(t.scope().eps_prime).toBeCloseTo(1.98e-5, 7);
@@ -1245,10 +1163,10 @@ describe("a real recipe in the tree", () => {
 describe("the audit of refusals", () => {
   it("keeps what the engine refused beside the log, without changing its state", () => {
     const t = new IdeaTree();
-    t.append("person", { type: "goal", text: "g", mode: "standard" });
+    t.append("person", { type: "goal", text: "g" });
     const before = t.events.length;
     expect(() =>
-      t.append("muse", {
+      t.append("ai", {
         type: "hypotheses",
         id: "h1",
         prediction: "nope",
@@ -1260,7 +1178,7 @@ describe("the audit of refusals", () => {
     ).toThrow(/unknown prediction/);
     expect(t.events.length).toBe(before);
     expect(t.refused).toEqual([
-      { at: before, actor: "muse", what: "hypotheses", reason: "unknown prediction nope" },
+      { at: before, actor: "ai", what: "hypotheses", reason: "unknown prediction nope" },
     ]);
     // A root off the protocol is dropped and said so.
     t.admit("goal", [{ ...grown("bad"), axis: "nowhere" }]);
@@ -1271,7 +1189,7 @@ describe("the audit of refusals", () => {
 describe("routed requests and text written for older values", () => {
   const tree = () => {
     const t = new IdeaTree();
-    t.append("person", { type: "goal", text: "A vessel", mode: "standard" });
+    t.append("person", { type: "goal", text: "A vessel" });
     const nodes = t.admit("goal", [
       grown("skin", {
         statement: "At 55 MPa the skin holds against a strength of 12 MPa.",
@@ -1286,7 +1204,7 @@ describe("routed requests and text written for older values", () => {
       }),
       grown("cost"),
     ]);
-    t.append("muse", { type: "grow", under: "goal", nodes, summary: "", usage });
+    t.append("ai", { type: "grow", under: "goal", nodes, summary: "", usage });
     return t;
   };
 
@@ -1304,16 +1222,16 @@ describe("routed requests and text written for older values", () => {
   it("keeps a request's read only with roots and parameters that exist", () => {
     const t = tree();
     const read = { type: "route" as const, question: "q", focus: "cost", why: "", usage };
-    t.append("muse", { ...read, intent: "answer", nodes: ["skin"], values: {} });
+    t.append("ai", { ...read, intent: "answer", nodes: ["skin"], values: {} });
     expect(t.routes).toHaveLength(1);
     expect(() =>
-      t.append("muse", { ...read, intent: "answer", nodes: ["nowhere"], values: {} }),
+      t.append("ai", { ...read, intent: "answer", nodes: ["nowhere"], values: {} }),
     ).toThrow(/unknown node/);
     expect(() =>
-      t.append("muse", { ...read, intent: "run", nodes: [], values: { made_up: 1 } }),
+      t.append("ai", { ...read, intent: "run", nodes: [], values: { made_up: 1 } }),
     ).toThrow(/no parameter/);
     expect(() =>
-      t.append("muse", { ...read, intent: "run", nodes: [], values: { strength: -1 } }),
+      t.append("ai", { ...read, intent: "run", nodes: [], values: { strength: -1 } }),
     ).toThrow(/no parameter/);
   });
 
@@ -1328,7 +1246,7 @@ describe("routed requests and text written for older values", () => {
       asked: t.scope(),
       usage,
     };
-    t.append("muse", { ...chat, consulted: ["skin"] });
+    t.append("ai", { ...chat, consulted: ["skin"] });
     expect(t.chat[0]?.unsupported).toEqual([]);
     expect(IdeaTree.replay(t.events).chat[0]?.unsupported).toEqual([]);
   });

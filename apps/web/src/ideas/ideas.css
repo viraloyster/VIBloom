@@ -132,13 +132,6 @@ button:disabled {
   text-align: center;
 }
 
-.hero-crown {
-  width: 220px;
-  opacity: 0.9;
-  filter: drop-shadow(0 18px 40px rgb(46 230 197 / 18%));
-  animation: breathe 7s ease-in-out infinite;
-}
-
 @keyframes breathe {
   50% {
     transform: translateY(-4px) scale(1.015);
@@ -529,6 +522,10 @@ h1 {
   transition: height 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
+.chat[hidden] {
+  display: none;
+}
+
 .chat.open {
   height: 46vh;
 }
@@ -641,10 +638,6 @@ h1 {
   opacity: 0.3;
 }
 
-.crown {
-  opacity: 0.95;
-}
-
 .mesh {
   fill: none;
   stroke: #7d63ff;
@@ -658,20 +651,6 @@ h1 {
   stroke: rgb(155 130 255 / 35%);
   stroke-width: 1;
   filter: drop-shadow(0 2px 6px rgb(155 130 255 / 30%));
-}
-
-.trunk .furrow {
-  fill: none;
-  stroke: rgb(8 5 3 / 55%);
-  stroke-width: 1.6;
-  stroke-linecap: round;
-}
-
-.trunk .bark-light {
-  fill: none;
-  stroke: rgb(255 214 170 / 14%);
-  stroke-width: 2.4;
-  stroke-linecap: round;
 }
 
 /* A root glows violet; colour marks only what matters: a broken or weak
@@ -1245,7 +1224,7 @@ h1 {
   color: var(--holds);
 }
 
-/* Chat in the familiar form: the person on the right, Muse on the left. */
+/* Chat in the familiar form: the person on the right, the AI on the left. */
 .chat-log {
   gap: 14px;
   padding: 4px 16px 10px;
@@ -1275,7 +1254,7 @@ h1 {
   border-bottom-right-radius: 4px;
 }
 
-.msg.muse {
+.msg.ai {
   justify-self: start;
   background: rgb(255 255 255 / 4%);
   border: 1px solid var(--edge);
@@ -1350,7 +1329,7 @@ h1 {
   font-size: 14px;
 }
 
-/* The seed: pulsing rings while Muse works on the first roots. */
+/* The seed: pulsing rings while the AI works on the first roots. */
 .seed .kernel {
   fill: #c9a26b;
   stroke: #5a3d22;
@@ -1897,7 +1876,7 @@ h1 {
   box-shadow: 0 0 10px var(--actor, transparent);
 }
 
-.step.muse {
+.step.ai {
   --actor: #b49cff;
 }
 

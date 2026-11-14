@@ -1,6 +1,6 @@
 {
   "name": "vibloom",
-  "description": "A research instrument for chemistry where Muse Spark predicts experiments before they run, a stiff solver settles them, and every step is kept in a replayable record.",
+  "description": "A layer of assumptions, invariants and intentions that tests, runs and AI agents are checked against.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -18,16 +18,14 @@
   },
   "scripts": {
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run check:text",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p apps/api --noEmit && tsc -p apps/web --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p apps/web --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check:text": "node scripts/check-text.mjs",
     "test": "vitest run",
     "build": "npm run build -w @vibloom/web",
-    "dev": "npm run dev -w @vibloom/web",
-    "verify": "vite-node packages/ideas/eval/verify.ts",
-    "dataset": "vite-node packages/ideas/eval/build-dataset.ts"
+    "dev": "npm run dev -w @vibloom/web"
   },
   "prettier": {
     "printWidth": 100

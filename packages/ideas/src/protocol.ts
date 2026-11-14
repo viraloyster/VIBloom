@@ -15,7 +15,7 @@ export const AXES = [
   "methods",
 ] as const;
 
-const RULES = `You are Muse inside VIBloom, an engine that decomposes any goal into the
+const RULES = `You are the assistant inside VIBloom, an engine that decomposes any goal into the
 assumptions it rests on, down to first principles, so each one can be tested.
 
 Protocol (follow it exactly; it keeps trees comparable between people):
@@ -104,7 +104,7 @@ Task: expand ONE node of an existing tree. Return 2 to 5 assumptions that this
 node directly rests on, one level deeper, moving toward bedrock. If the node is
 already bedrock, return what it would take to question it.`;
 
-export const REPAIR = `You are Muse inside VIBloom. Checks you wrote failed to evaluate. For each,
+export const REPAIR = `You are the assistant inside VIBloom. Checks you wrote failed to evaluate. For each,
 return corrected value and limit expressions: arithmetic over the parameter
 names listed (+ - * / ^, parentheses, sqrt abs min max log log10 exp pow sin cos
 tan, pi), evaluating to finite numbers. Keep the meaning and the comparison.
@@ -112,7 +112,7 @@ Fix only the syntax: use exactly the same parameter names as the original and
 keep its meaning; never change which quantities are compared. If a fix is
 impossible without changing the meaning, return both as "".`;
 
-export const VIEW = `You are Muse inside VIBloom. Draw an illustration for the monitor of the
+export const VIEW = `You are the assistant inside VIBloom. Draw an illustration for the monitor of the
 MECHANISM behind ONE assumption of a person's project: what physically or
 logically happens (forces in a structure, a substance moving through a plant,
 a quantity accumulating), so they understand why it holds or fails.
@@ -132,7 +132,7 @@ the input under "data"), once at start; never type them into the code. Fill
 strokes and text on dark, subtle motion. Under 12000 characters.
 title: a few words naming the mechanism.`;
 
-export const REVIEW = `You are Muse inside VIBloom. The image is what the monitor shows right now:
+export const REVIEW = `You are the assistant inside VIBloom. The image is what the monitor shows right now:
 the illustration you drew for one assumption. The input has the data the
 drawing was given. Look at the picture itself, not at what the code meant to
 do. ok is false only for a problem a person would see: the mechanism is not
@@ -150,7 +150,7 @@ export const REVIEW_SCHEMA = {
   },
 } as const;
 
-export const READ_SKETCH = `You are Muse inside VIBloom. The image is an idea a person wrote or drew by
+export const READ_SKETCH = `You are the assistant inside VIBloom. The image is an idea a person wrote or drew by
 hand: words, a sketch, formulas or functions. Transcribe it; do not solve,
 judge or extend it. goal: the idea as one or two plain sentences, in the
 person's words where they are legible. formulas: each formula or function
@@ -176,7 +176,7 @@ export const READ_SKETCH_SCHEMA = {
   },
 } as const;
 
-export const READ_FORMULA = `You are Muse inside VIBloom. The image is a formula a person wrote by hand
+export const READ_FORMULA = `You are the assistant inside VIBloom. The image is a formula a person wrote by hand
 for one assumption of their tree; the input lists the assumption and the
 parameters that exist, with units. reading: the formula exactly as written,
 in plain ASCII. Then express it as a check VIBloom can compute: value and
@@ -208,7 +208,7 @@ export const VIEW_SCHEMA = {
   properties: { title: { type: "string" }, html: { type: "string" } },
 } as const;
 
-export const CHAT = `You are Muse inside VIBloom, in a chat beside a person's tree of
+export const CHAT = `You are the assistant inside VIBloom, in a chat beside a person's tree of
 assumptions. The input gives the root they have selected (with its parents,
 children, values, the engine's result and where that result would flip), the
 roots chosen for this question in full (branches), the runs of those roots
@@ -229,7 +229,7 @@ and holds no run at those values. A root's text may quote values
 from when it was written (written_for); the verdict is for today's values.`;
 
 // The first read of anything the person types: what it needs and what to do.
-export const ROUTE = `You are Muse inside VIBloom, reading a person's request before
+export const ROUTE = `You are the assistant inside VIBloom, reading a person's request before
 anything is done with it. The input gives the request, the root they have
 selected, an index of the tree's roots and an index of every run.
 
@@ -408,7 +408,7 @@ export interface GrownNode {
   basis: string[];
 }
 
-export const PREDICT = `You are Muse inside VIBloom. Before VIBloom runs an Oregonator experiment,
+export const PREDICT = `You are the assistant inside VIBloom. Before VIBloom runs an Oregonator experiment,
 commit to a prediction: will the assumption hold or fail at these values?
 Use the lessons given (each with its scope and whether it is still current)
 when they apply, and list the ids of those you used in uses. confidence is
@@ -426,7 +426,7 @@ export const PREDICT_SCHEMA = {
   },
 } as const;
 
-export const DIAGNOSE = `You are Muse inside VIBloom. Your prediction for an Oregonator experiment was
+export const DIAGNOSE = `You are the assistant inside VIBloom. Your prediction for an Oregonator experiment was
 wrong. Propose exactly two different explanations for why, each with the
 scope where it would apply and what it expects in ONE discriminating test:
 the same values with a single parameter changed to a new positive value.

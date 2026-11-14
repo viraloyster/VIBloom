@@ -1,11 +1,11 @@
 // The process behind a tree, read from its log: who did what, in order.
-// Muse proposes, predicts and explains; the engine computes, runs, refuses and
+// The AI proposes, predicts and explains; the engine computes, runs, refuses and
 // decides; the person asks and changes values. Every step comes from a
 // recorded event (or a recorded refusal), never from what the screen shows.
 
 import type { CheckResult, IdeaEvent, IdeaTree, Usage } from "@vibloom/ideas";
 
-export type Actor = "muse" | "engine" | "person";
+export type Actor = "ai" | "engine" | "person";
 
 export interface Step {
   seq: number;
@@ -37,7 +37,6 @@ function usage(u: Usage): [string, string][] {
   return [
     ["Model", u.model],
     ["Tokens", `${String(u.input)} in (${String(u.cached)} cached), ${String(u.output)} out`],
-    ["Cost", `$${u.cost.toFixed(4)}`],
   ];
 }
 
@@ -105,7 +104,7 @@ export function steps(tree: IdeaTree): Step[] {
           actor: "person",
           stage: "Question",
           title: b.text,
-          ...(b.sketch ? { result: "written by hand; Muse read it" } : {}),
+          ...(b.sketch ? { result: "written by hand; the AI read it" } : {}),
           nodes: ["goal"],
           detail: [link(e)],
         });
@@ -116,9 +115,9 @@ export function steps(tree: IdeaTree): Step[] {
         const checks = b.nodes.filter((n) => n.check).length;
         out.push({
           seq: e.seq,
-          actor: "muse",
+          actor: "ai",
           stage: b.under === "goal" ? "Decomposition" : "Opened a root",
-          title: `Muse grew ${String(b.nodes.length)} roots${b.under === "goal" ? "" : ` under ${title(b.under)}`}, ${String(checks)} with a check or an experiment`,
+          title: `The AI grew ${String(b.nodes.length)} roots${b.under === "goal" ? "" : ` under ${title(b.under)}`}, ${String(checks)} with a check or an experiment`,
           result: b.summary.slice(0, 220),
           nodes: b.nodes.map((n) => n.id),
           detail: [
@@ -155,7 +154,7 @@ export function steps(tree: IdeaTree): Step[] {
               ...(earlier && !settles
                 ? [
                     {
-                      text: `Muse not asked: ${earlier.purpose === "map" ? "the recipe map" : "run"} #${String(earlier.seq)} already settled it`,
+                      text: `The AI not asked: ${earlier.purpose === "map" ? "the recipe map" : "run"} #${String(earlier.seq)} already settled it`,
                       tone: "plain" as const,
                     },
                   ]
@@ -181,8 +180,8 @@ export function steps(tree: IdeaTree): Step[] {
               seq: e.seq,
               actor: "engine",
               stage: "Discrepancy",
-              title: `Muse expected "${settles.expect}" (${pct(settles.confidence)}); the run ${verdict}`,
-              result: "A surprise: Muse must now explain it before anything is learned.",
+              title: `The AI expected "${settles.expect}" (${pct(settles.confidence)}); the run ${verdict}`,
+              result: "A surprise: The AI must now explain it before anything is learned.",
               tone: "fail",
               nodes: [b.node],
               detail: [["Prediction", settles.id], link(e)],
@@ -240,23 +239,23 @@ export function steps(tree: IdeaTree): Step[] {
         const p = tree.predictions.find((x) => x.id === b.id);
         out.push({
           seq: e.seq,
-          actor: "muse",
+          actor: "ai",
           stage: "Prediction",
-          title: `Before the run, Muse committed: it ${b.expect} (${pct(Math.min(0.99, Math.max(0.5, b.confidence)))})`,
+          title: `Before the run, the AI committed: it ${b.expect} (${pct(Math.min(0.99, Math.max(0.5, b.confidence)))})`,
           result: b.reason,
           ...(p && !p.blind ? { tone: "warn" as const } : {}),
           badges: p?.blind
             ? [{ text: "Blind: the project held no result of this experiment yet", tone: "ok" }]
             : [
                 {
-                  text: `Not blind: the result was already in the log${p?.prior !== undefined ? ` (#${String(p.prior)})` : ""}, though not in Muse's input; not scored`,
+                  text: `Not blind: the result was already in the log${p?.prior !== undefined ? ` (#${String(p.prior)})` : ""}, though not in the AI's input; not scored`,
                   tone: "warn",
                 },
               ],
           nodes: [b.node],
           detail: [
             [
-              "Muse was shown",
+              "The AI was shown",
               "the assumption, its question and tolerance, the values and earlier lessons; never a result",
             ],
             [
@@ -276,7 +275,7 @@ export function steps(tree: IdeaTree): Step[] {
         const l = tree.lessons.find((x) => x.id === b.id);
         out.push({
           seq: e.seq,
-          actor: "muse",
+          actor: "ai",
           stage: "Hypotheses",
           title: "Two explanations, and the one run that tells them apart, written before it runs",
           result: b.candidates
@@ -365,7 +364,7 @@ export function steps(tree: IdeaTree): Step[] {
       case "view":
         out.push({
           seq: e.seq,
-          actor: "muse",
+          actor: "ai",
           stage: "Drawing",
           title: `Drew the mechanism of "${title(b.node)}": ${b.title}`,
           nodes: [b.node],
@@ -379,7 +378,7 @@ export function steps(tree: IdeaTree): Step[] {
       case "review":
         out.push({
           seq: e.seq,
-          actor: "muse",
+          actor: "ai",
           stage: "Self-check (vision)",
           title: `Looked at a picture of its own drawing of "${title(b.node)}"`,
           result: b.ok ? "matches the data" : `found: ${b.problems.join("; ")}`,
@@ -391,7 +390,7 @@ export function steps(tree: IdeaTree): Step[] {
       case "formula":
         out.push({
           seq: e.seq,
-          actor: "muse",
+          actor: "ai",
           stage: "Handwriting (vision)",
           title: `Read a handwritten formula for "${title(b.node)}"`,
           result: `${b.reading} -> ${b.check.value} ${b.check.op} ${b.check.limit}`,
@@ -406,7 +405,7 @@ export function steps(tree: IdeaTree): Step[] {
       case "repair":
         out.push({
           seq: e.seq,
-          actor: "muse",
+          actor: "ai",
           stage: "Repair",
           title: `Fixed ${String(b.fixes.length)} formula(s) that did not evaluate`,
           nodes: b.fixes.map((f) => f.node),
@@ -421,7 +420,7 @@ export function steps(tree: IdeaTree): Step[] {
         const c = tree.chat.find((x) => x.question === b.question && x.answer === b.answer);
         out.push({
           seq: e.seq,
-          actor: "muse",
+          actor: "ai",
           stage: "Chat",
           title: b.question,
           result: b.answer,
@@ -450,10 +449,10 @@ export function steps(tree: IdeaTree): Step[] {
         }[b.intent];
         out.push({
           seq: e.seq,
-          actor: "muse",
+          actor: "ai",
           stage: "Request read",
           title: b.why || b.question,
-          result: `Muse chose to ${did}${b.nodes.length ? `, consulting ${b.nodes.map(title).join(", ")}` : ""}.`,
+          result: `The AI chose to ${did}${b.nodes.length ? `, consulting ${b.nodes.map(title).join(", ")}` : ""}.`,
           nodes: b.nodes,
           detail: [
             ["Request", b.question],

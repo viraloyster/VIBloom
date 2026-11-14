@@ -8,7 +8,7 @@ import type { IdeaEvent } from "./types";
 import type { GrownNode } from "./protocol";
 
 const session = async () => {
-  const url = new URL("../../../apps/web/public/examples/chemical-clock.json", import.meta.url);
+  const url = new URL("./fixtures/chemical-clock.json", import.meta.url);
   const data = JSON.parse(await readFile(url, "utf8")) as { events: IdeaEvent[] };
   return IdeaTree.replay(data.events);
 };
@@ -58,7 +58,7 @@ describe("the recipe map", () => {
     const closer = recenter(setup, { ...setup.recipe, bromate: 0.24 });
     expect(closer.span).toBeCloseTo(Math.sqrt(10));
     expect(closer.axes.bromate[3]).toBe(0.24);
-    // A limit Muse could write: stay within 0.1 M bromate.
+    // A limit the AI could write: stay within 0.1 M bromate.
     const limit: GrownNode = {
       key: "bromate-limit",
       title: "Bromate stays low",
@@ -73,12 +73,12 @@ describe("the recipe map", () => {
       basis: [],
     };
     const nodes = t.admit("goal", [limit]);
-    t.append("muse", {
+    t.append("ai", {
       type: "grow",
       under: "goal",
       nodes,
       summary: "",
-      usage: { model: "m", input: 0, cached: 0, output: 0, reasoning: 0, cost: 0 },
+      usage: { model: "m", input: 0, cached: 0, output: 0, reasoning: 0 },
     });
     const s2 = mapSetup(t);
     if (typeof s2 === "string") throw new Error(s2);
@@ -101,10 +101,10 @@ describe("the recipe map", () => {
     const inputs = Object.fromEntries(
       ["s", "q", "eps", "eps_prime"].map((k) => [k, t.scope()[k] ?? NaN]),
     );
-    // The app runs it without asking Muse: a run at these values settles it.
+    // The app runs it without asking the AI: a run at these values settles it.
     // Here the first is the recorded lesson's test, which ran 0.3 M bromate.
     expect(t.settledBy("full-oscillates", inputs)?.purpose).toBe("test");
-    t.append("muse", {
+    t.append("ai", {
       type: "predict",
       id: "p-map",
       node: "full-oscillates",
@@ -113,7 +113,7 @@ describe("the recipe map", () => {
       confidence: 0.8,
       reason: "",
       uses: [],
-      usage: { model: "m", input: 0, cached: 0, output: 0, reasoning: 0, cost: 0 },
+      usage: { model: "m", input: 0, cached: 0, output: 0, reasoning: 0 },
     });
     expect(t.predictions.find((p) => p.id === "p-map")?.blind).toBe(false);
     expect(runCheck(full, t.scope())).toBeDefined();
@@ -227,7 +227,7 @@ describe("the runs a routed answer is given", () => {
     const scope = t.scope();
     const inputs = Object.fromEntries(SIM_PARAMS.map((k) => [k, scope[k] ?? NaN]));
     expect(t.settledBy(id, inputs)).toEqual({ seq: mapSeq, purpose: "map" });
-    t.append("muse", {
+    t.append("ai", {
       type: "predict",
       id: "after-map",
       node: id,
@@ -236,7 +236,7 @@ describe("the runs a routed answer is given", () => {
       confidence: 0.7,
       reason: "",
       uses: [],
-      usage: { model: "m", input: 0, cached: 0, output: 0, reasoning: 0, cost: 0 },
+      usage: { model: "m", input: 0, cached: 0, output: 0, reasoning: 0 },
     });
     expect(t.predictions.find((p) => p.id === "after-map")?.blind).toBe(false);
   }, 60000);

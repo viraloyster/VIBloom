@@ -28,8 +28,8 @@ Three validations are kept separate:
 
 ## Reproduction in the browser
 
-Any recorded run can be recomputed in the reader's browser ("Verify it
-yourself"), off the main thread. The outcome must match and periods must agree
+Any recorded run can be recomputed in the reader's browser, off the main
+thread. The outcome must match and periods must agree
 within a relative 1e-6: JavaScript engines differ in the last digits of `exp`
 and `log`, so bit-for-bit equality across engines is not expected (a run
 recorded in Node and recomputed in Chromium differed by about 1e-7).
@@ -39,17 +39,16 @@ recorded in Node and recomputed in Chromium differed by about 1e-7).
 An Oregonator experiment attached to a root is recorded with its inputs and
 counts only after the viewer's browser has re-run it with those same inputs
 and reproduced it: the same verdict exactly, and periods within a relative
-1e-4. Measured on the recorded chemical clock, Node 22 and Chromium gave
-periods differing by 1.8e-7 (full model) and 2.7e-6 (reduced model); at the
-recipe of the current recorded session (eps about 0.1) the period gap
-differed by 1.5e-5 relative. The tolerance is set well above those and far
+1e-4. Measured on a chemical clock session, Node 22 and Chromium gave
+periods differing by 1.8e-7 (full model) and 2.7e-6 (reduced model); at eps
+about 0.1 the period gap differed by 1.5e-5 relative. The tolerance is set well above those and far
 below the 5% a claim typically allows. A result that does not reproduce is shown as such, never as holding.
 
-A recorded recipe map is checked by `npm run verify` cell by cell: every
-verdict must match exactly, and periods and gaps within 0.5% relative. In the
-recorded map session, 11 of 98 cells differed between Chromium and Node by
-more than 1e-4, all far from agreement (gaps of 9% to 153%), the largest by
-9e-4 relative in the gap; none changed a verdict.
+A recorded recipe map is checked cell by cell by `replayMap`
+(`packages/ideas/src/map.ts`): every verdict must match exactly, and periods
+and gaps within 0.5% relative. In a 98-cell map, 11 cells differed between
+Chromium and Node by more than 1e-4, all far from agreement (gaps of 9% to
+153%), the largest by 9e-4 relative in the gap; none changed a verdict.
 
 ## Twin beakers
 
@@ -80,17 +79,3 @@ The test suite must fail for each of these degenerate implementations:
 - a write gate that rejects every command;
 - a source parser that always abstains;
 - a classifier that always answers inconclusive.
-
-## Evaluations
-
-Each evaluation reports its denominators, its cases and its limits.
-
-| Evaluation     | Compares                                                                                                                                                                  |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Search         | Halton with transition refinement vs uniform sampling, same budget, counting all solver work                                                                              |
-| Context        | Layered context vs full context, counting expansions                                                                                                                      |
-| Evidence check | Strict parser vs Muse Spark review on messy sources                                                                                                                       |
-| Agent          | Adaptive Muse Spark investigation vs a fixed policy with the same tools, domain and budget: distinct counterexamples, valid decisions, inconclusive points, cost and time |
-
-Results are added here as each evaluation lands, with the command that
-reproduces them from a clean checkout.

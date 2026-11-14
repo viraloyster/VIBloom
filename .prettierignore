@@ -1,6 +1,5 @@
 package-lock.json
 packages/chem/fixtures/
-docs/eval/dataset/protocols.json
 # Written by the TypeScript guard; kept byte for byte.
 crates/*/tests/fixtures/
 target/

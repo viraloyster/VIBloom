@@ -1,4 +1,4 @@
-// A heuristic detector on what Muse writes: every number in its prose should
+// A heuristic detector on what the AI writes: every number in its prose should
 // come from the data it was given. The prompt asks for that; this flags a
 // figure that only sounds measured. It is a detector, not a proof: a number
 // can be in the data by coincidence, and words carry no numbers.

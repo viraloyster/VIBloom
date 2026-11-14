@@ -16,7 +16,6 @@ import type {
   IdeaNode,
   Lesson,
   LessonIdentity,
-  Mode,
   Outcome,
   Prediction,
   Param,
@@ -52,15 +51,15 @@ export class IdeaTree {
   readonly mapCells: { seq: number; node: string; inputs: Record<string, number> }[] = [];
   // What the engine refused, in order; outside the hash chain on purpose.
   readonly refused: Refusal[] = [];
-  // Visuals Muse designed for a node, latest last.
+  // Visuals the AI designed for a node, latest last.
   readonly views = new Map<string, { title: string; html: string }>();
-  // What Muse found when it looked at its latest drawing of a node.
+  // What the AI found when it looked at its latest drawing of a node.
   readonly reviews = new Map<string, { ok: boolean; problems: string[]; redrawn: boolean }>();
   // Nodes whose drawing was redrawn after a review found problems.
   readonly redrawn = new Set<string>();
   // The handwriting each handwritten formula was read from.
   readonly handwriting = new Map<string, string>();
-  // Each root's own values when Muse wrote it, so text written for an older
+  // Each root's own values when the AI wrote it, so text written for an older
   // recipe can be told apart from a verdict about the current one.
   readonly written = new Map<string, Record<string, number>>();
   readonly chat: {
@@ -74,7 +73,6 @@ export class IdeaTree {
     unsupported: string[];
   }[] = [];
   goal = "";
-  mode: Mode = "standard";
   sketch: string | undefined;
 
   get head() {
@@ -109,7 +107,6 @@ export class IdeaTree {
       predictions: structuredClone(this.predictions),
       runs: structuredClone(this.runs),
       goal: this.goal,
-      mode: this.mode,
     };
     try {
       this.apply(body);
@@ -134,7 +131,6 @@ export class IdeaTree {
       this.predictions.splice(0, Infinity, ...before.predictions);
       this.runs.splice(0, Infinity, ...before.runs);
       this.goal = before.goal;
-      this.mode = before.mode;
       throw e;
     }
     const seq = this.events.length;
@@ -149,7 +145,6 @@ export class IdeaTree {
       case "goal":
         if (this.events.length > 0) throw new Error("the goal is set once");
         this.goal = b.text;
-        this.mode = b.mode;
         if (b.sketch?.startsWith("data:image/jpeg;base64,") && b.sketch.length < 400_000) {
           this.sketch = b.sketch;
         }
@@ -360,7 +355,7 @@ export class IdeaTree {
               n.statement,
               n.check.tolerance,
               this.lessonsForModel(b.node),
-              // The recipe the values come from, which Muse is shown too.
+              // The recipe the values come from, which the AI is shown too.
               Object.keys(this.derived()).length
                 ? [RECIPE_PARAMS.map((k) => this.scope()[k]), this.derived(), RECIPE_RELATIONS]
                 : [],
@@ -716,7 +711,7 @@ export class IdeaTree {
     const given = new Map<string, string[]>();
     for (const g of grown.slice(0, 8)) {
       if (!isGrown(g)) {
-        this.refuse("engine", "node", `a root Muse wrote did not follow the protocol: ${g.key}`);
+        this.refuse("engine", "node", `a root the AI wrote did not follow the protocol: ${g.key}`);
         continue;
       }
       const slug =
@@ -834,7 +829,7 @@ export class IdeaTree {
       });
     }
     // With a recipe in the tree, q, eps and eps_prime follow from it: a value
-    // Muse also gave for them would silently replace the derivation, so it is
+    // The AI also gave for them would silently replace the derivation, so it is
     // set aside and said so.
     const named = new Set([
       ...Object.keys(this.scope()),
@@ -1014,7 +1009,7 @@ export class IdeaTree {
       });
   }
 
-  // Every number Muse was shown when answering about a node: the tree's
+  // Every number the AI was shown when answering about a node: the tree's
   // values and results, where the focus check would flip, its lessons and the
   // question itself.
   private shown(focus: string, question: string, consulted?: string[]): number[] {
@@ -1035,7 +1030,7 @@ export class IdeaTree {
       flips,
       [focus, ...(consulted ?? [])].map((id) => this.lessonsForModel(id)),
       consulted ? consulted.map((id) => this.written.get(id)) : [],
-      // Muse's own earlier prose is not a source: a figure it made up must
+      // The AI's own earlier prose is not a source: a figure it made up must
       // not become supported by being repeated. The person's words are.
       this.goal,
       [...this.nodes.values()].map((x) => [x.params, x.check]),
@@ -1108,7 +1103,7 @@ export class IdeaTree {
     };
   }
 
-  // The values a root's own text may quote that have changed since Muse
+  // The values a root's own text may quote that have changed since the AI
   // wrote it: the text is about those, the verdict about today's.
   staleText(id: string): { name: string; then: number; now: number }[] {
     const n = this.nodes.get(id);

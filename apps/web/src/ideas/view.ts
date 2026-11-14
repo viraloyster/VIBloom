@@ -1,15 +1,14 @@
-// The idea tree drawn as roots under a guanacaste crown. Each root grows in
+// The idea tree drawn as roots under the ground line. Each root grows in
 // when its node is created; colours come only from the status the code derives.
 
 import type { IdeaNode, IdeaTree, Status } from "@vibloom/ideas";
 import { el, svg } from "../dom";
-import { rng } from "../canopy";
-import { hash } from "../layout";
+import { hash, rng } from "../seeded";
 
 const DX = 112;
 const DY = 165;
-const CROWN_W = 600;
-const CROWN_H = 316;
+// Room above the ground for the goal and its label.
+const TOP = 100;
 
 export interface Ghost {
   key: string;
@@ -208,35 +207,7 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
   const stage = svg("g", { class: "stage" });
   const roots = svg("g", { class: "roots" });
   const marks = svg("g", { class: "marks" });
-  const crown = svg("image", {
-    href: "crown.webp",
-    x: -CROWN_W / 2,
-    y: -CROWN_H - 30,
-    width: CROWN_W,
-    height: CROWN_H,
-    class: "crown",
-  });
   const ground = svg("ellipse", { cx: 0, cy: -16, rx: 900, ry: 9, class: "ground" });
-  // A trunk with bark: shaded across like a cylinder, flaring into
-  // buttresses at the ground, with furrows along it.
-  const trunk = svg(
-    "g",
-    { class: "trunk", mask: "url(#trunk-fade)" },
-    svg("path", {
-      d: "M-22,-150 C-20,-110 -18,-70 -26,-46 C-34,-28 -58,-20 -92,-14 L92,-14 C58,-20 34,-28 26,-46 C18,-70 20,-110 22,-150 Z",
-      fill: "url(#bark)",
-    }),
-    ...[
-      "M-12,-148 C-10,-110 -14,-70 -22,-38 C-28,-26 -40,-20 -52,-16",
-      "M-3,-150 C-1,-112 -4,-72 -6,-40 C-7,-28 -10,-20 -14,-15",
-      "M6,-149 C8,-110 5,-74 7,-44 C9,-30 14,-21 22,-15",
-      "M14,-146 C13,-108 15,-70 21,-42 C27,-28 42,-20 58,-16",
-    ].map((d) => svg("path", { d, class: "furrow" })),
-    svg("path", {
-      d: "M-16,-148 C-14,-110 -13,-74 -18,-46",
-      class: "bark-light",
-    }),
-  );
   // Shared shading for the orbs: one light from the upper left.
   const defs = svg(
     "defs",
@@ -253,40 +224,6 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
       { id: "orb-shade", cx: "65%", cy: "75%", r: "70%" },
       svg("stop", { offset: "40%", "stop-color": "#000", "stop-opacity": "0" }),
       svg("stop", { offset: "100%", "stop-color": "#000", "stop-opacity": "0.6" }),
-    ),
-    // The trunk's top fades into the crown instead of ending in an edge.
-    svg(
-      "linearGradient",
-      { id: "trunk-fade-g", x1: "0", y1: "0", x2: "0", y2: "1" },
-      svg("stop", { offset: "0%", "stop-color": "#000" }),
-      svg("stop", { offset: "35%", "stop-color": "#fff" }),
-    ),
-    svg(
-      "mask",
-      {
-        id: "trunk-fade",
-        maskUnits: "userSpaceOnUse",
-        x: "-120",
-        y: "-160",
-        width: "240",
-        height: "160",
-      },
-      svg("rect", {
-        x: "-120",
-        y: "-160",
-        width: "240",
-        height: "160",
-        fill: "url(#trunk-fade-g)",
-      }),
-    ),
-    svg(
-      "linearGradient",
-      { id: "bark", x1: "0", y1: "0", x2: "1", y2: "0" },
-      svg("stop", { offset: "0%", "stop-color": "#140f0b" }),
-      svg("stop", { offset: "32%", "stop-color": "#4a3828" }),
-      svg("stop", { offset: "48%", "stop-color": "#5d4733" }),
-      svg("stop", { offset: "70%", "stop-color": "#32261b" }),
-      svg("stop", { offset: "100%", "stop-color": "#0f0b08" }),
     ),
     svg(
       "filter",
@@ -309,7 +246,7 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     svg("ellipse", { rx: 13, ry: 9, class: "kernel" }),
   );
   const web = svg("path", { d: mesh(), class: "mesh" });
-  stage.append(defs, web, ground, crown, trunk, roots, marks, seed);
+  stage.append(defs, web, ground, roots, marks, seed);
   const canvas = svg("svg", { class: "canvas", "aria-label": "Idea tree" }, stage);
   host.append(canvas);
 
@@ -413,11 +350,9 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
     if (r.width === 0 || goals.size === 0) return;
     const xs = [...goals.values()].map((p) => p.x);
     const ys = [...goals.values()].map((p) => p.y);
-    // Frame the roots; the crown may run past the column's sides.
     const minX = Math.min(...xs, -180) - 80;
     const maxX = Math.max(...xs, 180) + 80;
-    // The canopy may be cut at the top: the roots are the instrument.
-    const minY = -CROWN_H * 0.32;
+    const minY = -TOP;
     const maxY = Math.max(...ys) + 130;
     const k = Math.min(1.2, (r.width - 20) / (maxX - minX), (r.height - 40) / (maxY - minY));
     // The stage origin sits at 42% of the height; aim the box centre at the screen centre.
@@ -452,7 +387,7 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
       r.width,
     );
     const dy = fitAxis(
-      r.height * 0.42 + target.y + -CROWN_H * 0.5 * k,
+      r.height * 0.42 + target.y + -TOP * k,
       r.height * 0.42 + target.y + (Math.max(...ys) + 70) * k,
       r.height,
     );
@@ -520,7 +455,7 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
   });
   sizer.observe(canvas);
 
-  // Thick near the trunk, thin toward the tips.
+  // Thick near the goal, thin toward the tips.
   const shapeRoot = (g: SVGGElement, id: string, parent: string) => {
     const p = drawn.get(id);
     const q = drawn.get(parent);
@@ -624,7 +559,7 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
       }),
     ),
   );
-  // While Muse works on the first roots, a seed germinates where they will grow.
+  // While the AI works on the first roots, a seed germinates where they will grow.
   const seedNote = el("div", { class: "seed-note", hidden: true });
   host.append(seedNote);
 
@@ -781,7 +716,10 @@ export function mountTreeView(host: HTMLElement, onSelect: (id: string) => void)
       seed.toggleAttribute("hidden", !on);
       seedNote.hidden = !on;
       if (on) {
-        seedNote.replaceChildren(el("b", {}, "Muse is working on the seed"), el("span", {}, text));
+        seedNote.replaceChildren(
+          el("b", {}, "The AI is working on the seed"),
+          el("span", {}, text),
+        );
         if (autoFit) target = { x: 0, y: 40, k: 1.3 };
       } else if (autoFit) fit();
       wake();

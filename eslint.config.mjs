@@ -7,8 +7,6 @@ const boundaries = {
   contracts: [],
   engine: ["contracts"],
   chem: ["contracts"],
-  search: ["contracts"],
-  agent: ["contracts", "engine"],
   ideas: ["engine", "chem", "contracts"],
 };
 const packages = Object.keys(boundaries);
@@ -33,7 +31,7 @@ const boundaryRules = Object.entries(boundaries).map(([name, allowed]) => ({
 }));
 
 export default tseslint.config(
-  { ignores: ["**/node_modules/", "**/dist/", "**/.wrangler/"] },
+  { ignores: ["**/node_modules/", "**/dist/"] },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   {
@@ -47,12 +45,7 @@ export default tseslint.config(
   {
     // Numerical kernels index arrays inside loops bounded by their lengths; tests
     // index fixtures they built themselves.
-    files: [
-      "packages/chem/src/**/*.ts",
-      "packages/search/src/**/*.ts",
-      "packages/engine/src/hash.ts",
-      "**/*.test.ts",
-    ],
+    files: ["packages/chem/src/**/*.ts", "packages/engine/src/hash.ts", "**/*.test.ts"],
     rules: { "@typescript-eslint/no-non-null-assertion": "off" },
   },
 );

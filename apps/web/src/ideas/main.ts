@@ -1,6 +1,7 @@
-// "What do you want to build?": Muse grows the roots of any goal, a person
-// opens the ones that matter, and code checks what can be computed. The key
-// stays in this tab and goes only to api.meta.ai.
+// "What do you want to build?": a person, or an AI they connect, grows the
+// roots of any goal; code checks what can be computed. The AI is optional and
+// any provider works: the key stays in this browser and goes only to the
+// provider the person chose.
 
 import {
   BudgetExceeded,
@@ -8,9 +9,11 @@ import {
   EXPAND,
   IdeaTree,
   Ledger,
-  Muse,
-  MuseError,
-  modelFor,
+  AXES,
+  Model,
+  ModelError,
+  PROVIDERS,
+  used,
   REPAIR,
   REPAIR_SCHEMA,
   VIEW,
@@ -39,7 +42,8 @@ import {
   type IdeaEvent,
   type Refusal,
   type IdeaNode,
-  type Mode,
+  type GrownNode,
+  type Provider,
   type Usage,
   type RouteIntent,
 } from "@vibloom/ideas";
@@ -62,33 +66,56 @@ const EXAMPLES = [
   "A tree that grows gold",
   "There are infinitely many twin primes",
 ];
-const EFFORT = "low" as const;
 const MAX_OUT = {
   decompose: 8000,
   expand: 5000,
   view: 9000,
-  // Muse reasons before it answers; 1500 left a third of answers unfinished.
+  // Models that reason before answering need room; 1500 left a third unfinished.
   chat: 4000,
   route: 3000,
   review: 3000,
   read: 4000,
 };
-const KEY_STORE = "vibloom.key";
+const AI_STORE = "vibloom.ai";
 const PROJECT_STORE = "vibloom.project";
 
 const app = document.getElementById("app") ?? document.body;
-let key = "";
-try {
-  key = localStorage.getItem(KEY_STORE) ?? "";
-} catch {
-  // Storage blocked: the key lives only in memory.
+// The AI connection. Without a model the app works by hand: same engine,
+// same checks, same log.
+interface AiSettings {
+  provider: Provider;
+  model: string;
+  key: string;
+  baseUrl: string;
+  remember: boolean;
 }
-const ledger = new Ledger(0.5);
+let ai_: AiSettings = { provider: "anthropic", model: "", key: "", baseUrl: "", remember: false };
+try {
+  const raw = localStorage.getItem(AI_STORE);
+  if (raw) ai_ = { ...ai_, ...(JSON.parse(raw) as Partial<AiSettings>) };
+} catch {
+  // Storage blocked: settings live only in memory.
+}
+function saveAi() {
+  try {
+    // The key is stored only when the person asks; the rest always.
+    localStorage.setItem(AI_STORE, JSON.stringify({ ...ai_, key: ai_.remember ? ai_.key : "" }));
+  } catch {
+    // Not remembered; fine.
+  }
+}
+const hasAi = () => ai_.model.trim() !== "" && (ai_.key.trim() !== "" || ai_.provider === "local");
+const ledger = new Ledger(1_000_000);
 let tree = new IdeaTree();
 let busy = false;
 let recorded = false;
 
-const usd = (x: number) => (x < 0.01 ? `$${x.toFixed(4)}` : `$${x.toFixed(3)}`);
+const tok = (x: number) =>
+  x >= 1e6
+    ? `${(x / 1e6).toFixed(2)}M tokens`
+    : x >= 1e3
+      ? `${(x / 1e3).toFixed(1)}k tokens`
+      : `${String(x)} tokens`;
 
 // A project's name in the header: its first sentence, cut at a word. The
 // whole question stays in the tooltip and on the goal root.
@@ -104,6 +131,79 @@ function goalOf(events: IdeaEvent[]): string {
   return b?.type === "goal" ? b.text.slice(0, 60) : "your last tree";
 }
 
+// The AI connection, shared by the landing page and the settings panel.
+function aiSettings(onChange: () => void): HTMLElement {
+  const provider = el(
+    "select",
+    { class: "mode", "aria-label": "Provider" },
+    ...Object.entries(PROVIDERS).map(([id, p]) => el("option", { value: id }, p.label)),
+  );
+  provider.value = ai_.provider;
+  const model = el("input", {
+    class: "key",
+    placeholder: "Model name, for example claude-sonnet-5-5",
+    spellcheck: "false",
+  });
+  model.value = ai_.model;
+  const keyInput = el("input", {
+    type: "password",
+    class: "key",
+    placeholder: "API key (not needed for a local model)",
+    autocomplete: "off",
+    spellcheck: "false",
+  });
+  keyInput.value = ai_.key;
+  const base = el("input", {
+    class: "key",
+    placeholder: "Base URL (optional)",
+    spellcheck: "false",
+  });
+  base.value = ai_.baseUrl;
+  const remember = el("input", { type: "checkbox" });
+  remember.checked = ai_.remember;
+  const cap = el("input", {
+    type: "number",
+    class: "cap",
+    min: "10000",
+    step: "50000",
+    value: String(ledger.cap),
+  });
+  const update = () => {
+    const changed = provider.value !== ai_.provider;
+    ai_ = {
+      provider: provider.value as Provider,
+      model: model.value.trim(),
+      key: keyInput.value.trim(),
+      baseUrl: base.value.trim(),
+      remember: remember.checked,
+    };
+    if (changed && !model.value.trim()) model.value = PROVIDERS[ai_.provider].model;
+    ai_.model = model.value.trim();
+    ledger.cap = Math.max(10_000, Number(cap.value) || ledger.cap);
+    saveAi();
+    onChange();
+  };
+  for (const x of [provider, model, keyInput, base, remember, cap])
+    x.addEventListener("change", update);
+  return el(
+    "div",
+    {},
+    el("div", { class: "row" }, provider, model),
+    el("div", { class: "row" }, keyInput, base),
+    el(
+      "div",
+      { class: "row" },
+      el("label", { class: "remember" }, remember, "Remember the key on this device"),
+      el("label", { class: "cap-label" }, "Session budget, tokens", cap),
+    ),
+    el(
+      "p",
+      { class: "fine" },
+      "Optional. Without an AI you build the roots and make the predictions yourself; the engine, the checks and the record are the same. The key stays in this browser and is sent only to the provider you choose.",
+    ),
+  );
+}
+
 function landing() {
   const goal = el("textarea", {
     class: "goal-input",
@@ -111,36 +211,18 @@ function landing() {
     placeholder: "A cardboard airliner, a proof, a reaction, a business...",
     "aria-label": "What do you want to build?",
   });
-  const keyInput = el("input", {
-    type: "password",
-    class: "key",
-    placeholder: "Meta Model API key",
-    autocomplete: "off",
-    spellcheck: "false",
-  });
-  keyInput.value = key;
-  const remember = el("input", { type: "checkbox" });
-  remember.checked = key !== "";
-  const mode = el(
-    "select",
-    { class: "mode", "aria-label": "Mode" },
-    el("option", { value: "standard" }, "Standard - not used for training"),
-    el("option", { value: "contributor" }, "Contributor - about 20x cheaper, Meta may train on it"),
-  );
-  const cap = el("input", {
-    type: "number",
-    class: "cap",
-    min: "0.05",
-    step: "0.05",
-    value: "0.50",
-  });
-  const grow = el("button", { class: "grow" }, "Grow the roots");
+  const grow = el("button", { class: "grow" });
   const sketch = el(
     "button",
     { class: "sketch", title: "Write or sketch it by hand, or use a photo of paper" },
     "Write it by hand",
   );
   const note = el("p", { class: "note" });
+  const label = () => {
+    grow.textContent = hasAi() ? "Grow the roots" : "Start by hand";
+    sketch.hidden = !hasAi();
+  };
+  label();
   // The handwriting the goal was read from, kept with it in the record.
   let sketched: string | undefined;
   const chips = el(
@@ -155,26 +237,6 @@ function landing() {
       return b;
     }),
   );
-  const replay = el("button", { class: "ghost-btn" }, "Recorded: cardboard airliner");
-  replay.addEventListener("click", () => void playRecorded("cardboard-airliner"));
-  const replayChem = el(
-    "button",
-    { class: "ghost-btn" },
-    "Recorded: handwritten BZ lab notes, tested in seconds",
-  );
-  replayChem.addEventListener("click", () => void playRecorded("chemical-clock"));
-  const replayLesson = el(
-    "button",
-    { class: "ghost-btn" },
-    "Recorded: Muse surprised, then learns",
-  );
-  replayLesson.addEventListener("click", () => void playRecorded("period-reduction"));
-  const replaySearch = el(
-    "button",
-    { class: "ghost-btn" },
-    "Recorded: searching nearby recipes with the map",
-  );
-  replaySearch.addEventListener("click", () => void playRecorded("recipe-search"));
   let saved: { events: IdeaEvent[]; refused?: Refusal[] } | undefined;
   try {
     saved = JSON.parse(localStorage.getItem(PROJECT_STORE) ?? "null") as typeof saved;
@@ -194,7 +256,14 @@ function landing() {
   });
   const file = el("input", { type: "file", accept: "application/json", hidden: true });
   const open = el("button", { class: "ghost-btn" }, "Open an exported tree");
+  const replayFile = el("button", { class: "ghost-btn" }, "Replay one step by step");
+  let replaying = false;
   open.addEventListener("click", () => {
+    replaying = false;
+    file.click();
+  });
+  replayFile.addEventListener("click", () => {
+    replaying = true;
     file.click();
   });
   file.addEventListener("change", () => {
@@ -204,7 +273,8 @@ function landing() {
       try {
         // Replay re-verifies the hash chain and every computed result.
         const data = JSON.parse(text) as { events: IdeaEvent[]; refused?: Refusal[] };
-        load(data.events, data.refused);
+        if (replaying) void replayLog(data);
+        else load(data.events, data.refused);
       } catch (e) {
         note.textContent = `That file is not a valid tree: ${e instanceof Error ? e.message : String(e)}`;
       }
@@ -213,48 +283,28 @@ function landing() {
 
   grow.addEventListener("click", () => {
     const text = goal.value.trim();
-    key = keyInput.value.trim();
     if (!text) {
       goal.focus();
       return;
     }
-    if (!key) {
-      note.textContent = "Add your Meta Model API key, or watch the recorded example.";
-      return;
-    }
-    try {
-      if (remember.checked && key) localStorage.setItem(KEY_STORE, key);
-      else localStorage.removeItem(KEY_STORE);
-    } catch {
-      // Not remembered; fine.
-    }
-    ledger.cap = Math.max(0.05, Number(cap.value) || 0.5);
-    void start(text, mode.value as Mode, sketched);
+    void start(text, sketched);
   });
   goal.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) grow.click();
   });
-  // Muse reads handwriting (words, sketches, formulas) into the goal; the
+  // An AI reads handwriting (words, sketches, formulas) into the goal; the
   // person reads the transcription before anything grows from it.
   sketch.addEventListener("click", () => {
-    key = keyInput.value.trim();
-    if (!key) {
-      note.textContent = "Reading handwriting uses Muse: add your Meta Model API key first.";
-      return;
-    }
-    ledger.cap = Math.max(0.05, Number(cap.value) || 0.5);
     openPad({
       title: "Write or sketch your idea",
-      hint: "Words, a drawing, formulas or functions. Muse transcribes it; you check it before growing.",
-      action: "Read it with Muse",
+      hint: "Words, a drawing, formulas or functions. The AI transcribes it; you check it before growing.",
+      action: "Read it with the AI",
       onRead: async (image) => {
-        const { value, usage } = await muse().ask(
+        const { value, usage } = await ai().ask(
           {
             instructions: READ_SKETCH,
             input: "Transcribe this.",
             images: [image],
-            mode: mode.value as Mode,
-            effort: "low",
             maxOutput: MAX_OUT.read,
           },
           "sketch",
@@ -272,7 +322,7 @@ function landing() {
           .join("\n")
           .slice(0, 1200);
         sketched = image;
-        note.textContent = `Muse read your handwriting (${usd(usage.cost)})${v.unclear ? `; unclear: ${v.unclear}` : ""}. Check it, then grow the roots.`;
+        note.textContent = `The AI read your handwriting (${tok(used(usage))})${v.unclear ? `; unclear: ${v.unclear}` : ""}. Check it, then grow the roots.`;
         goal.focus();
       },
     });
@@ -286,7 +336,6 @@ function landing() {
       el(
         "section",
         { class: "hero" },
-        el("img", { src: "crown.webp", alt: "", class: "hero-crown" }),
         el("p", { class: "brand" }, "VIBloom"),
         el("h1", {}, "What do you want to build?"),
         el(
@@ -298,16 +347,7 @@ function landing() {
         el(
           "p",
           { class: "lede" },
-          "Muse grows the assumptions it rests on, down to first principles. Code checks what can be computed. Red means a calculation says it fails.",
-        ),
-        el(
-          "div",
-          { class: "watch" },
-          el("span", { class: "fine" }, "Watch Muse work, no key needed:"),
-          replayChem,
-          replaySearch,
-          replayLesson,
-          replay,
+          "Every goal rests on assumptions. Map them, down to first principles; code checks what can be computed, and a red root means a calculation says it fails.",
         ),
         el(
           "div",
@@ -318,28 +358,12 @@ function landing() {
         chips,
         el(
           "details",
-          { class: "settings", open: key === "" },
-          el("summary", {}, "Key, mode and budget"),
-          el(
-            "div",
-            { class: "row" },
-            keyInput,
-            el("label", { class: "remember" }, remember, "Remember on this device"),
-          ),
-          el(
-            "div",
-            { class: "row" },
-            mode,
-            el("label", { class: "cap-label" }, "Session budget $", cap),
-          ),
-          el(
-            "p",
-            { class: "fine" },
-            "Your key stays in this tab and is sent only to api.meta.ai. Before each request the API counts its tokens and the session reserves the most it could cost; it stops at the budget.",
-          ),
+          { class: "settings", open: !hasAi() },
+          el("summary", {}, "AI (optional)"),
+          aiSettings(label),
         ),
         note,
-        el("div", { class: "row center" }, resume, open, file),
+        el("div", { class: "row center" }, resume, open, replayFile, file),
       ),
     ),
   );
@@ -350,6 +374,7 @@ function landing() {
 let view: ReturnType<typeof mountTreeView>;
 let monitor: ReturnType<typeof mountMonitor>;
 let chat: ReturnType<typeof mountChat>;
+let chatHost: HTMLElement;
 let hud: HTMLElement;
 let ghosts: Ghost[] = [];
 let selectedId: string | undefined;
@@ -363,7 +388,7 @@ let processButton: HTMLButtonElement;
 function workspace(goal: string) {
   const treeHost = el("section", { class: "tree-col", "aria-label": "Tree" });
   const monitorHost = el("section", { class: "monitor", "aria-label": "Monitor" });
-  const chatHost = el("section", { class: "chat", "aria-label": "Chat" });
+  chatHost = el("section", { class: "chat", "aria-label": "Chat" });
   hud = el("div", { class: "hud" });
   const back = el("button", { class: "ghost-btn" }, "New idea");
   back.addEventListener("click", () => {
@@ -461,8 +486,12 @@ function workspace(goal: string) {
     },
     estimate: (kind, id) =>
       kind === "view"
-        ? estimate(modelFor(tree.mode), VIEW + JSON.stringify(nodeData(id)), MAX_OUT.view)
-        : estimate(modelFor(tree.mode), EXPAND + tree.context(id), MAX_OUT.expand),
+        ? estimate(VIEW + JSON.stringify(nodeData(id)), MAX_OUT.view)
+        : estimate(EXPAND + tree.context(id), MAX_OUT.expand),
+    ai: hasAi,
+    addRoot: (id) => {
+      addByHand(id);
+    },
     busy: () => busy,
   });
   chat = mountChat(chatHost, {
@@ -473,42 +502,12 @@ function workspace(goal: string) {
   refresh();
 }
 
-// Settings stay reachable from the workspace: key, mode and budget.
+// Settings stay reachable from the workspace.
 function gear() {
   const b = el("button", { class: "gear", "aria-label": "Settings", title: "Settings" }, "\u2699");
   const panel = el("div", { class: "gear-panel", hidden: true });
   b.addEventListener("click", () => {
-    const keyInput = el("input", {
-      type: "password",
-      class: "key",
-      placeholder: "Meta Model API key",
-      autocomplete: "off",
-    });
-    keyInput.value = key;
-    keyInput.addEventListener("change", () => {
-      key = keyInput.value.trim();
-    });
-    const cap = el("input", {
-      type: "number",
-      class: "cap",
-      min: "0.05",
-      step: "0.05",
-      value: ledger.cap.toFixed(2),
-    });
-    cap.addEventListener("change", () => {
-      ledger.cap = Math.max(0.05, Number(cap.value) || ledger.cap);
-      refresh();
-    });
-    panel.replaceChildren(
-      el("p", { class: "eyebrow" }, "Settings"),
-      keyInput,
-      el("label", { class: "cap-label" }, "Session budget $", cap),
-      el(
-        "p",
-        { class: "fine" },
-        `Mode: ${tree.mode}. The key stays in this tab and goes only to api.meta.ai.`,
-      ),
-    );
+    panel.replaceChildren(el("p", { class: "eyebrow" }, "AI (optional)"), aiSettings(refresh));
     panel.hidden = !panel.hidden;
   });
   return el("div", { class: "gear-wrap" }, panel, b);
@@ -564,12 +563,14 @@ function refresh() {
     view.mark([]);
     monitor.render(tree, selectedId);
   }
+  // The chat needs an AI; a tree that already holds one stays readable.
+  chatHost.hidden = !hasAi() && tree.chat.length === 0;
   chat.render(
     tree,
     asking,
     (i) => {
       const u = chatUsage[i];
-      return u ? usd(u.cost) : "";
+      return u ? tok(used(u)) : "";
     },
     selectedId ?? "goal",
   );
@@ -578,14 +579,18 @@ function refresh() {
   const calls = recorded
     ? tree.events.flatMap((e) => ("usage" in e.body ? [e.body.usage] : []))
     : ledger.entries;
-  const spent = calls.reduce((s, u) => s + u.cost, 0);
+  const spent = calls.reduce((s, u) => s + used(u), 0);
   const cached = calls.reduce((s, u) => s + u.cached, 0);
   const input = calls.reduce((s, u) => s + u.input, 0);
   hud.replaceChildren(
     el(
       "span",
       { class: "spend" },
-      recorded ? `${usd(spent)} when recorded` : `${usd(ledger.total)} / ${usd(ledger.cap)}`,
+      recorded
+        ? `${tok(spent)} when recorded`
+        : hasAi()
+          ? `${tok(ledger.total)} of ${tok(ledger.cap)}`
+          : "No AI: working by hand",
     ),
     el("span", {}, `${String(calls.length)} ${recorded ? "recorded calls" : "calls"}`),
     el("span", {}, input ? `${String(Math.round((100 * cached) / input))}% cached` : "0% cached"),
@@ -594,8 +599,16 @@ function refresh() {
 
 const chatUsage: Usage[] = [];
 
-function muse() {
-  return new Muse(key ? { apiKey: key } : {}, ledger);
+function ai() {
+  return new Model(
+    {
+      provider: ai_.provider,
+      model: ai_.model,
+      ...(ai_.key ? { apiKey: ai_.key } : {}),
+      ...(ai_.baseUrl ? { baseUrl: ai_.baseUrl } : {}),
+    },
+    ledger,
+  );
 }
 
 async function grow(under: string, kind: "decompose" | "expand") {
@@ -603,22 +616,14 @@ async function grow(under: string, kind: "decompose" | "expand") {
   busy = true;
   view.busy(under);
   ghosts = [];
-  monitor.status("Muse is thinking...", true);
+  monitor.status("The AI is thinking...", true);
   const first = tree.nodes.size === 1;
   if (first) view.seed("reading the goal...");
-  let thought = "";
   try {
-    const r = await muse().grow({
+    const r = await ai().grow({
       instructions: kind === "decompose" ? DECOMPOSE : EXPAND,
       input: kind === "decompose" ? JSON.stringify({ goal: tree.goal }) : tree.context(under),
-      mode: tree.mode,
-      effort: EFFORT,
       maxOutput: MAX_OUT[kind],
-      onThought: (t) => {
-        thought = (thought + t).slice(-240);
-        monitor.status(`Muse is thinking: ${thought}`, true);
-        if (first && ghosts.length === 0) view.seed(thought.slice(-120));
-      },
       onNode: (raw) => {
         const n = raw as { key?: unknown; title?: unknown };
         if (typeof n.key === "string" && typeof n.title === "string") {
@@ -630,7 +635,7 @@ async function grow(under: string, kind: "decompose" | "expand") {
     });
     ghosts = [];
     const nodes = tree.admit(under, r.nodes);
-    tree.append(`muse:${r.usage.model}`, {
+    tree.append(`ai:${r.usage.model}`, {
       type: "grow",
       under,
       nodes,
@@ -653,7 +658,7 @@ async function grow(under: string, kind: "decompose" | "expand") {
   }
 }
 
-// Muse designs a visual of what a root tests; it runs in an isolated frame
+// The AI designs a visual of what a root tests; it runs in an isolated frame
 // and draws only the numbers VIBloom hands it.
 async function visualize(id: string) {
   if (busy) return;
@@ -661,21 +666,19 @@ async function visualize(id: string) {
   refresh();
   try {
     let feedback: string[] = [];
-    // One drawing, Muse looks at it, and at most one redraw: never a loop.
+    // One drawing, the AI looks at it, and at most one redraw: never a loop.
     for (let attempt = 0; attempt < 2; attempt++) {
       monitor.status(
-        attempt ? "Muse is redrawing what it found wrong..." : "Muse is designing a view...",
+        attempt ? "The AI is redrawing what it found wrong..." : "The AI is designing a view...",
         true,
       );
-      const { value, usage } = await muse().ask(
+      const { value, usage } = await ai().ask(
         {
           instructions: VIEW,
           input: JSON.stringify({
             data: nodeData(id),
             ...(feedback.length ? { fix_what_you_saw: feedback } : {}),
           }),
-          mode: tree.mode,
-          effort: "low",
           maxOutput: MAX_OUT.view,
         },
         "view",
@@ -683,8 +686,8 @@ async function visualize(id: string) {
       );
       const v = value as { title?: unknown; html?: unknown };
       if (typeof v.html !== "string" || v.html.length > 40_000)
-        throw new MuseError("bad_view", "no usable view");
-      tree.append(`muse:${usage.model}`, {
+        throw new ModelError("bad_view", "no usable view");
+      tree.append(`ai:${usage.model}`, {
         type: "view",
         node: id,
         title: typeof v.title === "string" ? v.title.slice(0, 80) : "View",
@@ -704,28 +707,26 @@ async function visualize(id: string) {
   }
 }
 
-// Muse looks at a picture of the monitor, as the person sees it, and says
+// The AI looks at a picture of the monitor, as the person sees it, and says
 // whether its drawing matches the data. Returns what it found wrong.
 async function review(id: string): Promise<string[]> {
-  monitor.status("Muse is looking at its drawing...", true);
+  monitor.status("The AI is looking at its drawing...", true);
   // Let the frame load and the drawing settle before the picture.
   await sleep(2500);
   const image = await monitor.snapshot();
   if (!image) return [];
-  const { value, usage } = await muse().ask(
+  const { value, usage } = await ai().ask(
     {
       instructions: REVIEW,
       input: JSON.stringify({ data: nodeData(id) }),
       images: [image],
-      mode: tree.mode,
-      effort: "low",
       maxOutput: MAX_OUT.review,
     },
     "review",
     REVIEW_SCHEMA,
   );
   const v = value as { ok: boolean; problems: string[] };
-  tree.append(`muse:${usage.model}`, {
+  tree.append(`ai:${usage.model}`, {
     type: "review",
     node: id,
     ok: v.ok,
@@ -736,7 +737,7 @@ async function review(id: string): Promise<string[]> {
   return v.ok ? [] : v.problems.slice(0, 3);
 }
 
-// A formula written by hand on a root: Muse reads it into the tree's names,
+// A formula written by hand on a root: The AI reads it into the tree's names,
 // the person confirms the reading, and the engine decides if it computes.
 function handwrite(id: string) {
   const n = tree.nodes.get(id);
@@ -747,19 +748,17 @@ function handwrite(id: string) {
   });
   openPad({
     title: `A formula for "${n.title}"`,
-    hint: "Write the comparison that would make this assumption hold, with symbols or words. Muse maps it to the tree's parameters; the engine computes it.",
-    action: "Read it with Muse",
+    hint: "Write the comparison that would make this assumption hold, with symbols or words. The AI maps it to the tree's parameters; the engine computes it.",
+    action: "Read it with the AI",
     onRead: async (image) => {
       busy = true;
       refresh();
       try {
-        const { value, usage } = await muse().ask(
+        const { value, usage } = await ai().ask(
           {
             instructions: READ_FORMULA,
             input: JSON.stringify({ assumption: n.statement, parameters: params }),
             images: [image],
-            mode: tree.mode,
-            effort: "low",
             maxOutput: MAX_OUT.read,
           },
           "formula",
@@ -775,14 +774,14 @@ function handwrite(id: string) {
         };
         if (v.unmatched.length) {
           throw new Error(
-            `Muse read "${v.reading}" but found no parameter for ${v.unmatched.join(", ")}. Nothing was changed.`,
+            `The AI read "${v.reading}" but found no parameter for ${v.unmatched.join(", ")}. Nothing was changed.`,
           );
         }
         const ok = confirm(
-          `Muse read: ${v.reading}\n\nAs a check: ${v.value} ${v.op} ${v.limit} ${v.unit}\n\nUse it for this root?`,
+          `The AI read: ${v.reading}\n\nAs a check: ${v.value} ${v.op} ${v.limit} ${v.unit}\n\nUse it for this root?`,
         );
         if (!ok) return;
-        tree.append(`muse:${usage.model}`, {
+        tree.append(`ai:${usage.model}`, {
           type: "formula",
           node: id,
           reading: v.reading.slice(0, 300),
@@ -793,7 +792,7 @@ function handwrite(id: string) {
         const node = tree.nodes.get(id);
         if (node) await check(node);
         recheck();
-        monitor.status(`Your formula is now this root's check (read for ${usd(usage.cost)}).`);
+        monitor.status(`Your formula is now this root's check (read for ${tok(used(usage))}).`);
       } finally {
         busy = false;
         refresh();
@@ -802,7 +801,7 @@ function handwrite(id: string) {
   });
 }
 
-// Everything typed in the chat is read by Muse first, as JSON: what it is
+// Everything typed in the chat is read by the AI first, as JSON: what it is
 // asking for and which roots it needs. The engine checks every id and value,
 // then the request goes where it belongs: an answer from the record, a recipe
 // run the person confirms, or the recipe map.
@@ -813,14 +812,14 @@ async function ask(question: string) {
   refresh();
   const focus = selectedId ?? "goal";
   try {
-    monitor.status("Muse is reading the request...", true);
+    monitor.status("The AI is reading the request...", true);
     const route = await routeOf(question, focus);
     if (route?.intent === "map") {
       const setup = mapSetup(tree);
       if (typeof setup !== "string") {
         select(setup.node.id);
         openTab("Recipe map");
-        monitor.status(`Muse: ${route.why} The engine is running the recipe map.`);
+        monitor.status(`The AI: ${route.why} The engine is running the recipe map.`);
         return;
       }
     }
@@ -829,11 +828,16 @@ async function ask(question: string) {
         .map(([k, v]) => `${k.replace(/_/g, " ")} ${String(v)}`)
         .join(", ");
       if (
-        confirm(`Muse read this as: run ${list}.\n\n${route.why}\n\nChange the tree and run it?`)
+        confirm(`The AI read this as: run ${list}.\n\n${route.why}\n\nChange the tree and run it?`)
       ) {
         for (const [name, value] of Object.entries(route.values))
           if (tree.scope()[name] !== value)
-            tree.append("person", { type: "set_param", name, value, source: "chat, read by Muse" });
+            tree.append("person", {
+              type: "set_param",
+              name,
+              value,
+              source: "chat, read by the AI",
+            });
         await recheckAndWait();
       }
     }
@@ -859,7 +863,7 @@ function openTab(name: string) {
 async function routeOf(question: string, focus: string) {
   const params = Object.keys(tree.scope()).filter((k) => tree.param(k));
   try {
-    const { value, usage } = await muse().ask(
+    const { value, usage } = await ai().ask(
       {
         instructions: ROUTE,
         input: JSON.stringify({
@@ -875,8 +879,6 @@ async function routeOf(question: string, focus: string) {
           ),
           params,
         }),
-        mode: tree.mode,
-        effort: "low",
         maxOutput: MAX_OUT.route,
       },
       "route",
@@ -907,7 +909,7 @@ async function routeOf(question: string, focus: string) {
       why: v.why.slice(0, 240),
       usage,
     };
-    tree.append(`muse:${usage.model}`, body);
+    tree.append(`ai:${usage.model}`, body);
     return body;
   } catch (e) {
     if (e instanceof BudgetExceeded) throw e;
@@ -928,18 +930,18 @@ async function answer(question: string, focus: string, routed: string[]) {
     .slice(0, 5);
   monitor.status(
     consulted.length
-      ? `Muse is answering from ${[focus, ...consulted].map((id) => tree.nodes.get(id)?.title ?? id).join(", ")}...`
-      : "Muse is answering...",
+      ? `The AI is answering from ${[focus, ...consulted].map((id) => tree.nodes.get(id)?.title ?? id).join(", ")}...`
+      : "The AI is answering...",
     true,
   );
-  // Muse sees the monitor as the person does when it shows its drawing.
+  // The AI sees the monitor as the person does when it shows its drawing.
   const image = tree.views.has(focus) ? await monitor.snapshot() : undefined;
   const brief = (id: string) => ({
     id,
     ...nodeData(id),
     ...(tree.staleText(id).length ? { written_for: tree.staleText(id) } : {}),
   });
-  const { value, usage } = await muse().ask(
+  const { value, usage } = await ai().ask(
     {
       instructions: CHAT,
       input: JSON.stringify({
@@ -966,8 +968,6 @@ async function answer(question: string, focus: string, routed: string[]) {
         ...(image ? { image: "what the monitor shows the person right now" } : {}),
       }),
       ...(image ? { images: [image] } : {}),
-      mode: tree.mode,
-      effort: "low",
       maxOutput: MAX_OUT.chat,
     },
     "chat",
@@ -978,7 +978,7 @@ async function answer(question: string, focus: string, routed: string[]) {
   const cites = (Array.isArray(v.cites) ? v.cites : []).filter(
     (c): c is string => typeof c === "string" && tree.nodes.has(c),
   );
-  tree.append(`muse:${usage.model}`, {
+  tree.append(`ai:${usage.model}`, {
     type: "chat",
     focus,
     question,
@@ -993,7 +993,7 @@ async function answer(question: string, focus: string, routed: string[]) {
 }
 
 // When the tree holds a recipe, what the engine knows about how it sets the
-// model, so Muse can reason about which change does what.
+// model, so the AI can reason about which change does what.
 function recipeContext() {
   const derived = tree.derived();
   const scope = tree.scope();
@@ -1015,18 +1015,19 @@ function recipeContext() {
 function explain(e: unknown): string {
   if (e instanceof BudgetExceeded)
     return `session budget reached (${e.message}). Raise it in Settings.`;
-  if (e instanceof MuseError) {
-    if (e.code === "http_401" || e.code === "invalid_api_key") return "the key was rejected.";
-    if (e.code === "max_output_tokens")
-      return "Muse ran out of room for this answer; nothing was added.";
-    return `Muse could not answer (${e.code}).`;
+  if (e instanceof ModelError) {
+    if (e.code === "rejected_401" || e.code === "rejected_403")
+      return "the provider rejected the key.";
+    if (e.code === "length") return "the AI ran out of room for this answer; nothing was added.";
+    if (e.code === "no_model") return "choose a model in Settings.";
+    return `the AI could not answer (${e.code}: ${e.message.slice(0, 120)}).`;
   }
   return e instanceof Error ? e.message : String(e);
 }
 
-// The anticipation loop, around every experiment while Muse is connected:
-// Muse commits to an outcome before the run, the engine runs, and a surprise
-// makes Muse propose two explanations that one more run tells apart. The
+// The anticipation loop, around every experiment while the AI is connected:
+// The AI commits to an outcome before the run, the engine runs, and a surprise
+// makes the AI propose two explanations that one more run tells apart. The
 // engine decides which one the evidence fits.
 async function experiment(n: IdeaNode) {
   const spec = n.check;
@@ -1034,13 +1035,13 @@ async function experiment(n: IdeaNode) {
   const t = tree;
   const scope = t.scope();
   const inputs = Object.fromEntries(SIM_PARAMS.map((k) => [k, scope[k] ?? NaN]));
-  let made: { id: string; expect: "holds" | "fails" } | undefined;
+  let made: { id: string; expect: "holds" | "fails"; by?: "person" } | undefined;
   // A question already settled at these values (by the recipe map, a test
-  // or another node) is run without asking Muse: it could not be blind.
+  // or another node) is run without asking the AI: it could not be blind.
   const settled = t.settledBy(n.id, inputs);
-  if (key && !recorded && !settled) {
+  if (!recorded && !settled) {
     try {
-      made = await foresee(n, inputs);
+      made = hasAi() ? await foresee(n, inputs) : foreseeByHand(n, inputs);
     } catch (e) {
       // No prediction (budget, network): the run still happens, unscored.
       monitor.status(`Running without a prediction: ${explain(e)}`);
@@ -1049,9 +1050,9 @@ async function experiment(n: IdeaNode) {
   }
   monitor.status(
     made
-      ? `Muse predicts ${n.title} ${made.expect}. Running the experiment...`
+      ? `${made.by === "person" ? "You predict" : "The AI predicts"} ${n.title} ${made.expect}. Running the experiment...`
       : settled
-        ? `Running ${n.title}; its outcome is already settled by ${settled.purpose === "map" ? "the recipe map" : "run"} #${String(settled.seq)}, so Muse is not asked to predict it.`
+        ? `Running ${n.title}; its outcome is already settled by ${settled.purpose === "map" ? "the recipe map" : "run"} #${String(settled.seq)}, so the AI is not asked to predict it.`
         : `Running the Oregonator experiment for ${n.title}...`,
     true,
   );
@@ -1071,7 +1072,17 @@ async function experiment(n: IdeaNode) {
   }
   const observed = result.pass ? "holds" : "fails";
   if (observed === made.expect) {
-    monitor.status(`As Muse predicted, ${n.title} ${observed}.`);
+    monitor.status(
+      `As ${made.by === "person" ? "you" : "the AI"} predicted, ${n.title} ${observed}.`,
+    );
+    return;
+  }
+  // Explaining a surprise is a proposal; without an AI the person writes it
+  // next to the run, and the record keeps both.
+  if (!hasAi()) {
+    monitor.status(
+      `Surprise: you expected ${made.expect}, the run ${observed}. That gap is the lesson: change one value and run again to find out why.`,
+    );
     return;
   }
   try {
@@ -1084,8 +1095,8 @@ async function experiment(n: IdeaNode) {
 async function foresee(n: IdeaNode, inputs: Record<string, number>) {
   const spec = n.check;
   if (spec?.kind !== "oregonator") return undefined;
-  monitor.status(`Muse is predicting ${n.title} before the run...`, true);
-  const pr = await muse().ask(
+  monitor.status(`The AI is predicting ${n.title} before the run...`, true);
+  const pr = await ai().ask(
     {
       instructions: PREDICT,
       // Never a result: only the claim, its question and the values.
@@ -1098,8 +1109,6 @@ async function foresee(n: IdeaNode, inputs: Record<string, number>) {
         // The recipe these values come from, so the reasoning is about it.
         ...recipeContext(),
       }),
-      mode: tree.mode,
-      effort: "low",
       maxOutput: 4000,
     },
     "prediction",
@@ -1112,7 +1121,7 @@ async function foresee(n: IdeaNode, inputs: Record<string, number>) {
     uses: string[];
   };
   const id = `p${String(tree.predictions.length + 1)}`;
-  tree.append(`muse:${pr.usage.model}`, {
+  tree.append(`ai:${pr.usage.model}`, {
     type: "predict",
     id,
     node: n.id,
@@ -1139,10 +1148,10 @@ async function learn(
   const t = tree;
   const observed = result.pass ? "holds" : "fails";
   monitor.status(
-    `Surprise: Muse expected ${p.expect}, the run ${observed}. Muse is proposing explanations...`,
+    `Surprise: The AI expected ${p.expect}, the run ${observed}. The AI is proposing explanations...`,
     true,
   );
-  const dg = await muse().ask(
+  const dg = await ai().ask(
     {
       instructions: DIAGNOSE,
       input: JSON.stringify({
@@ -1160,8 +1169,6 @@ async function learn(
         ...recipeContext(),
         lessons: tree.lessonsForModel(n.id),
       }),
-      mode: tree.mode,
-      effort: "medium",
       maxOutput: 8000,
     },
     "diagnosis",
@@ -1175,7 +1182,7 @@ async function learn(
   };
   // The explanations go into the log before their test runs.
   const hid = `lesson-${String(tree.lessons.length + 1)}`;
-  tree.append(`muse:${dg.usage.model}`, {
+  tree.append(`ai:${dg.usage.model}`, {
     type: "hypotheses",
     id: hid,
     prediction: pid,
@@ -1217,18 +1224,16 @@ async function investigate(id: string) {
   }
 }
 
-// Muse fixes its own formulas that failed to evaluate: one request for all of
+// The AI fixes its own formulas that failed to evaluate: one request for all of
 // them, once per growth, never in a loop.
 async function repair() {
   const failing = tree.broken();
   if (failing.length === 0) return;
-  monitor.status(`Muse is fixing ${String(failing.length)} formula(s)...`, true);
-  const { value, usage } = await muse().ask(
+  monitor.status(`The AI is fixing ${String(failing.length)} formula(s)...`, true);
+  const { value, usage } = await ai().ask(
     {
       instructions: REPAIR,
       input: JSON.stringify(failing),
-      mode: tree.mode,
-      effort: "low",
       maxOutput: 3000,
     },
     "repair",
@@ -1237,12 +1242,14 @@ async function repair() {
   const fixes = tree.admitFixes(
     (value as { fixes?: { id: string; value: string; limit: string }[] }).fixes ?? [],
   );
-  tree.append(`muse:${usage.model}`, { type: "repair", fixes, usage });
+  tree.append(`ai:${usage.model}`, { type: "repair", fixes, usage });
   for (const f of fixes) {
     const n = tree.nodes.get(f.node);
     if (n) await check(n);
   }
-  monitor.status(`Muse repaired ${String(fixes.length)} of ${String(failing.length)} formula(s).`);
+  monitor.status(
+    `The AI repaired ${String(fixes.length)} of ${String(failing.length)} formula(s).`,
+  );
 }
 
 // Formulas are evaluated on the spot; experiments run in a worker, and the
@@ -1275,15 +1282,91 @@ async function confirmExperiments() {
   recheck();
 }
 
-async function start(goal: string, mode: Mode, sketch?: string) {
+async function start(goal: string, sketch?: string) {
   stopPlayback();
   recorded = false;
   tree = new IdeaTree();
   chatUsage.length = 0;
-  tree.append("person", { type: "goal", text: goal, mode, ...(sketch ? { sketch } : {}) });
+  tree.append("person", { type: "goal", text: goal, ...(sketch ? { sketch } : {}) });
   selectedId = undefined;
   workspace(goal);
-  await grow("goal", "decompose");
+  if (hasAi()) await grow("goal", "decompose");
+  else {
+    select("goal");
+    monitor.status("Add the first assumptions this goal rests on: Add a root by hand.");
+  }
+}
+
+// Without an AI, a person makes the prediction before the run, through the
+// same record: it is scored the same way, and a surprise teaches the same.
+function foreseeByHand(n: IdeaNode, inputs: Record<string, number>) {
+  const answer = prompt(
+    `Before the run: will "${n.title}" hold at these values?\nType holds or fails, and a confidence from 50 to 99 (for example: holds 70). Leave it empty to run without predicting.`,
+  );
+  const m = /^\s*(holds|fails)\s*(\d{2})?/i.exec(answer ?? "");
+  if (!m?.[1]) return undefined;
+  const expect = m[1].toLowerCase() as "holds" | "fails";
+  const confidence = Math.min(99, Math.max(50, Number(m[2] ?? "60"))) / 100;
+  const id = `p${String(tree.predictions.length + 1)}`;
+  tree.append("person", {
+    type: "predict",
+    id,
+    node: n.id,
+    inputs,
+    expect,
+    confidence,
+    reason: "by hand",
+    uses: [],
+    usage: BY_HAND,
+  });
+  refresh();
+  return { id, expect, by: "person" as const };
+}
+
+const BY_HAND = { model: "person", input: 0, cached: 0, output: 0, reasoning: 0 };
+
+// A root written by a person: it goes through the same protocol check as one
+// an AI proposes, and the engine checks it the same way.
+function addByHand(under: string) {
+  if (busy || !tree.nodes.has(under)) return;
+  const title = prompt("A new root under this one. Its title:")?.trim();
+  if (!title) return;
+  const statement =
+    prompt("The assumption, as one sentence that could be false:", title)?.trim() || title;
+  const names = [...tree.nodes.values()].flatMap((n) => n.params.map((p) => p.name));
+  const formula = prompt(
+    `Optional: a check the engine can compute, as value op limit unit, using numbers${
+      names.length ? ` or these names: ${names.join(", ")}` : ""
+    } (for example: 45 <= 50 kg). Leave it empty for none.`,
+  )?.trim();
+  const m = formula ? /^(.+?)\s*(<=|>=|<|>|==)\s*(\S+)\s*(.*)$/.exec(formula) : null;
+  const node: GrownNode = {
+    key: title,
+    title: title.slice(0, 80),
+    statement,
+    axis: AXES[0],
+    role: "assumption",
+    criticality: "major",
+    risk: "medium",
+    rationale: "written by hand",
+    params: [],
+    check: {
+      description: m ? (formula ?? "") : "not computable yet",
+      value: m?.[1]?.trim() ?? "",
+      op: m?.[2] ?? "<=",
+      limit: m?.[3] ?? "",
+      unit: m?.[4]?.trim() ?? "",
+    },
+    basis: [],
+  };
+  const nodes = tree.admit(under, [node]);
+  if (!nodes.length) {
+    monitor.status("That root could not be added; see the refusals in the Process view.");
+    return;
+  }
+  tree.append("person", { type: "grow", under, nodes, summary: "", usage: BY_HAND });
+  for (const n of nodes) void check(n).then(refresh);
+  select(nodes[0]?.id);
 }
 
 function select(id: string | undefined) {
@@ -1336,17 +1419,14 @@ function exportTree() {
   a.click();
 }
 
-// A recorded session replays its own log, event by event, exactly as it was
+// An exported tree can replay its own log, event by event, exactly as it was
 // recorded: same order, same hashes. What this browser adds is separate:
 // every experiment is run again here and its run is marked as reproduced or
 // not, beside the recorded result. Nothing new is appended to the log.
-async function playRecorded(name: string) {
+async function replayLog(data: { events: IdeaEvent[]; refused?: Refusal[] }) {
   const my = ++player.epoch;
   player.paused = false;
-  player.name = name;
-  const res = await fetch(`examples/${name}.json`);
-  const data = (await res.json()) as { events: IdeaEvent[]; refused?: Refusal[] };
-  if (my !== player.epoch) return;
+  player.data = data;
   const refusals = [...(data.refused ?? [])];
   const full = IdeaTree.replay(data.events);
   const first = data.events[0];
@@ -1369,7 +1449,7 @@ async function playRecorded(name: string) {
       }
       const b = e.body;
       if (b.type === "grow") {
-        monitor.status(`Recorded Muse session: ${b.summary}`);
+        if (b.summary) monitor.status(`Replaying: ${b.summary}`);
         for (const n of b.nodes) {
           ghosts.push({ key: n.id, under: b.under, title: n.title });
           view.render(t, ghosts);
@@ -1432,7 +1512,7 @@ async function playRecorded(name: string) {
 const player = {
   epoch: 0,
   paused: false,
-  name: "",
+  data: undefined as { events: IdeaEvent[]; refused?: Refusal[] } | undefined,
   step: false,
   wake: undefined as (() => void) | undefined,
 };
@@ -1465,7 +1545,9 @@ const playback = {
     player.wake?.();
     refresh();
   },
-  replay: () => void playRecorded(player.name),
+  replay: () => {
+    if (player.data) void replayLog(player.data);
+  },
 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
