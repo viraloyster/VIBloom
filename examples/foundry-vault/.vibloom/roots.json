@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "runner": [
+    "forge",
+    "test",
+    "--json"
+  ],
+  "tests": "test/",
+  "protect": [
+    "foundry.toml",
+    "test/handlers/VaultHandler.sol"
+  ],
+  "nodes": [
+    {
+      "id": "inv.assets-match-flows",
+      "kind": "invariant",
+      "title": "The vault's assets equal everything deposited minus everything withdrawn",
+      "stance": "adopted",
+      "test": {
+        "file": "test/Vault.t.sol",
+        "contract": "VaultTest",
+        "name": "invariant_assetsMatchFlows"
+      },
+      "watch": [
+        "src/",
+        "test/"
+      ],
+      "protected": true
+    },
+    {
+      "id": "inv.shares-are-backed",
+      "kind": "invariant",
+      "title": "Shares never exist without assets behind them",
+      "stance": "adopted",
+      "test": {
+        "file": "test/Vault.t.sol",
+        "contract": "VaultTest",
+        "name": "invariant_sharesAreBacked"
+      },
+      "watch": [
+        "src/",
+        "test/"
+      ],
+      "protected": true
+    },
+    {
+      "id": "asm.handler-is-the-only-actor",
+      "kind": "assumption",
+      "title": "Only the handler's deposits and withdrawals move assets in the test",
+      "stance": "hypothetical",
+      "depends_on": [
+        "inv.assets-match-flows"
+      ],
+      "protected": false
+    },
+    {
+      "id": "asm.rounding-favours-the-vault",
+      "kind": "assumption",
+      "title": "Rounding in withdraw always favours the vault",
+      "stance": "hypothetical",
+      "depends_on": [
+        "inv.shares-are-backed"
+      ],
+      "protected": false
+    },
+    {
+      "id": "int.no-overdraw",
+      "kind": "intention",
+      "title": "Nobody can take out more than their shares are worth",
+      "stance": "adopted",
+      "depends_on": [
+        "inv.assets-match-flows",
+        "inv.shares-are-backed"
+      ],
+      "protected": false
+    }
+  ]
+}

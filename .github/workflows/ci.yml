@@ -29,3 +29,22 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
+
+  # The guard against the real runners, on the example projects.
+  examples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest
+      - run: cargo install --locked --path crates/vibloom
+      - name: Foundry vault
+        working-directory: examples/foundry-vault
+        run: vibloom verify && vibloom check
+      - name: Pytest ledger
+        working-directory: examples/pytest-ledger
+        run: vibloom verify && vibloom check

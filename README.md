@@ -31,7 +31,9 @@ premise marks everything resting on it.
 - `.vibloom/log.jsonl`: every test run, hash-chained, with the hash of the
   watched files at that run.
 - Derived states: holds, BROKEN, pending review (a watched file changed),
-  unsupported, at risk, untested, off.
+  unsupported, at risk, untested, skipped, MISSING, off. Only a test that ran
+  and passed against the current files counts as holding; every other state
+  of a tested node fails the check.
 - A commit check (`vibloom precommit`), a CI check (`vibloom check`) that also
   requires the log to extend the base branch's, and context for any agent
   (`vibloom context <file>`).
@@ -69,8 +71,18 @@ The solver agrees with SciPy (Radau) on Oregonator periods to a relative 5e-4
 
 - **On a code project:** download `vibloom` from the
   [releases](https://github.com/viraloyster/VIBloom/releases) or build it with
-  `cargo install --locked --git https://github.com/viraloyster/VIBloom vibloom`,
-  then `vibloom init` in the project. See [docs/guard.md](docs/guard.md).
+  `cargo install --locked --git https://github.com/viraloyster/VIBloom vibloom`.
+  Then, in the project:
+
+  ```bash
+  vibloom init           # detects Foundry, Hardhat, Cargo or pytest
+  vibloom install-hook   # the commit check
+  vibloom check          # run the tests and record the run
+  ```
+
+  See [docs/guard.md](docs/guard.md) and the two projects in
+  [examples/](examples/).
+
 - **The web app:** https://viraloyster.github.io/VIBloom/, or locally with
   `npm ci && npm run dev`. To use an AI, choose a provider in Settings
   (Anthropic, OpenAI, xAI, Gemini, OpenRouter or a local server) and enter
@@ -101,6 +113,7 @@ packages/chem     stiff solver, Oregonator models, recipe conversion, classifier
 packages/engine   hashing, event log, write gate, derived status
 packages/contracts shared types and boundary validation
 tools/reference   SciPy reference data generator
+examples/         a Foundry vault and a pytest ledger set up with the guard
 docs/             architecture, guard, science, validation
 ```
 

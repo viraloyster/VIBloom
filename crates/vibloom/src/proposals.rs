@@ -135,18 +135,29 @@ pub fn propose(
     })
 }
 
+// A title as an id: lowercase words joined by dashes, cut at a word so an id
+// never ends in half a word.
 fn slug(title: &str) -> String {
     let mut s = String::new();
     for c in title.to_lowercase().chars() {
         if c.is_ascii_alphanumeric() {
             s.push(c);
-        } else if !s.ends_with('-') && !s.is_empty() {
+        } else if c != '\'' && !s.ends_with('-') && !s.is_empty() {
             s.push('-');
         }
     }
-    let s: String = s.trim_end_matches('-').chars().take(40).collect();
-    let s = s.trim_end_matches('-').to_string();
-    if s.is_empty() { "node".into() } else { s }
+    let mut out = String::new();
+    for word in s.split('-').filter(|w| !w.is_empty()) {
+        if !out.is_empty() && out.len() + 1 + word.len() > 32 {
+            break;
+        }
+        if !out.is_empty() {
+            out.push('-');
+        }
+        out.push_str(word);
+    }
+    out.truncate(32);
+    if out.is_empty() { "node".into() } else { out }
 }
 
 /// An id nothing in the map uses yet: the kind's prefix and the title.

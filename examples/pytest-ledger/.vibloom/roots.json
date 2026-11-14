@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "runner": [
+    "pytest",
+    "-q",
+    "--junitxml=.pytest_cache/vibloom-junit.xml"
+  ],
+  "report": ".pytest_cache/vibloom-junit.xml",
+  "tests": "tests/",
+  "protect": [],
+  "nodes": [
+    {
+      "id": "inv.no-negative-balance",
+      "kind": "invariant",
+      "title": "No balance ever goes negative, and the total equals what moved",
+      "stance": "adopted",
+      "test": {
+        "file": "tests/test_ledger.py",
+        "contract": "tests.test_ledger",
+        "name": "test_no_balance_goes_negative"
+      },
+      "watch": [
+        "src/",
+        "tests/"
+      ],
+      "protected": true
+    },
+    {
+      "id": "int.no-overdraw",
+      "kind": "intention",
+      "title": "An account can never spend what it does not have",
+      "stance": "adopted",
+      "depends_on": [
+        "inv.no-negative-balance"
+      ],
+      "protected": false
+    }
+  ]
+}

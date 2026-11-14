@@ -3,3 +3,8 @@ packages/chem/fixtures/
 # Written by the TypeScript guard; kept byte for byte.
 crates/*/tests/fixtures/
 target/
+# Written by the guard.
+.vibloom/
+# Build output of the examples.
+examples/*/out/
+examples/*/cache/
