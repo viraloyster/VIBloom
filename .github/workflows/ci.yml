@@ -44,7 +44,11 @@ jobs:
       - run: cargo install --locked --path crates/vibloom
       - name: Foundry vault
         working-directory: examples/foundry-vault
-        run: vibloom verify && vibloom check
+        run: |
+          forge --version
+          forge test --list --json
+          vibloom verify
+          vibloom check || { vibloom status --json; forge test; exit 1; }
       - name: Pytest ledger
         working-directory: examples/pytest-ledger
         run: vibloom verify && vibloom check
