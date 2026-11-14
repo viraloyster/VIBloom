@@ -53,17 +53,22 @@ fn id_for(name: &str) -> String {
     )
 }
 
-pub fn add_found(map: &RootsMap, found: &[Found]) -> (RootsMap, Vec<String>) {
-    let known: HashSet<String> = map
-        .nodes
-        .iter()
-        .filter_map(|n| n.test.as_ref().map(|t| format!("{}:{}", t.file, t.name)))
-        .collect();
+/// `watch` is what a found invariant watches besides its own test file: the
+/// project's sources and tests, so a change to either puts it up for review.
+pub fn add_found(map: &RootsMap, found: &[Found], watch: &[String]) -> (RootsMap, Vec<String>) {
+    // A test the map lists without a contract stands for every contract.
+    let known = |f: &Found| {
+        map.nodes.iter().filter_map(|n| n.test.as_ref()).any(|t| {
+            t.file == f.file
+                && t.name == f.name
+                && t.contract.as_ref().is_none_or(|c| *c == f.contract)
+        })
+    };
     let mut ids: HashSet<String> = map.nodes.iter().map(|n| n.id.clone()).collect();
     let mut out = map.clone();
     let mut added = Vec::new();
     for f in found {
-        if known.contains(&format!("{}:{}", f.file, f.name)) {
+        if known(f) {
             continue;
         }
         let base = id_for(&f.name);
@@ -85,7 +90,7 @@ pub fn add_found(map: &RootsMap, found: &[Found]) -> (RootsMap, Vec<String>) {
                 contract: Some(f.contract.clone()),
                 name: f.name.clone(),
             }),
-            watch: vec![],
+            watch: watch.to_vec(),
             depends_on: vec![],
             protected: true,
         });
@@ -140,13 +145,14 @@ contract CounterTest is Test {
             contract: "D".into(),
             name: "invariant_totalMatchesAdded".into(),
         });
-        let (map, added) = add_found(&start, &found);
+        let (map, added) = add_found(&start, &found, &["src/".to_string()]);
         assert_eq!(
             added,
             vec!["inv.not-here", "inv.bounded", "inv.total-matches-added-2"]
         );
         let last = map.nodes.last().expect("node");
         assert!(last.protected);
+        assert_eq!(last.watch, vec!["src/"]);
         assert_eq!(
             last.test.as_ref().map(|t| t.file.as_str()),
             Some("test/D.t.sol")

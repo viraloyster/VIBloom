@@ -10,6 +10,7 @@ pub const MAP_PATH: &str = ".vibloom/roots.json";
 pub const LOG_PATH: &str = ".vibloom/log.jsonl";
 pub const PROPOSALS_PATH: &str = ".vibloom/proposals.jsonl";
 pub const DEFAULT_RUNNER: [&str; 3] = ["forge", "test", "--json"];
+pub const DEFAULT_TIMEOUT: u64 = 3600;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -93,6 +94,8 @@ pub struct RootsMap {
     /// Where the runner writes a JUnit XML report; without it, the runner's
     /// output is read as `forge test --json`.
     pub report: Option<String>,
+    /// Seconds a run may take before it is stopped and recorded as an error.
+    pub timeout: u64,
     pub tests: String,
     /// Paths only the verifier may edit, besides protected tests and .vibloom/.
     pub protect: Vec<String>,
@@ -104,6 +107,7 @@ impl RootsMap {
         Self {
             runner: DEFAULT_RUNNER.iter().map(|s| (*s).to_string()).collect(),
             report: None,
+            timeout: DEFAULT_TIMEOUT,
             tests: "test/".into(),
             protect: vec![],
             nodes: vec![],
@@ -182,7 +186,9 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
     };
     unknown_keys(
         obj,
-        &["version", "runner", "report", "tests", "protect", "nodes"],
+        &[
+            "version", "runner", "report", "timeout", "tests", "protect", "nodes",
+        ],
         "the map",
         &mut errors,
     );
@@ -205,6 +211,13 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
     };
     if report.is_none() {
         errors.push("report must be a relative path".into());
+    }
+    let timeout = match obj.get("timeout") {
+        None => Some(DEFAULT_TIMEOUT),
+        Some(v) => v.as_u64().filter(|t| *t > 0),
+    };
+    if timeout.is_none() {
+        errors.push("timeout must be a number of seconds above 0".into());
     }
     let tests = match obj.get("tests") {
         None => Some("test/".to_string()),
@@ -369,6 +382,7 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
         (true, Some(runner), Some(report), Some(tests), Some(protect)) => Ok(RootsMap {
             runner,
             report,
+            timeout: timeout.unwrap_or(DEFAULT_TIMEOUT),
             tests,
             protect,
             nodes,
@@ -444,6 +458,8 @@ struct MapOut<'a> {
     runner: &'a [String],
     #[serde(skip_serializing_if = "Option::is_none")]
     report: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    timeout: Option<u64>,
     tests: &'a str,
     protect: &'a [String],
     nodes: Vec<NodeOut<'a>>,
@@ -455,6 +471,7 @@ pub fn serialize_map(map: &RootsMap) -> String {
         version: 1,
         runner: &map.runner,
         report: map.report.as_deref(),
+        timeout: (map.timeout != DEFAULT_TIMEOUT).then_some(map.timeout),
         tests: &map.tests,
         protect: &map.protect,
         nodes: map

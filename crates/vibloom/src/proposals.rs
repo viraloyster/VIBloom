@@ -149,18 +149,14 @@ fn slug(title: &str) -> String {
     if s.is_empty() { "node".into() } else { s }
 }
 
-/// The map with the proposal added. Assumptions enter as hypothetical; the
-/// person adopts them later by editing the map.
-pub fn accept(map: &RootsMap, p: &Proposal) -> Result<(RootsMap, String), Vec<String>> {
-    let Some(kind) = Kind::parse(&p.kind) else {
-        return Err(vec!["the proposal's kind is not valid".into()]);
-    };
+/// An id nothing in the map uses yet: the kind's prefix and the title.
+pub fn fresh_id(map: &RootsMap, kind: Kind, title: &str) -> String {
     let prefix = match kind {
         Kind::Assumption => "asm",
         Kind::Invariant => "inv",
         Kind::Intention => "int",
     };
-    let base = format!("{prefix}.{}", slug(&p.title));
+    let base = format!("{prefix}.{}", slug(title));
     let ids: HashSet<&str> = map.nodes.iter().map(|n| n.id.as_str()).collect();
     let mut id = base.clone();
     let mut i = 2;
@@ -169,8 +165,27 @@ pub fn accept(map: &RootsMap, p: &Proposal) -> Result<(RootsMap, String), Vec<St
         i += 1;
     }
     debug_assert!(valid_id(&id));
+    id
+}
+
+/// The map with one more node. The result must still be a valid map, checked
+/// the same way as one written by hand.
+pub fn with_node(map: &RootsMap, node: RootNode) -> Result<RootsMap, Vec<String>> {
     let mut out = map.clone();
-    out.nodes.push(RootNode {
+    out.nodes.push(node);
+    let reparsed: Value =
+        serde_json::from_str(&serialize_map(&out)).map_err(|e| vec![e.to_string()])?;
+    parse_map(&reparsed)
+}
+
+/// The map with the proposal added. Assumptions enter as hypothetical; the
+/// person adopts them later by editing the map.
+pub fn accept(map: &RootsMap, p: &Proposal) -> Result<(RootsMap, String), Vec<String>> {
+    let Some(kind) = Kind::parse(&p.kind) else {
+        return Err(vec!["the proposal's kind is not valid".into()]);
+    };
+    let id = fresh_id(map, kind, &p.title);
+    let node = RootNode {
         id: id.clone(),
         kind,
         title: p.title.clone(),
@@ -187,13 +202,8 @@ pub fn accept(map: &RootsMap, p: &Proposal) -> Result<(RootsMap, String), Vec<St
         watch: p.watch.clone(),
         depends_on: p.depends_on.clone(),
         protected: kind == Kind::Invariant,
-    });
-    // The result must still be a valid map, checked the same way as one
-    // written by hand.
-    let reparsed: Value =
-        serde_json::from_str(&serialize_map(&out)).map_err(|e| vec![e.to_string()])?;
-    let checked = parse_map(&reparsed)?;
-    Ok((checked, id))
+    };
+    Ok((with_node(map, node)?, id))
 }
 
 #[cfg(test)]

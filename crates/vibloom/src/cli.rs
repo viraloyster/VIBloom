@@ -3,17 +3,19 @@
 
 use crate::context::context;
 use crate::derive::{Files, NodeView, derive, label, troubled};
-use crate::forge::{Outcome, RunnerOutputError, forge_filters, parse_forge};
+use crate::forge::{Outcome, RunnerOutputError, parse_forge};
 use crate::gate::precommit;
 use crate::hash::sha256_hex;
-use crate::hooks::{HookInput, HookOutput, Role, post_tool, pre_tool, stop};
+use crate::hooks::{HookInput, HookOutput, Role, post_tool, pre_tool, stop, test_run};
 use crate::junit::parse_junit;
 use crate::log::{ReadLog, RunBody, RunEntry, extends_log, next_entry, read_log, to_line};
 use crate::map::{
-    LOG_PATH, MAP_PATH, PROPOSALS_PATH, RootsMap, parse_map, serialize_map, watched_by,
+    Kind, LOG_PATH, MAP_PATH, PROPOSALS_PATH, RootNode, RootsMap, Stance, TestRef, parse_map,
+    serialize_map, test_name, watched_by,
 };
-use crate::proposals::{Book, Decision, accept};
-use crate::scan::{add_found, find_invariants};
+use crate::proposals::{Book, Decision, accept, fresh_id, with_node};
+use crate::scan::{Found, add_found, find_invariants};
+use crate::setup::{Plan, Stack, helpers, plan};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::fs;
@@ -35,7 +37,6 @@ const SKIP_DIRS: [&str; 10] = [
     ".venv",
     "dist",
 ];
-const LOCK_PATH: &str = ".vibloom/lock";
 
 pub struct Io<'a> {
     pub cwd: PathBuf,
@@ -105,15 +106,23 @@ fn load_book(root: &Path) -> Book {
 /// and a person) never write the record at once. Released when the file
 /// closes, even if the process dies.
 pub fn locked<T>(root: &Path, f: impl FnOnce() -> Fallible<T>) -> Fallible<T> {
-    fs::create_dir_all(root.join(".vibloom")).map_err(|e| e.to_string())?;
+    // Kept out of the working tree, so it is never staged or committed: in
+    // the repository's git folder, or the temp folder when there is none.
+    let path = git(root, &["rev-parse", "--absolute-git-dir"]).map_or_else(
+        |_| {
+            let id = sha256_hex(real(root).to_string_lossy().as_bytes());
+            std::env::temp_dir().join(format!("vibloom-{}.lock", &id[..16]))
+        },
+        |d| PathBuf::from(d.trim()).join("vibloom.lock"),
+    );
     let file = fs::OpenOptions::new()
         .create(true)
         .truncate(false)
         .write(true)
-        .open(root.join(LOCK_PATH))
-        .map_err(|e| format!("cannot open {LOCK_PATH}: {e}"))?;
+        .open(&path)
+        .map_err(|e| format!("cannot open {}: {e}", path.display()))?;
     file.lock()
-        .map_err(|e| format!("cannot lock {LOCK_PATH}: {e}"))?;
+        .map_err(|e| format!("cannot lock {}: {e}", path.display()))?;
     let out = f();
     let _ = file.unlock();
     out
@@ -216,6 +225,57 @@ pub fn views(root: &Path) -> Fallible<Vec<NodeView>> {
     ))
 }
 
+struct Finished {
+    stdout: String,
+    stderr: String,
+}
+
+// The runner with a time limit: a test that hangs must not hang the agent's
+// hook or CI for ever. Output is drained on threads so a full pipe cannot
+// block the child.
+fn run_child(exe: &str, args: &[String], root: &Path, limit: u64) -> Result<Finished, String> {
+    use std::io::Read as _;
+    use std::process::Stdio;
+    let mut child = Command::new(exe)
+        .args(args)
+        .current_dir(root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("could not start {exe}: {e}"))?;
+    let drain = |pipe: Option<Box<dyn std::io::Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = p.read_to_end(&mut buf);
+            }
+            String::from_utf8_lossy(&buf).into_owned()
+        })
+    };
+    let out = drain(child.stdout.take().map(|p| Box::new(p) as _));
+    let err = drain(child.stderr.take().map(|p| Box::new(p) as _));
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if started.elapsed().as_secs() >= limit => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!(
+                    "the runner did not finish in {limit} s and was stopped (\"timeout\" in the map sets the limit)"
+                ));
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
+            Err(e) => return Err(format!("could not wait for {exe}: {e}")),
+        }
+    }
+    Ok(Finished {
+        stdout: out.join().unwrap_or_default(),
+        stderr: err.join().unwrap_or_default(),
+    })
+}
+
 pub struct RunReport {
     pub entry: RunEntry,
     pub views: Vec<NodeView>,
@@ -245,10 +305,10 @@ pub fn run(root: &Path, extra: &[String]) -> Fallible<RunReport> {
     }
     let mut outcomes: Vec<Outcome> = vec![];
     let mut error = None;
-    match Command::new(exe).args(args).current_dir(root).output() {
-        Err(e) => error = Some(format!("could not start {exe}: {e}")),
+    match run_child(exe, args, root, map.timeout) {
+        Err(e) => error = Some(e),
         Ok(res) => {
-            let stdout = String::from_utf8_lossy(&res.stdout);
+            let stdout = res.stdout;
             let parsed = match &map.report {
                 None => parse_forge(&stdout),
                 Some(report) => match std::fs::read_to_string(root.join(report)) {
@@ -261,7 +321,7 @@ pub fn run(root: &Path, extra: &[String]) -> Fallible<RunReport> {
             match parsed {
                 Ok(o) => outcomes = o,
                 Err(e) => {
-                    let stderr = String::from_utf8_lossy(&res.stderr);
+                    let stderr = res.stderr;
                     let src = if stderr.trim().is_empty() {
                         stdout
                     } else {
@@ -318,15 +378,94 @@ pub fn table(vs: &[NodeView]) -> String {
         .join("\n")
 }
 
-fn scan(root: &Path, map: &RootsMap) -> (RootsMap, Vec<String>) {
-    let mut files = Vec::new();
-    walk(root, map.tests.trim_end_matches('/'), &mut files);
-    let found: Vec<_> = files
+fn last_json(text: &str) -> Option<Value> {
+    let line = text.lines().map(str::trim).rfind(|l| l.starts_with('{'))?;
+    serde_json::from_str(line).ok()
+}
+
+// What the project is and how its tests run, asking forge for its own
+// folders when it is a Foundry project.
+fn project_plan(root: &Path, stack: Option<Stack>) -> Plan {
+    let has = |f: &str| root.join(f).is_file();
+    let stack = stack.unwrap_or_else(|| Stack::detect(&has));
+    let config = (stack == Stack::Foundry)
+        .then(|| run_child("forge", &["config".into(), "--json".into()], root, 60).ok())
+        .flatten()
+        .and_then(|r| last_json(&r.stdout));
+    plan(stack, config.as_ref(), &has)
+}
+
+// Foundry's own list of tests: it knows the contract each test runs in, also
+// for a test inherited from a base contract, which reading the source cannot.
+fn forge_invariants(root: &Path, exe: &str) -> Option<Vec<Found>> {
+    let args = ["test".to_string(), "--list".into(), "--json".into()];
+    let listed = last_json(&run_child(exe, &args, root, 600).ok()?.stdout)?;
+    let mut out = Vec::new();
+    for (file, contracts) in listed.as_object()? {
+        for (contract, tests) in contracts.as_object()? {
+            for name in tests.as_array()?.iter().filter_map(Value::as_str) {
+                if name.starts_with("invariant") || name.starts_with("statefulFuzz") {
+                    out.push(Found {
+                        file: file.clone(),
+                        contract: contract.clone(),
+                        name: test_name(name),
+                    });
+                }
+            }
+        }
+    }
+    Some(out)
+}
+
+struct Scanned {
+    map: RootsMap,
+    added: Vec<String>,
+    /// Handlers and base contracts now guarded with the tests that use them.
+    guarded: Vec<String>,
+}
+
+fn scan(root: &Path, map: &RootsMap, src: Option<&str>) -> Scanned {
+    let foundry = map.report.is_none();
+    let found = foundry
+        .then(|| forge_invariants(root, map.runner.first().map_or("forge", String::as_str)))
+        .flatten()
+        .unwrap_or_else(|| {
+            let mut files = Vec::new();
+            walk(root, map.tests.trim_end_matches('/'), &mut files);
+            files
+                .iter()
+                .filter(|f| f.ends_with(".t.sol"))
+                .flat_map(|f| {
+                    find_invariants(f, &fs::read_to_string(root.join(f)).unwrap_or_default())
+                })
+                .collect()
+        });
+    // A change to the sources or to any test file puts a found invariant up
+    // for review: its handler lives among the tests.
+    let mut watch: Vec<String> = src.map(str::to_string).into_iter().collect();
+    if !watch.contains(&map.tests) {
+        watch.push(map.tests.clone());
+    }
+    let (mut out, added) = add_found(map, &found, &watch);
+    let tests: Vec<String> = out
+        .nodes
         .iter()
-        .filter(|f| f.ends_with(".t.sol"))
-        .flat_map(|f| find_invariants(f, &fs::read_to_string(root.join(f)).unwrap_or_default()))
+        .filter(|n| n.protected)
+        .filter_map(|n| n.test.as_ref().map(|t| t.file.clone()))
         .collect();
-    add_found(map, &found)
+    let read = |f: &str| fs::read_to_string(root.join(f)).ok();
+    let mut guarded = Vec::new();
+    for h in helpers(&tests, &map.tests, &read) {
+        if !crate::hooks::is_guarded(&out, &h) {
+            out.protect.push(h.clone());
+            guarded.push(h);
+        }
+    }
+    Scanned {
+        map: out,
+        added,
+        guarded,
+    }
 }
 
 pub fn hooks_config() -> Value {
@@ -426,16 +565,17 @@ fn hook(kind: &str, stdin: &str, role: Role, cwd: &Path) -> Fallible<HookOutput>
     match kind {
         "pre-tool" => Ok(pre_tool(&input, &map, role, &rel)),
         "post-tool" => {
-            // After a test run, the guard re-runs the same subset with --json
-            // and records it; the agent's own output is never parsed or trusted.
+            // After a test run, the guard runs the tests itself and records
+            // that; the agent's own output is never parsed or trusted.
             let filters = (input.tool_name == "Bash")
-                .then(|| forge_filters(input.command.as_deref().unwrap_or_default()))
+                .then(|| test_run(&map, input.command.as_deref().unwrap_or_default()))
                 .flatten();
+            let ran = filters.is_some();
             let vs = match filters {
                 Some(f) => run(&root, &f)?.views,
                 None => views(&root)?,
             };
-            Ok(post_tool(&input, &vs, &rel))
+            Ok(post_tool(&input, &vs, ran, &rel))
         }
         "stop" => Ok(stop(&input, &views(&root)?, &load_log(&root).problems)),
         other => Ok(HookOutput {
@@ -494,13 +634,19 @@ fn check_base(root: &Path, base: &str) -> Vec<String> {
 
 pub const USAGE: &str = "vibloom: assumptions, invariants and intentions for a code project.
 
-  vibloom init               create .vibloom/roots.json and list the invariant tests found
-  vibloom scan               add invariant tests the map does not list yet
+  vibloom init [--stack S]   create .vibloom/roots.json for this project (foundry, hardhat,
+                             cargo or pytest; detected when not given)
+  vibloom install-hook       install the commit check in this clone's git hooks
+  vibloom add <kind> \"<title>\" [--file F --test N [--contract C]] [--watch P] [--on ID]
+                             add an assumption, invariant or intention (verifier)
+  vibloom scan               add invariant tests the map does not list yet (verifier)
   vibloom status [--json]    the derived state of every node (exit 1 if any needs attention)
   vibloom run [-- args]      run the tests, record the run, show what changed
   vibloom check [--base ref] [-- args]
                              run, then exit 1 if any node needs attention (for CI); with
                              --base, first require the log to extend the one on that commit
+  vibloom sync --base ref    after the base branch moved on: take its run log and record
+                             the tests again on top of it
   vibloom context [file]     what an agent should know before touching a file
   vibloom verify             check the run log's hash chain
   vibloom repair             set aside everything after a broken link in the log (verifier)
@@ -538,14 +684,34 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
     };
     // Our options come first; only what follows "--" goes to the runner, so a
     // mistyped option is never run as a test filter.
-    let mut base: Option<String> = None;
-    let mut as_json = false;
+    let valued: &[&str] = match cmd {
+        "check" | "sync" => &["--base"],
+        "init" => &["--stack"],
+        "add" => &[
+            "--id",
+            "--file",
+            "--contract",
+            "--test",
+            "--watch",
+            "--on",
+            "--detail",
+        ],
+        _ => &[],
+    };
+    let flags: &[&str] = match cmd {
+        "status" => &["--json"],
+        "add" => &["--hypothetical", "--unprotected"],
+        _ => &[],
+    };
+    let mut opts: Vec<(&str, &str)> = vec![];
+    let mut set: Vec<&str> = vec![];
     let mut extra: Vec<String> = vec![];
     let mut words: Vec<&str> = vec![];
     let runs = matches!(cmd, "run" | "check");
     let mut i = 0;
     while i < rest.len() {
-        match rest[i].as_str() {
+        let a = rest[i].as_str();
+        match a {
             "--" if runs => {
                 extra.extend(rest[i + 1..].iter().cloned());
                 break;
@@ -554,27 +720,33 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
                 (io.out)(USAGE);
                 return Ok(0);
             }
-            "--base" if cmd == "check" => {
+            _ if valued.contains(&a) => {
                 i += 1;
-                base = Some(
-                    rest.get(i)
-                        .cloned()
-                        .ok_or("--base needs a commit, for example --base origin/main")?,
-                );
+                let v = rest.get(i).ok_or_else(|| format!("{a} needs a value."))?;
+                opts.push((a, v.as_str()));
             }
-            "--json" if cmd == "status" => as_json = true,
-            a if a.starts_with('-') && cmd != "hook" => {
+            _ if flags.contains(&a) => set.push(a),
+            _ if a.starts_with('-') && cmd != "hook" => {
                 return Err(if runs {
                     format!("Unknown option {a}. Arguments for the test runner go after `--`.")
                 } else {
                     format!("Unknown option {a} for `vibloom {cmd}`.")
                 });
             }
-            a => words.push(a),
+            _ => words.push(a),
         }
         i += 1;
     }
-    let takes_words = matches!(cmd, "hook" | "context" | "proposals");
+    let opt = |k: &str| opts.iter().rev().find(|(n, _)| *n == k).map(|(_, v)| *v);
+    let all = |k: &str| -> Vec<String> {
+        opts.iter()
+            .filter(|(n, _)| *n == k)
+            .map(|(_, v)| (*v).to_string())
+            .collect()
+    };
+    let base = opt("--base").map(str::to_string);
+    let as_json = set.contains(&"--json");
+    let takes_words = matches!(cmd, "hook" | "context" | "proposals" | "add");
     if !takes_words && !words.is_empty() {
         return Err(format!(
             "`vibloom {cmd}` takes no argument like {}.{}",
@@ -620,15 +792,39 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
             if io.cwd.join(MAP_PATH).exists() {
                 return Err(format!("{MAP_PATH} already exists here."));
             }
+            let stack = match opt("--stack") {
+                None => None,
+                Some(s) => Some(Stack::parse(s).ok_or_else(|| {
+                    format!("Unknown stack {s}: use foundry, hardhat, cargo or pytest.")
+                })?),
+            };
+            let p = project_plan(&io.cwd, stack);
+            let start = RootsMap {
+                runner: p.runner.clone(),
+                report: p.report.clone(),
+                tests: p.tests.clone(),
+                protect: p.protect.clone(),
+                ..RootsMap::empty()
+            };
+            let found = scan(&io.cwd, &start, p.src.as_deref());
             fs::create_dir_all(io.cwd.join(".vibloom")).map_err(|e| e.to_string())?;
-            let (map, added) = scan(&io.cwd, &RootsMap::empty());
-            write_atomic(&io.cwd.join(MAP_PATH), &serialize_map(&map))?;
+            write_atomic(&io.cwd.join(MAP_PATH), &serialize_map(&found.map))?;
             (io.out)(&format!(
-                "Created {MAP_PATH} with {} invariant tests found.",
-                added.len()
+                "Created {MAP_PATH}: runner `{}`, {} invariant tests found.",
+                p.runner.join(" "),
+                found.added.len()
             ));
+            if !found.map.protect.is_empty() {
+                (io.out)(&format!(
+                    "Guarded besides the tests: {}.",
+                    found.map.protect.join(", ")
+                ));
+            }
+            for n in &p.notes {
+                (io.out)(n);
+            }
             (io.out)(
-                "Give them titles, add assumptions and intentions, and set up the commit check (see docs/guard.md).",
+                "Next: `vibloom install-hook` for the commit check, `vibloom check` to run the tests, `vibloom add` for assumptions and intentions.",
             );
             return Ok(0);
         }
@@ -641,15 +837,116 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
     })?;
     match cmd {
         "scan" => {
-            let (map, added) = scan(&root, &load_map(&root)?);
-            if !added.is_empty() {
-                write_atomic(&root.join(MAP_PATH), &serialize_map(&map))?;
+            verifier(io.role, "changes the map")?;
+            let map = load_map(&root)?;
+            let src = project_plan(&root, None).src;
+            let found = scan(&root, &map, src.as_deref());
+            if !found.added.is_empty() || !found.guarded.is_empty() {
+                write_atomic(&root.join(MAP_PATH), &serialize_map(&found.map))?;
             }
-            (io.out)(&if added.is_empty() {
+            (io.out)(&if found.added.is_empty() {
                 "No new invariant tests.".to_string()
             } else {
-                format!("Added {}.", added.join(", "))
+                format!("Added {}.", found.added.join(", "))
             });
+            if !found.guarded.is_empty() {
+                (io.out)(&format!("Now guarded: {}.", found.guarded.join(", ")));
+            }
+            Ok(0)
+        }
+        "add" => {
+            verifier(io.role, "changes the map")?;
+            let usage = "Usage: vibloom add <assumption|invariant|intention> \"<title>\" [--file F --test N [--contract C]] [--watch P]... [--on ID]... [--detail D] [--id ID] [--hypothetical] [--unprotected]";
+            let (Some(kind), Some(title), None) = (
+                words.first().and_then(|k| Kind::parse(k)),
+                words.get(1),
+                words.get(2),
+            ) else {
+                return Err(usage.into());
+            };
+            let map = load_map(&root)?;
+            let test = match (opt("--file"), opt("--test")) {
+                (Some(f), Some(n)) => Some(TestRef {
+                    file: relative_to(&root, &io.cwd, f)
+                        .ok_or_else(|| format!("{f} is outside the project."))?,
+                    contract: opt("--contract").map(str::to_string),
+                    name: test_name(n),
+                }),
+                (None, None) => None,
+                _ => return Err(format!("A test needs both --file and --test.\n{usage}")),
+            };
+            let mut watch = Vec::new();
+            for w in all("--watch") {
+                let dir = w.ends_with('/');
+                let r = relative_to(&root, &io.cwd, &w)
+                    .ok_or_else(|| format!("{w} is outside the project."))?;
+                watch.push(if dir { format!("{r}/") } else { r });
+            }
+            // A tested node with nothing to watch would never go stale: it
+            // watches the sources and the tests unless told otherwise.
+            if watch.is_empty() && test.is_some() {
+                watch.extend(project_plan(&root, None).src);
+                if !watch.contains(&map.tests) {
+                    watch.push(map.tests.clone());
+                }
+            }
+            let id = opt("--id").map_or_else(|| fresh_id(&map, kind, title), str::to_string);
+            let node = RootNode {
+                id: id.clone(),
+                kind,
+                title: (*title).to_string(),
+                detail: opt("--detail").map(str::to_string),
+                stance: if set.contains(&"--hypothetical") {
+                    Stance::Hypothetical
+                } else {
+                    Stance::Adopted
+                },
+                test,
+                watch,
+                depends_on: all("--on"),
+                protected: kind == Kind::Invariant && !set.contains(&"--unprotected"),
+            };
+            let next = with_node(&map, node)
+                .map_err(|e| format!("The node cannot be added:\n- {}", e.join("\n- ")))?;
+            write_atomic(&root.join(MAP_PATH), &serialize_map(&next))?;
+            (io.out)(&format!("Added {id}."));
+            Ok(0)
+        }
+        "install-hook" => {
+            let rel = git(&root, &["rev-parse", "--git-path", "hooks/pre-commit"])
+                .map_err(|e| format!("This is not a git repository: {e}"))?;
+            let path = root.join(rel.trim());
+            let line = "vibloom precommit";
+            if let Ok(existing) = fs::read_to_string(&path) {
+                if existing.contains(line) {
+                    (io.out)("The commit check is already installed.");
+                    return Ok(0);
+                }
+                return Err(format!(
+                    "{} already exists. Add this line to it: {line} || exit 1",
+                    path.display()
+                ));
+            }
+            if let Some(dir) = path.parent() {
+                fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            }
+            fs::write(
+                &path,
+                format!(
+                    "#!/bin/sh\n# VIBloom: refuse a commit that breaks the map.\nif ! command -v vibloom >/dev/null 2>&1; then\n  echo \"VIBloom: vibloom is not on PATH, so the commit check cannot run.\" >&2\n  exit 1\nfi\nexec {line}\n"
+                ),
+            )
+            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                fs::set_permissions(&path, fs::Permissions::from_mode(0o755))
+                    .map_err(|e| e.to_string())?;
+            }
+            (io.out)(&format!(
+                "Installed the commit check at {}. Each clone installs its own.",
+                path.display()
+            ));
             Ok(0)
         }
         "status" => {
@@ -676,6 +973,41 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
                 (io.out)(&table(&vs));
             }
             Ok(i32::from(vs.iter().any(troubled) || !problems.is_empty()))
+        }
+        "sync" => {
+            let b = base
+                .as_deref()
+                .ok_or("Usage: vibloom sync --base <commit>, for example --base origin/main")?;
+            // A branch whose log no longer extends the base's (the base moved
+            // on, or a merge left both histories in the file) takes the
+            // base's log and records the tests again on top of it.
+            if check_base(&root, b).is_empty() {
+                (io.out)(&format!("The run log already extends the one on {b}."));
+            } else {
+                let shown = git(&root, &["show", &format!("{b}:./{LOG_PATH}")]).unwrap_or_default();
+                let base_log = read_log(&shown);
+                if !base_log.problems.is_empty() {
+                    return Err(format!(
+                        "The run log on {b} does not verify:\n- {}",
+                        base_log.problems.join("\n- ")
+                    ));
+                }
+                locked(&root, || write_atomic(&root.join(LOG_PATH), &shown))?;
+                (io.out)(&format!(
+                    "Took the {} runs on {b}; this branch's own runs are replaced by the one recorded now.",
+                    base_log.entries.len()
+                ));
+            }
+            let report = run(&root, &[])?;
+            (io.out)(&format!(
+                "Run {}: {} test results recorded.",
+                report.entry.seq,
+                report.entry.outcomes.len()
+            ));
+            (io.out)(&table(&report.views));
+            Ok(i32::from(
+                report.views.iter().any(troubled) || report.entry.error.is_some(),
+            ))
         }
         "run" | "check" => {
             if let Some(b) = base.as_deref() {
@@ -778,6 +1110,16 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
         }
         "proposals" => proposals(&root, &words, io),
         other => Err(format!("Unknown command {other}.\n\n{USAGE}")),
+    }
+}
+
+fn verifier(role: Role, what: &str) -> Fallible<()> {
+    if role == Role::Verifier {
+        Ok(())
+    } else {
+        Err(format!(
+            "This {what}: only the verifier does it. Run it as VIBLOOM_ROLE=verifier."
+        ))
     }
 }
 

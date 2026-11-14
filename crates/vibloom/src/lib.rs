@@ -14,3 +14,4 @@ pub mod map;
 pub mod mcp;
 pub mod proposals;
 pub mod scan;
+pub mod setup;

@@ -170,11 +170,29 @@ pub fn summary(views: &[NodeView]) -> String {
         .join("\n")
 }
 
-/// After a tool ran. `views` is the state after the guard re-ran the tests,
-/// when the tool was a test run.
+/// Whether a shell command runs the project's tests, and with which filters.
+/// Foundry's filters are kept, to re-run the same subset; for any other
+/// runner the command only has to name it, and the whole suite runs.
+pub fn test_run(map: &RootsMap, command: &str) -> Option<Vec<String>> {
+    if map.report.is_none() {
+        return forge_filters(command);
+    }
+    let word = |w: &str| {
+        let name = w.rsplit(['/', '\\']).next().unwrap_or(w);
+        Regex::new(&format!(r"(^|[\s;&|/]){}(\s|$)", regex::escape(name)))
+            .is_ok_and(|r| r.is_match(command))
+    };
+    let mut named = map.runner.iter().take_while(|w| !w.starts_with('-'));
+    let exe = named.next()?;
+    (word(exe) && named.next().is_none_or(|sub| word(sub))).then(Vec::new)
+}
+
+/// After a tool ran. `ran` says the tool was a test run, and then `views` is
+/// the state after the guard ran the tests itself.
 pub fn post_tool(
     input: &HookInput,
     views: &[NodeView],
+    ran: bool,
     rel: &dyn Fn(&str) -> Option<String>,
 ) -> HookOutput {
     let context = |text: String| {
@@ -182,9 +200,7 @@ pub fn post_tool(
             json!({ "hookSpecificOutput": { "hookEventName": "PostToolUse", "additionalContext": text }}),
         )
     };
-    if input.tool_name == "Bash"
-        && forge_filters(input.command.as_deref().unwrap_or_default()).is_some()
-    {
+    if ran {
         let bad = views.iter().filter(|v| troubled(v)).count();
         if bad == 0 {
             let held = views
@@ -421,6 +437,7 @@ pub(crate) mod tests {
         let out = json_of(&post_tool(
             &bash("forge test --mt invariant_sum"),
             &[v],
+            true,
             &rel,
         ));
         assert_eq!(out["decision"], "block");
@@ -430,6 +447,7 @@ pub(crate) mod tests {
         let clean = json_of(&post_tool(
             &bash("forge test"),
             &[view(Evidence::Holds)],
+            true,
             &rel,
         ));
         assert!(
@@ -447,7 +465,7 @@ pub(crate) mod tests {
             file_path: Some("/repo/src/C.sol".into()),
             ..Default::default()
         };
-        let out = json_of(&post_tool(&input, &[view(Evidence::Holds)], &rel));
+        let out = json_of(&post_tool(&input, &[view(Evidence::Holds)], false, &rel));
         assert!(
             out["hookSpecificOutput"]["additionalContext"]
                 .as_str()
@@ -460,9 +478,36 @@ pub(crate) mod tests {
             ..Default::default()
         };
         assert_eq!(
-            post_tool(&other, &[view(Evidence::Holds)], &rel),
+            post_tool(&other, &[view(Evidence::Holds)], false, &rel),
             HookOutput::default()
         );
+    }
+
+    #[test]
+    fn knows_a_test_run_of_the_projects_own_runner() {
+        assert_eq!(
+            test_run(&map(), "forge test --mt invariant_sum -vv"),
+            Some(vec!["--mt".to_string(), "invariant_sum".to_string()])
+        );
+        assert_eq!(test_run(&map(), "forge build"), None);
+        let with = |runner: serde_json::Value| {
+            parse_map(
+                &json!({ "version": 1, "runner": runner, "report": "out/j.xml", "nodes": [] }),
+            )
+            .expect("valid")
+        };
+        let pytest = with(json!(["/venv/bin/pytest", "-q", "--junitxml=out/j.xml"]));
+        assert_eq!(test_run(&pytest, "cd app && pytest -k vault"), Some(vec![]));
+        assert_eq!(test_run(&pytest, ".venv/bin/pytest"), Some(vec![]));
+        assert_eq!(test_run(&pytest, "pip install pytest-cov"), None);
+        let nextest = with(json!(["cargo", "nextest", "run", "--profile", "ci"]));
+        assert_eq!(
+            test_run(&nextest, "cargo nextest run -p vault"),
+            Some(vec![])
+        );
+        assert_eq!(test_run(&nextest, "cargo build"), None);
+        // The filters are forge's; another runner never gets them.
+        assert_eq!(test_run(&pytest, "forge test --mt x"), None);
     }
 
     #[test]

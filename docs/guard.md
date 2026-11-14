@@ -14,6 +14,36 @@ tool or a person editing by hand all go through the same map, the same log and
 the same commit check. Integrations for a specific agent, such as the Claude
 Code hooks below, are optional extras on top.
 
+## Start
+
+In the project's root:
+
+```bash
+vibloom init           # detects Foundry, Hardhat, Cargo or pytest; --stack to choose
+vibloom install-hook   # the commit check, in this clone's git hooks
+vibloom check          # run the tests and record the run
+```
+
+For a Foundry project `init` asks forge for its tests (`forge test --list`), so
+an invariant inherited from a base contract is found under the contract it
+runs in. Each invariant found becomes a protected node that watches the source
+and test folders. `init` also guards what the invariants lean on: the handlers
+and base contracts their test files import, and `foundry.toml`, where the fuzz
+and invariant runs and depth are set. Weakening a handler or lowering `runs`
+weakens an invariant without touching its test, so only the verifier may.
+
+Add what the tests cannot say by hand, as the verifier:
+
+```bash
+export VIBLOOM_ROLE=verifier
+vibloom add assumption "only add() changes total" --on inv.total-matches-added --hypothetical
+vibloom add intention "accounting is exact" --on asm.only-add-changes-total
+vibloom add invariant "shares never exceed assets" --file test/Vault.t.sol --contract VaultTest --test invariant_solvency
+```
+
+`--watch` (repeatable) sets what a node watches; a node with a test watches
+the source and test folders when none is given. Or edit the map directly.
+
 ## The map
 
 `.vibloom/roots.json`, written by people (or a verifier agent) and kept in git:
@@ -89,8 +119,9 @@ a mocha reporter such as `mocha-junit-reporter` set in `hardhat.config`.)
   (nextest's, pytest's by default) do not, so set `contract` to tell apart
   two tests with the same name.
 - `vibloom scan` finds Foundry invariant tests only; other tests go in the map
-  by hand. The Claude Code hook records runs after `forge test` only; with
-  another runner, call `vibloom run`.
+  with `vibloom add`.
+- `"timeout"` in the map is the number of seconds a run may take (3600 when
+  not given). A run that does not finish is stopped and recorded as an error.
 
 ## Derived states
 
@@ -160,11 +191,14 @@ publishing.
 ## Commands
 
 ```bash
-vibloom init            # create the map, adding every invariant test found under tests/
-vibloom scan            # add invariant tests the map does not list yet
+vibloom init            # create the map for this project, adding every invariant test found
+vibloom install-hook    # install the commit check in this clone's git hooks
+vibloom add <kind> "<title>" ...   # add a node (verifier); see Start
+vibloom scan            # add invariant tests the map does not list yet (verifier)
 vibloom status [--json] # derived state of every node; exit 1 if any needs attention
 vibloom run -- --mt X   # run the tests (what follows -- goes to the runner), record, show what changed
 vibloom check           # run, then exit 1 if any node needs attention: for CI
+vibloom sync --base origin/main   # take the base's run log and record the tests on top of it
 vibloom context [file]  # what an agent should know before touching a file
 vibloom verify          # check the log's hash chain
 vibloom repair          # set aside everything after a broken link (verifier)
@@ -185,17 +219,11 @@ Three pieces work the same whatever writes the code:
   touches a file, in its prompt, rules file or tool call. It has full detail for
   the nodes that file touches, what they rest on and what rests on them, and one
   line for every other node, troubled ones first.
-- **The commit check**: put `vibloom precommit` in `.git/hooks/pre-commit`:
-
-  ```sh
-  #!/bin/sh
-  exec vibloom precommit
-  ```
-
-  It refuses a commit that changes a protected test, a path in `protect` or the
-  map (unless `VIBLOOM_ROLE=verifier`), that leaves a node broken, unsupported
-  or pending review, that includes an invariant that has never run, or that
-  comes with a run log failing verification. After changing code, run
+- **The commit check**: `vibloom install-hook` puts `vibloom precommit` in this
+  clone's `.git/hooks/pre-commit` (git does not share hooks, so each clone
+  installs its own). It refuses a commit that changes a protected test, a path
+  in `protect` or the map (unless `VIBLOOM_ROLE=verifier`), that leaves any
+  node needing attention, or that comes with a run log failing verification. After changing code, run
   `vibloom run` and commit the new log entry with it.
 
 - **CI**: `vibloom check` runs the tests, records the run and exits 1 if any node
@@ -269,6 +297,22 @@ jobs:
 
 Pin the VIBloom commit: the check is only as trustworthy as the code that runs it.
 
+### When the base branch moves on
+
+The log is one chain, so two branches that both recorded runs cannot both
+keep them: after the first is merged, the second no longer extends the base
+and git reports a conflict in `.vibloom/log.jsonl`. On the second branch:
+
+```bash
+git merge origin/main        # or rebase; ignore the conflict in the log
+vibloom sync --base origin/main
+git add .vibloom/log.jsonl
+```
+
+`sync` takes the base's log as it is and records the tests again on top of
+it, on the merged code. The branch's earlier runs are dropped; what counts is
+the run made after the merge.
+
 ### Owners for guarded files
 
 `.github/CODEOWNERS`, listing the map, the log and every protected test:
@@ -301,9 +345,10 @@ hooks do three things:
   that plainly write to those paths (redirection, `sed -i`, `mv`, `rm`, `cp`,
   `tee`, `git checkout`, `git restore`...) are denied too, and so are commands
   that set `VIBLOOM_ROLE` or commit with `--no-verify`.
-- **After a tool runs**: after a `forge test` command, the guard re-runs the
-  same subset with `--json` and records it, so the agent's own output is never
-  what counts. If anything is broken, unsupported or pending, the agent is sent
+- **After a tool runs**: after a command that runs the project's tests, the
+  guard runs them itself and records that, so the agent's own output is never
+  what counts. With Foundry it re-runs the same subset (`--match-test` and the
+  other filters); with another runner, the whole suite. If anything is broken, unsupported or pending, the agent is sent
   back with the list and the rule "fix the code, not the invariant". After an
   edit to a watched file, the agent is told which nodes are now pending review.
 - **Before the agent stops**: if any node needs attention, or the log fails

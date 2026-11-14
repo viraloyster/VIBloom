@@ -506,6 +506,173 @@ fn ignored_files_in_a_watched_folder_do_not_count_as_changes() {
     assert!(s.out.contains("pending review"), "{}", s.out);
 }
 
+fn read_map(dir: &Path) -> Value {
+    serde_json::from_str(&fs::read_to_string(dir.join(".vibloom/roots.json")).expect("map"))
+        .expect("json")
+}
+
+#[test]
+fn init_guards_what_an_invariant_test_leans_on() {
+    let dir = project();
+    fs::create_dir_all(dir.join("test/handlers")).expect("dir");
+    fs::write(dir.join("foundry.toml"), "[profile.default]\n").expect("write");
+    fs::write(
+        dir.join("test/C.t.sol"),
+        "import {H} from \"./handlers/H.sol\";\ncontract CT { function invariant_sum() public {} }",
+    )
+    .expect("write");
+    fs::write(dir.join("test/handlers/H.sol"), "contract H {}").expect("write");
+    let out = cli(&dir, &["init"]).out;
+    assert!(out.contains("1 invariant tests found"), "{out}");
+    let m = read_map(&dir);
+    assert_eq!(m["protect"], json!(["foundry.toml", "test/handlers/H.sol"]));
+    assert_eq!(m["nodes"][0]["watch"], json!(["src/", "test/"]));
+
+    // The handler is guarded like the test itself.
+    let input = json!({ "cwd": dir, "tool_name": "Edit",
+        "tool_input": { "file_path": dir.join("test/handlers/H.sol") } })
+    .to_string();
+    assert!(
+        vibloom(&dir, &["hook", "pre-tool"], &input, false)
+            .out
+            .contains("deny")
+    );
+}
+
+#[test]
+fn sets_up_another_stack_and_adds_nodes_by_hand() {
+    let dir = project();
+    fs::write(dir.join("pyproject.toml"), "[project]\nname = \"x\"\n").expect("write");
+    let out = cli(&dir, &["init"]).out;
+    assert!(out.contains("runner `pytest -q --junitxml="), "{out}");
+    let m = read_map(&dir);
+    assert_eq!(m["report"], ".pytest_cache/vibloom-junit.xml");
+    assert_eq!(m["tests"], "tests/");
+    assert_eq!(cli(&dir, &["init", "--stack", "cobol"]).code, 1);
+
+    let add = ["add", "invariant", "a balance never goes negative"];
+    let test = [
+        "--file",
+        "tests/test_vault.py",
+        "--test",
+        "test_never_negative",
+    ];
+    let refused = cli(&dir, &[&add[..], &test[..]].concat());
+    assert_eq!(refused.code, 1);
+    assert!(refused.err.contains("only the verifier"), "{}", refused.err);
+    let no_test = vibloom(&dir, &add, "", true);
+    assert!(
+        no_test.err.contains("an invariant needs a test"),
+        "{}",
+        no_test.err
+    );
+    let added = vibloom(&dir, &[&add[..], &test[..]].concat(), "", true);
+    assert_eq!(added.out, "Added inv.a-balance-never-goes-negative.");
+    let on = ["--on", "inv.a-balance-never-goes-negative"];
+    let intent = ["add", "intention", "withdraw caps at the balance"];
+    assert_eq!(
+        vibloom(&dir, &[&intent[..], &on[..]].concat(), "", true).out,
+        "Added int.withdraw-caps-at-the-balance."
+    );
+    let unknown = vibloom(
+        &dir,
+        &["add", "assumption", "x", "--on", "inv.nope"],
+        "",
+        true,
+    );
+    assert!(
+        unknown.err.contains("depends on unknown inv.nope"),
+        "{}",
+        unknown.err
+    );
+
+    let m = read_map(&dir);
+    assert_eq!(m["nodes"][0]["watch"], json!(["src/", "tests/"]));
+    assert_eq!(m["nodes"][0]["protected"], true);
+    assert_eq!(m["nodes"][1]["depends_on"], json!(on[1..]));
+    // Nothing ran yet, so nothing holds.
+    let status = cli(&dir, &["status"]);
+    assert_eq!(status.code, 1);
+    assert!(status.out.contains("untested"), "{}", status.out);
+}
+
+#[test]
+fn installs_the_commit_check_once() {
+    let dir = project();
+    with_runner(&dir);
+    assert_eq!(cli(&dir, &["install-hook"]).code, 1);
+    git(&dir, &["init", "-q"]);
+    assert!(
+        cli(&dir, &["install-hook"])
+            .out
+            .starts_with("Installed the commit check")
+    );
+    let hook = fs::read_to_string(dir.join(".git/hooks/pre-commit")).expect("hook");
+    assert!(hook.starts_with("#!/bin/sh") && hook.contains("exec vibloom precommit"));
+    assert_eq!(
+        cli(&dir, &["install-hook"]).out,
+        "The commit check is already installed."
+    );
+    fs::write(dir.join(".git/hooks/pre-commit"), "#!/bin/sh\nnpm test\n").expect("write");
+    let other = cli(&dir, &["install-hook"]);
+    assert_eq!(other.code, 1);
+    assert!(other.err.contains("Add this line to it"), "{}", other.err);
+}
+
+#[test]
+fn sync_takes_the_base_log_when_two_branches_both_ran() {
+    let dir = project();
+    with_runner(&dir);
+    fs::write(dir.join("src/C.sol"), "contract C { }").expect("write");
+    git(&dir, &["init", "-q", "-b", "main"]);
+    cli(&dir, &["run"]);
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "base"]);
+
+    git(&dir, &["checkout", "-qb", "feature"]);
+    cli(&dir, &["run"]);
+    git(&dir, &["commit", "-qam", "feature ran"]);
+    git(&dir, &["checkout", "-q", "main"]);
+    cli(&dir, &["run"]);
+    cli(&dir, &["run"]);
+    git(&dir, &["commit", "-qam", "main ran twice"]);
+    git(&dir, &["checkout", "-q", "feature"]);
+
+    assert_eq!(cli(&dir, &["check", "--base", "main"]).code, 1);
+    assert_eq!(cli(&dir, &["sync"]).code, 1);
+    let synced = cli(&dir, &["sync", "--base", "main"]);
+    assert_eq!(synced.code, 0, "{}", synced.err);
+    assert!(
+        synced.out.starts_with("Took the 3 runs on main"),
+        "{}",
+        synced.out
+    );
+    assert!(synced.out.contains("Run 4:"), "{}", synced.out);
+    assert_eq!(cli(&dir, &["verify"]).out, "4 runs, chain intact.");
+    assert_eq!(cli(&dir, &["check", "--base", "main"]).code, 0);
+    // Already in step with the base: nothing is replaced.
+    assert!(
+        cli(&dir, &["sync", "--base", "main"])
+            .out
+            .starts_with("The run log already extends")
+    );
+}
+
+#[test]
+fn stops_a_runner_that_hangs() {
+    let dir = project();
+    with_runner(&dir);
+    edit_map(&dir, |m| {
+        m["runner"] = json!(["sleep", "30"]);
+        m["timeout"] = json!(1);
+    });
+    let started = std::time::Instant::now();
+    let r = cli(&dir, &["check"]);
+    assert!(started.elapsed().as_secs() < 10);
+    assert_eq!(r.code, 1);
+    assert!(r.err.contains("did not finish in 1 s"), "{}", r.err);
+}
+
 #[test]
 fn does_nothing_in_a_project_without_a_map() {
     let dir = project();
