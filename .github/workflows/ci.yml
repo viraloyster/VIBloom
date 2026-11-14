@@ -46,9 +46,8 @@ jobs:
         working-directory: examples/foundry-vault
         run: |
           forge --version
-          forge test --list --json
           vibloom verify
-          vibloom check || { vibloom status --json; forge test; exit 1; }
+          vibloom check
       - name: Pytest ledger
         working-directory: examples/pytest-ledger
         run: vibloom verify && vibloom check

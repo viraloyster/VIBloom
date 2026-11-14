@@ -23,6 +23,9 @@ The first release. Since the first Rust version:
 - An unknown option to `run` was handed to the test runner and recorded a
   failed run. Runner arguments go after `--`.
 - On macOS, a new file in a new folder was taken to be outside the project.
+- Foundry 1.9 runs a contract's invariants as one campaign and reports them
+  under one name; each invariant is now read from it. A status the guard does
+  not know is recorded as a failure, never dropped.
 
 ### Added
 

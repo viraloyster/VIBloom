@@ -48,24 +48,54 @@ pub fn parse_forge(stdout: &str) -> Result<Vec<Outcome>, RunnerOutputError> {
         let Some(results) = body.get("test_results").and_then(Value::as_object) else {
             continue;
         };
-        for (sig, r) in results {
-            let status = match r.get("status").and_then(Value::as_str) {
-                Some("Success") => Status::Pass,
-                Some("Failure") => Status::Fail,
-                Some("Skipped") => Status::Skip,
-                _ => continue,
-            };
-            let reason = r
-                .get("reason")
+        let status_of = |v: &Value| match v.get("status").and_then(Value::as_str) {
+            Some("Success") => (Status::Pass, None),
+            Some("Failure") => (Status::Fail, None),
+            Some("Skipped") => (Status::Skip, None),
+            // A status this version does not know is never read as a pass.
+            other => (
+                Status::Fail,
+                Some(format!(
+                    "the runner reported an unknown status: {}",
+                    other.unwrap_or("none")
+                )),
+            ),
+        };
+        let reason_of = |v: &Value| {
+            v.get("reason")
                 .and_then(Value::as_str)
                 .filter(|s| !s.is_empty())
-                .map(|s| s.chars().take(500).collect());
+                .map(|s| s.chars().take(500).collect::<String>())
+        };
+        for (sig, r) in results {
+            // Since forge 1.9 the invariants of a contract run as one campaign,
+            // reported under one of their names with a result for each.
+            if let Some(each) = r
+                .get("invariant_predicate_results")
+                .and_then(Value::as_array)
+            {
+                for p in each {
+                    let Some(name) = p.get("name").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    let (status, unknown) = status_of(p);
+                    out.push(Outcome {
+                        file: file.into(),
+                        contract: contract.into(),
+                        name: name.split('(').next().unwrap_or(name).into(),
+                        status,
+                        reason: unknown.or_else(|| reason_of(p)),
+                    });
+                }
+                continue;
+            }
+            let (status, unknown) = status_of(r);
             out.push(Outcome {
                 file: file.into(),
                 contract: contract.into(),
                 name: sig.split('(').next().unwrap_or(sig).into(),
                 status,
-                reason,
+                reason: unknown.or_else(|| reason_of(r)),
             });
         }
     }
@@ -143,6 +173,41 @@ mod tests {
         assert_eq!(
             (out[0].file.as_str(), out[0].contract.as_str()),
             ("test/Counter.t.sol", "CounterTest")
+        );
+    }
+
+    #[test]
+    fn reads_each_invariant_of_a_campaign_since_forge_1_9() {
+        let report = r#"{"test/Vault.t.sol:VaultTest":{"test_results":{
+          "invariant_assetsMatchFlows()":{"status":"Failure","reason":null,"invariant_count":2,
+            "invariant_predicate_results":[
+              {"name":"invariant_assetsMatchFlows","status":"Failure","reason":"panic: assertion failed (0x01)"},
+              {"name":"invariant_sharesAreBacked","status":"Success"}]},
+          "test_deposit()":{"status":"Success","reason":null},
+          "test_new()":{"status":"Flaky","reason":null}}}}"#
+            .replace('\n', "");
+        let mut out = parse_forge(&report).expect("report");
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        let got: Vec<(&str, Status, Option<&str>)> = out
+            .iter()
+            .map(|o| (o.name.as_str(), o.status, o.reason.as_deref()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (
+                    "invariant_assetsMatchFlows",
+                    Status::Fail,
+                    Some("panic: assertion failed (0x01)")
+                ),
+                ("invariant_sharesAreBacked", Status::Pass, None),
+                ("test_deposit", Status::Pass, None),
+                (
+                    "test_new",
+                    Status::Fail,
+                    Some("the runner reported an unknown status: Flaky")
+                ),
+            ]
         );
     }
 
