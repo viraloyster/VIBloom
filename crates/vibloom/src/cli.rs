@@ -280,16 +280,23 @@ fn normalize(p: &Path) -> PathBuf {
     out
 }
 
+// The deepest ancestor that exists is resolved, so a new file in a new folder
+// under a symlinked root (macOS's /var -> /private/var) still lands inside it.
 fn real(p: &Path) -> PathBuf {
-    if let Ok(c) = p.canonicalize() {
-        return c;
-    }
-    match (
-        p.parent().and_then(|d| d.canonicalize().ok()),
-        p.file_name(),
-    ) {
-        (Some(d), Some(f)) => d.join(f),
-        _ => normalize(p),
+    let p = normalize(p);
+    let mut rest = Vec::new();
+    let mut cur = p.as_path();
+    loop {
+        if let Ok(c) = cur.canonicalize() {
+            return rest.iter().rev().fold(c, |acc, part| acc.join(part));
+        }
+        match (cur.parent(), cur.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_os_string());
+                cur = parent;
+            }
+            _ => return p,
+        }
     }
 }
 
@@ -721,5 +728,18 @@ mod tests {
         assert_eq!(r.as_deref(), Some("test/A.t.sol"));
         assert_eq!(relative_to(&root, &root, "/definitely/elsewhere"), None);
         assert_eq!(relative_to(&root, &root, "../outside"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolves_a_new_folder_under_a_symlinked_root() {
+        let base = std::env::temp_dir().join(format!("vibloom-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("real")).expect("dir");
+        std::os::unix::fs::symlink(base.join("real"), base.join("link")).expect("symlink");
+        let root = base.join("link");
+        let r = relative_to(&root, &root, "new/dir/A.t.sol");
+        let _ = std::fs::remove_dir_all(&base);
+        assert_eq!(r.as_deref(), Some("new/dir/A.t.sol"));
     }
 }

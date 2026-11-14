@@ -14,7 +14,7 @@ permissions:
 jobs:
   build:
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
