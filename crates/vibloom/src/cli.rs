@@ -478,6 +478,10 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
             (io.out)(USAGE);
             return Ok(0);
         }
+        "--version" | "-V" => {
+            (io.out)(concat!("vibloom ", env!("CARGO_PKG_VERSION")));
+            return Ok(0);
+        }
         "hook" => {
             let stdin = (io.stdin)();
             let r = hook(
