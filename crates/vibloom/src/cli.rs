@@ -3,10 +3,11 @@
 
 use crate::context::context;
 use crate::derive::{Files, NodeView, derive, label, troubled};
-use crate::forge::{Outcome, forge_filters, parse_forge};
+use crate::forge::{Outcome, RunnerOutputError, forge_filters, parse_forge};
 use crate::gate::precommit;
 use crate::hash::sha256_hex;
 use crate::hooks::{HookInput, HookOutput, Role, post_tool, pre_tool, stop};
+use crate::junit::parse_junit;
 use crate::log::{ReadLog, RunBody, RunEntry, extends_log, next_entry, read_log, to_line};
 use crate::map::{
     LOG_PATH, MAP_PATH, PROPOSALS_PATH, RootsMap, parse_map, serialize_map, watched_by,
@@ -171,13 +172,30 @@ pub fn run(root: &Path, extra: &[String]) -> Fallible<RunReport> {
     let mut command = map.runner.clone();
     command.extend(extra.iter().cloned());
     let (exe, args) = command.split_first().ok_or("the runner is empty")?;
+    // A report left by an earlier run must never be read as this run's.
+    if let Some(report) = &map.report {
+        let path = root.join(report);
+        if path.exists() {
+            std::fs::remove_file(&path)
+                .map_err(|e| format!("could not remove the old report {report}: {e}"))?;
+        }
+    }
     let mut outcomes: Vec<Outcome> = vec![];
     let mut error = None;
     match Command::new(exe).args(args).current_dir(root).output() {
         Err(e) => error = Some(format!("could not start {exe}: {e}")),
         Ok(res) => {
             let stdout = String::from_utf8_lossy(&res.stdout);
-            match parse_forge(&stdout) {
+            let parsed = match &map.report {
+                None => parse_forge(&stdout),
+                Some(report) => match std::fs::read_to_string(root.join(report)) {
+                    Ok(xml) => parse_junit(&xml, &root.to_string_lossy()),
+                    Err(_) => Err(RunnerOutputError(format!(
+                        "the runner wrote no report at {report}"
+                    ))),
+                },
+            };
+            match parsed {
                 Ok(o) => outcomes = o,
                 Err(e) => {
                     let stderr = String::from_utf8_lossy(&res.stderr);

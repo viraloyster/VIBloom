@@ -26,7 +26,7 @@ fn tools() -> Value {
           "inputSchema": { "type": "object", "properties": {} } },
         { "name": "context", "description": "What to know before touching a file: full detail for the nodes it touches, one line for the rest.",
           "inputSchema": { "type": "object", "properties": { "file": { "type": "string", "description": "Path of the file, relative to the project or absolute." } } } },
-        { "name": "run", "description": "Run the tests, record the run in the log and return the new states. Only forge's test filters are accepted.",
+        { "name": "run", "description": "Run the tests, record the run in the log and return the new states. Filters are accepted for forge only.",
           "inputSchema": { "type": "object", "properties": { "filters": {
               "type": "array", "items": { "type": "string" },
               "description": "Flag and value pairs, for example [\"--match-path\", \"test/A.t.sol\"]." } } } },
@@ -97,6 +97,13 @@ fn call(cwd: &Path, name: &str, args: &Value) -> Result<String, String> {
         }
         "run" => {
             let filters = checked_filters(&strings(args.get("filters")))?;
+            // Filters are forge's; with another runner only the whole suite runs.
+            if !filters.is_empty() && load_map(&root)?.report.is_some() {
+                return Err(
+                    "filters only apply to forge; this project's runner runs the whole suite"
+                        .into(),
+                );
+            }
             let report = run(&root, &filters)?;
             let mut text = format!(
                 "Run {}: {} test results recorded.\n",

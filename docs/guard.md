@@ -6,7 +6,8 @@ project assumes, what must always hold and what each change intends, records
 every test run in a hash-chained log, and derives from those runs whether each
 node still stands. An agent reads the map; it can never set a state.
 
-The first runner is Foundry (`forge test --json`). No model is involved: the
+It reads Foundry (`forge test --json`) and any runner that writes a JUnit XML
+report: cargo-nextest, pytest, Jest, mocha (Hardhat), Go and most others. No model is involved: the
 guard is deterministic and runs the same with or without AI, and it does not
 depend on any particular agent. Claude Code, Codex, Cursor, Aider, any other
 tool or a person editing by hand all go through the same map, the same log and
@@ -64,6 +65,33 @@ Code hooks below, are optional extras on top.
 - `depends_on` links form a DAG; the map is rejected if they form a cycle or
   name an unknown node, or if a path leaves the repository.
 
+## Runners
+
+Without `report`, the map's `runner` (by default `forge test --json`) is read as
+Foundry's JSON. With `report`, the runner writes a JUnit XML file there and the
+guard reads it:
+
+```json
+{ "runner": ["pytest", "-q", "--junitxml=out/junit.xml"], "report": "out/junit.xml" }
+{ "runner": ["cargo", "nextest", "run", "--profile", "ci"], "report": "target/nextest/ci/junit.xml" }
+{ "runner": ["npx", "hardhat", "test"], "report": "out/junit.xml" }
+```
+
+(cargo-nextest writes JUnit when its profile sets `junit.path`; Hardhat through
+a mocha reporter such as `mocha-junit-reporter` set in `hardhat.config`.)
+
+- The report is deleted before each run: a report left by an earlier run is
+  never read as the current one. A run that writes no report is an error.
+- A test is `{ "file", "contract", "name" }`. With JUnit, `contract` is the
+  test case's `classname` and `name` its `name`. `file` is always the test's
+  source file in the project, since it is protected and watched; it is also
+  matched against the report when the report names a file. Most reports
+  (nextest's, pytest's by default) do not, so set `contract` to tell apart
+  two tests with the same name.
+- `vibloom scan` finds Foundry invariant tests only; other tests go in the map
+  by hand. The Claude Code hook records runs after `forge test` only; with
+  another runner, call `vibloom run`.
+
 ## Derived states
 
 | State          | When                                                                          |
@@ -92,11 +120,21 @@ as a pass.
 
 ## Install
 
+Download the binary for your platform from the
+[releases](https://github.com/viraloyster/VIBloom/releases) (Linux x86_64
+and arm64, macOS arm64 and x86_64, Windows x86_64) and check it against its
+`.sha256` file. The binaries are not code-signed yet. Or build it:
+
 ```bash
 cargo install --locked --git https://github.com/viraloyster/VIBloom vibloom
 ```
 
 One binary, no runtime to install. A hook call takes about 2 ms.
+
+A release is made by raising `version` in `crates/vibloom/Cargo.toml` and
+pushing a tag `guard-v<version>`; the Release guard workflow builds, tests and
+publishes it. Run that workflow by hand to build every platform without
+publishing.
 
 ## Commands
 
@@ -322,7 +360,7 @@ run again; after `bad()` is removed and the suite runs, all four nodes hold.
   does not discover a dependency nobody wrote down.
 - `.vibloom/proposals.jsonl` is not hash-chained: it holds suggestions, not
   evidence, and nothing in it counts until a person accepts it into the map.
-- Only Foundry's JSON report is read today. Another runner needs a parser that
-  returns the same outcomes.
+- Two report formats are read: Foundry's JSON and JUnit XML. A runner that
+  writes neither needs a parser that returns the same outcomes.
 - After a test command, the guard re-runs that subset once more. On a large
   suite, filter with `--match-path` or `--match-test`.

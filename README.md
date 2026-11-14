@@ -37,7 +37,8 @@ premise marks everything resting on it.
   (`vibloom context <file>`).
 - An MCP server (`vibloom mcp`) and optional Claude Code hooks. Agents can
   propose nodes; a person accepts or rejects them.
-- The first runner is Foundry (`forge test --json`).
+- Runners: Foundry (`forge test --json`) and any runner that writes JUnit XML
+  (cargo-nextest, pytest, Jest, mocha, Go).
 
 No model is involved: the guard is deterministic and does not depend on any
 particular agent. See [docs/guard.md](docs/guard.md).
@@ -66,9 +67,10 @@ The solver agrees with SciPy (Radau) on Oregonator periods to a relative 5e-4
 
 ## Run it
 
-- **On a code project:** build the binary with `cargo build --release -p
-vibloom`, then `vibloom init` in the project. See
-  [docs/guard.md](docs/guard.md).
+- **On a code project:** download `vibloom` from the
+  [releases](https://github.com/viraloyster/VIBloom/releases) or build it with
+  `cargo install --locked --git https://github.com/viraloyster/VIBloom vibloom`,
+  then `vibloom init` in the project. See [docs/guard.md](docs/guard.md).
 - **The web app:** https://viraloyster.github.io/VIBloom/, or locally with
   `npm ci && npm run dev`. To use an AI, choose a provider in Settings
   (Anthropic, OpenAI, xAI, Gemini, OpenRouter or a local server) and enter
@@ -84,7 +86,7 @@ vibloom`, then `vibloom init` in the project. See
 - **Outside chemistry, the web app computes on assumed numbers.** It accepts
   any goal and evaluates the comparisons in the tree, but it has no
   experiments outside chemistry.
-- **One runner for code so far.** The guard reads Foundry's output today.
+- **Two report formats.** The guard reads Foundry's JSON and JUnit XML.
 - **The guard is a local check.** An agent with full control of its machine
   can skip local hooks; the boundary it cannot cross is a protected branch
   that requires `vibloom check` in CI. See [docs/guard.md](docs/guard.md).

@@ -171,6 +171,53 @@ fn records_a_runner_failure_as_an_error_never_a_pass() {
     assert!(cli(&dir, &["status"]).out.contains("untested"));
 }
 
+// Writes a JUnit report like cargo-nextest: tests::sum fails while src/C.sol
+// contains "bug". With "none" as argument it writes nothing, as a build failure.
+const JUNIT_RUNNER: &str = r#"#!/bin/sh
+[ "$1" = none ] && exit 101
+if grep -q bug src/C.sol; then f='<failure>sum &lt; total</failure>'; else f=''; fi
+mkdir -p out
+printf '<testsuites><testsuite name="vault"><testcase classname="vault" name="tests::sum">%s</testcase></testsuite></testsuites>' "$f" > out/junit.xml
+"#;
+
+#[test]
+fn reads_a_junit_report_and_never_a_stale_one() {
+    let dir = project();
+    fs::write(dir.join("junit.sh"), JUNIT_RUNNER).expect("write");
+    cli(&dir, &["init"]);
+    edit_map(&dir, |m| {
+        m["runner"] = json!(["sh", "junit.sh"]);
+        m["report"] = json!("out/junit.xml");
+        m["nodes"] = json!([{ "id": "inv.sum", "kind": "invariant", "title": "sum",
+            "test": { "file": "src/C.sol", "contract": "vault", "name": "tests::sum" },
+            "watch": ["src/C.sol"] }]);
+    });
+
+    let broken = cli(&dir, &["check"]);
+    assert_eq!(broken.code, 1);
+    assert!(
+        broken.out.contains("inv.sum: untested -> BROKEN"),
+        "{}",
+        broken.out
+    );
+    let log = fs::read_to_string(dir.join(".vibloom/log.jsonl")).expect("log");
+    assert!(log.contains("sum < total"), "{log}");
+
+    fs::write(dir.join("src/C.sol"), "contract C { }").expect("write");
+    assert_eq!(cli(&dir, &["check"]).code, 0);
+
+    // The report from the last run is still on disk; it must not count again.
+    edit_map(&dir, |m| m["runner"] = json!(["sh", "junit.sh", "none"]));
+    let none = cli(&dir, &["check"]);
+    assert_eq!(none.code, 1);
+    assert!(
+        none.err
+            .contains("the runner wrote no report at out/junit.xml"),
+        "{}",
+        none.err
+    );
+}
+
 #[test]
 fn the_commit_check_needs_no_agent() {
     let dir = project();

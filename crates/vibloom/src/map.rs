@@ -90,6 +90,9 @@ pub struct RootNode {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RootsMap {
     pub runner: Vec<String>,
+    /// Where the runner writes a JUnit XML report; without it, the runner's
+    /// output is read as `forge test --json`.
+    pub report: Option<String>,
     pub tests: String,
     /// Paths only the verifier may edit, besides protected tests and .vibloom/.
     pub protect: Vec<String>,
@@ -100,6 +103,7 @@ impl RootsMap {
     pub fn empty() -> Self {
         Self {
             runner: DEFAULT_RUNNER.iter().map(|s| (*s).to_string()).collect(),
+            report: None,
             tests: "test/".into(),
             protect: vec![],
             nodes: vec![],
@@ -117,6 +121,24 @@ pub fn valid_id(id: &str) -> bool {
 }
 
 /// A repository-relative path that cannot climb out of the repository.
+/// A Solidity signature loses its parameters ("invariant_a()" -> "invariant_a");
+/// any other name, such as a Jest description with parentheses, is kept whole.
+pub fn test_name(name: &str) -> String {
+    match name.split_once('(') {
+        Some((head, _))
+            if name.ends_with(')')
+                && head
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                && head.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') =>
+        {
+            head.to_string()
+        }
+        _ => name.to_string(),
+    }
+}
+
 pub fn safe_path(p: &str) -> bool {
     !p.is_empty() && !p.starts_with('/') && !p.split('/').any(|s| s == "..") && !p.contains('\\')
 }
@@ -149,6 +171,16 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
     };
     if runner.is_none() {
         errors.push("runner must be a non-empty string list".into());
+    }
+    let report = match obj.get("report") {
+        None => Some(None),
+        Some(v) => v
+            .as_str()
+            .filter(|s| safe_path(s))
+            .map(|s| Some(s.to_string())),
+    };
+    if report.is_none() {
+        errors.push("report must be a relative path".into());
     }
     let tests = match obj.get("tests") {
         None => Some("test/".to_string()),
@@ -238,7 +270,7 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
                     (Some(file), Some(name), true) => Some(TestRef {
                         file: file.into(),
                         contract: contract.and_then(Value::as_str).map(str::to_string),
-                        name: name.split('(').next().unwrap_or(name).to_string(),
+                        name: test_name(name),
                     }),
                     _ => {
                         errors.push(format!("{id}: test needs a relative file and a name"));
@@ -281,9 +313,10 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
         errors.push(format!("dependency cycle: {}", cycle.join(" -> ")));
     }
 
-    match (errors.is_empty(), runner, tests, protect) {
-        (true, Some(runner), Some(tests), Some(protect)) => Ok(RootsMap {
+    match (errors.is_empty(), runner, report, tests, protect) {
+        (true, Some(runner), Some(report), Some(tests), Some(protect)) => Ok(RootsMap {
             runner,
+            report,
             tests,
             protect,
             nodes,
@@ -357,6 +390,8 @@ struct NodeOut<'a> {
 struct MapOut<'a> {
     version: u8,
     runner: &'a [String],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    report: Option<&'a str>,
     tests: &'a str,
     protect: &'a [String],
     nodes: Vec<NodeOut<'a>>,
@@ -367,6 +402,7 @@ pub fn serialize_map(map: &RootsMap) -> String {
     let out = MapOut {
         version: 1,
         runner: &map.runner,
+        report: map.report.as_deref(),
         tests: &map.tests,
         protect: &map.protect,
         nodes: map
@@ -495,10 +531,30 @@ mod tests {
         let first = parse_map(&json!({
             "version": 1,
             "protect": ["foundry.toml"],
+            "report": "target/nextest/ci/junit.xml",
             "nodes": [inv("inv.a", json!({ "watch": ["src/"], "detail": "why" }))]
         }))
         .expect("valid");
         let again: Value = serde_json::from_str(&serialize_map(&first)).expect("json");
         assert_eq!(parse_map(&again).expect("valid"), first);
+    }
+
+    #[test]
+    fn keeps_the_report_inside_the_project() {
+        let e = parse_map(&json!({ "version": 1, "report": "/tmp/junit.xml", "nodes": [] }))
+            .expect_err("outside the project");
+        assert_eq!(e, vec!["report must be a relative path"]);
+        let m = parse_map(&json!({ "version": 1, "nodes": [] })).expect("valid");
+        assert!(m.report.is_none());
+        assert!(!serialize_map(&m).contains("report"));
+    }
+
+    #[test]
+    fn strips_a_solidity_signature_and_keeps_other_names() {
+        assert_eq!(test_name("invariant_sum()"), "invariant_sum");
+        assert_eq!(test_name("invariant_sum(uint256)"), "invariant_sum");
+        assert_eq!(test_name("tests::sum"), "tests::sum");
+        assert_eq!(test_name("adds (1 + 2)"), "adds (1 + 2)");
+        assert_eq!(test_name("test_add[case(1)]"), "test_add[case(1)]");
     }
 }

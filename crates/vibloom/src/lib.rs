@@ -8,6 +8,7 @@ pub mod forge;
 pub mod gate;
 pub mod hash;
 pub mod hooks;
+pub mod junit;
 pub mod log;
 pub mod map;
 pub mod mcp;

@@ -57,7 +57,10 @@ pub struct NodeView {
 
 fn matches(n: &RootNode, o: &Outcome) -> bool {
     n.test.as_ref().is_some_and(|t| {
-        o.file == t.file && o.name == t.name && t.contract.as_ref().is_none_or(|c| &o.contract == c)
+        // A JUnit report may name no file; then the classname and name decide.
+        (o.file.is_empty() || o.file == t.file)
+            && o.name == t.name
+            && t.contract.as_ref().is_none_or(|c| &o.contract == c)
     })
 }
 
