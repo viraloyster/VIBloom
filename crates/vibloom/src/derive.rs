@@ -17,6 +17,9 @@ pub enum Evidence {
     Broken,
     Skipped,
     Untested,
+    /// It ran once, but the latest run of the whole suite did not include it:
+    /// the test was removed, renamed or filtered out.
+    Missing,
     Stale,
     None,
 }
@@ -108,6 +111,12 @@ struct Own {
 
 pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<NodeView> {
     let mut own: HashMap<&str, Own> = HashMap::new();
+    // The latest run of the whole suite: the map's runner with nothing added.
+    let full = entries
+        .iter()
+        .rev()
+        .find(|e| e.error.is_none() && e.command == map.runner)
+        .map(|e| e.seq);
     for n in &map.nodes {
         if n.test.is_none() {
             own.insert(
@@ -137,6 +146,24 @@ pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<Node
             );
             continue;
         };
+        // A result older than the latest whole run that the run itself did
+        // not repeat proves nothing any more: the test is gone.
+        if full.is_some_and(|f| f > entry.seq) {
+            own.insert(
+                &n.id,
+                Own {
+                    evidence: Evidence::Missing,
+                    changed: vec![],
+                    reason: Some(format!(
+                        "its test last ran in run {} and was not in run {}",
+                        entry.seq,
+                        full.unwrap_or_default()
+                    )),
+                    run: Some(entry.seq),
+                },
+            );
+            continue;
+        }
         let changed = changed_since(n, entry, current);
         // A failure stays a failure until a new run says otherwise; a pass only
         // counts while the files it ran against are unchanged.
@@ -185,7 +212,11 @@ pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<Node
             if off || ev == Some(Evidence::Broken) || below == Support::Unsupported {
                 support = Support::Unsupported;
                 because.push(d.clone());
-            } else if ev == Some(Evidence::Stale) || below == Support::Pending {
+            } else if matches!(
+                ev,
+                Some(Evidence::Stale | Evidence::Untested | Evidence::Skipped | Evidence::Missing)
+            ) || below == Support::Pending
+            {
                 if support == Support::Ok {
                     support = Support::Pending;
                 }
@@ -223,10 +254,18 @@ pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<Node
 }
 
 /// A node needs attention when its own evidence or its support is not sound.
-/// Off nodes are a choice, not a problem.
+/// A test that never ran, was skipped or went missing is not evidence either:
+/// nothing says the node holds. Off nodes are a choice, not a problem.
 pub fn troubled(v: &NodeView) -> bool {
     v.stance != Stance::Off
-        && (matches!(v.evidence, Evidence::Broken | Evidence::Stale) || v.support != Support::Ok)
+        && (matches!(
+            v.evidence,
+            Evidence::Broken
+                | Evidence::Stale
+                | Evidence::Untested
+                | Evidence::Skipped
+                | Evidence::Missing
+        ) || v.support != Support::Ok)
 }
 
 pub fn label(v: &NodeView) -> &'static str {
@@ -235,6 +274,7 @@ pub fn label(v: &NodeView) -> &'static str {
     }
     match (v.evidence, v.support) {
         (Evidence::Broken, _) => "BROKEN",
+        (Evidence::Missing, _) => "MISSING",
         (_, Support::Unsupported) if v.kind == Kind::Intention => "AT RISK",
         (_, Support::Unsupported) => "UNSUPPORTED",
         (Evidence::Stale, _) | (_, Support::Pending) => "pending review",
@@ -311,7 +351,10 @@ mod tests {
     fn starts_untested_with_off_as_a_choice() {
         let v = by_id(derive(&map(), &[], &files()));
         assert_eq!(label(&v["inv.sum"]), "untested");
-        assert_eq!(label(&v["asm.only-add"]), "hypothetical");
+        // Nothing says the invariant holds yet, so neither it nor what rests
+        // on it is sound.
+        assert!(troubled(&v["inv.sum"]));
+        assert_eq!(label(&v["asm.only-add"]), "pending review");
         assert_eq!(label(&v["asm.off"]), "off");
         assert_eq!(label(&v["int.uses-off"]), "AT RISK");
         assert!(!troubled(&v["asm.off"]));
@@ -372,6 +415,60 @@ mod tests {
         assert_eq!(v["inv.sum"].evidence, Evidence::Holds);
         assert_eq!(v["inv.sum"].run, Some(2));
         assert_eq!(v["int.exact"].support, Support::Ok);
+    }
+
+    #[test]
+    fn a_skipped_test_is_not_evidence() {
+        let e = entry(None, Status::Skip, Status::Pass, files());
+        let v = by_id(derive(&map(), &[e], &files()));
+        assert_eq!(label(&v["inv.sum"]), "skipped");
+        assert!(troubled(&v["inv.sum"]));
+        assert_eq!(v["asm.only-add"].support, Support::Pending);
+        assert!(!troubled(&v["inv.bound"]));
+    }
+
+    #[test]
+    fn a_test_absent_from_the_latest_whole_run_is_missing() {
+        let whole = |last: Option<&RunEntry>, outcomes: Vec<Outcome>, command: &[&str]| {
+            next_entry(
+                last,
+                RunBody {
+                    at: "2026-11-13T00:00:00.000Z".into(),
+                    command: command.iter().map(|s| (*s).to_string()).collect(),
+                    outcomes,
+                    files: files(),
+                    error: None,
+                },
+            )
+        };
+        let runner = ["forge", "test", "--json"];
+        let both = vec![
+            outcome("invariant_sum", Status::Pass),
+            outcome("invariant_bound", Status::Pass),
+        ];
+        let a = whole(None, both, &runner);
+        // A filtered run that leaves a test out says nothing about it.
+        let filtered = whole(
+            Some(&a),
+            vec![outcome("invariant_bound", Status::Pass)],
+            &["forge", "test", "--json", "--mt", "invariant_bound"],
+        );
+        let v = by_id(derive(&map(), &[a.clone(), filtered.clone()], &files()));
+        assert_eq!(v["inv.sum"].evidence, Evidence::Holds);
+        // The whole suite ran and the test was not in it: it is gone.
+        let gone = whole(
+            Some(&filtered),
+            vec![outcome("invariant_bound", Status::Pass)],
+            &runner,
+        );
+        let v = by_id(derive(&map(), &[a, filtered, gone], &files()));
+        assert_eq!(label(&v["inv.sum"]), "MISSING");
+        assert!(troubled(&v["inv.sum"]));
+        assert_eq!(
+            v["inv.sum"].reason.as_deref(),
+            Some("its test last ran in run 1 and was not in run 3")
+        );
+        assert_eq!(v["inv.bound"].evidence, Evidence::Holds);
     }
 
     #[test]

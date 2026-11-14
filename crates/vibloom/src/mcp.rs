@@ -2,7 +2,9 @@
 //! that speaks it. Agents can read the map, run the tests and propose; they
 //! cannot accept a proposal, change a state or touch the record.
 
-use crate::cli::{find_root, iso_now, load_log, load_map, relative_to, run, table, views};
+use crate::cli::{
+    append, find_root, iso_now, load_log, load_map, locked, relative_to, run, table, views,
+};
 use crate::context::context;
 use crate::forge::FILTER_FLAGS;
 use crate::map::{PROPOSALS_PATH, TestRef};
@@ -118,8 +120,6 @@ fn call(cwd: &Path, name: &str, args: &Value) -> Result<String, String> {
         }
         "propose" => {
             let map = load_map(&root)?;
-            let book =
-                Book::read(&std::fs::read_to_string(root.join(PROPOSALS_PATH)).unwrap_or_default());
             let s = |k: &str| args.get(k).and_then(Value::as_str).map(str::to_string);
             let test = args
                 .get("test")
@@ -133,17 +133,21 @@ fn call(cwd: &Path, name: &str, args: &Value) -> Result<String, String> {
                 test,
                 by: s("by"),
             };
-            let p = propose(&map, &book, draft, iso_now()).map_err(|e| e.join("\n"))?;
-            std::fs::create_dir_all(root.join(".vibloom")).map_err(|e| e.to_string())?;
-            let mut f = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(root.join(PROPOSALS_PATH))
-                .map_err(|e| e.to_string())?;
-            writeln!(f, "{}", serde_json::to_string(&p).unwrap_or_default())
-                .map_err(|e| e.to_string())?;
+            // Read and appended under the lock, so two agents never get one id.
+            let p = locked(&root, || {
+                let book = Book::read(
+                    &std::fs::read_to_string(root.join(PROPOSALS_PATH)).unwrap_or_default(),
+                );
+                let p = propose(&map, &book, draft, iso_now()).map_err(|e| e.join("\n"))?;
+                append(
+                    &root,
+                    PROPOSALS_PATH,
+                    &format!("{}\n", serde_json::to_string(&p).unwrap_or_default()),
+                )?;
+                Ok(p)
+            })?;
             Ok(format!(
-                "Proposed {} ({}): {}. It is hypothetical until a person accepts it with `vibloom proposals accept {}`.",
+                "Proposed {} ({}): {}. It is hypothetical until the verifier accepts it with `vibloom proposals accept {}`.",
                 p.id, p.kind, p.title, p.id
             ))
         }

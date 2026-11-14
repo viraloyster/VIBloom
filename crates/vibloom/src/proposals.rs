@@ -2,7 +2,8 @@
 //! apart, as hypothetical, until a person accepts it into the map or rejects it.
 
 use crate::map::{
-    Kind, RootNode, RootsMap, Stance, TestRef, parse_map, safe_path, serialize_map, valid_id,
+    Kind, RootNode, RootsMap, Stance, TestRef, parse_map, safe_path, serialize_map, test_name,
+    valid_id,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -180,7 +181,7 @@ pub fn accept(map: &RootsMap, p: &Proposal) -> Result<(RootsMap, String), Vec<St
             Stance::Adopted
         },
         test: p.test.as_ref().map(|t| TestRef {
-            name: t.name.split('(').next().unwrap_or(&t.name).to_string(),
+            name: test_name(&t.name),
             ..t.clone()
         }),
         watch: p.watch.clone(),

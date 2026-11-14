@@ -120,7 +120,11 @@ fn goes_from_a_broken_run_to_a_fix_through_the_hooks() {
         "{}",
         first.out
     );
-    assert!(first.out.contains("asm.exact: hypothetical -> UNSUPPORTED"));
+    assert!(
+        first
+            .out
+            .contains("asm.exact: pending review -> UNSUPPORTED")
+    );
 
     let cwd = json!({ "cwd": dir }).to_string();
     let blocked: Value =
@@ -333,7 +337,15 @@ fn serves_mcp_and_keeps_proposals_out_of_the_map_until_accepted() {
             .out
             .contains("p1  assumption  Only add() changes total")
     );
-    let accepted = cli(&dir, &["proposals", "accept", "p1"]);
+    // An agent cannot accept what it proposed: deciding needs the verifier.
+    let refused = cli(&dir, &["proposals", "accept", "p1"]);
+    assert_eq!(refused.code, 1);
+    assert!(
+        refused.err.contains("Only the verifier decides"),
+        "{}",
+        refused.err
+    );
+    let accepted = vibloom(&dir, &["proposals", "accept", "p1"], "", true);
     assert!(
         accepted.out.contains("as asm.only-add-changes-total"),
         "{}",
@@ -345,6 +357,153 @@ fn serves_mcp_and_keeps_proposals_out_of_the_map_until_accepted() {
             .contains("UNSUPPORTED  asm.only-add-changes-total")
     );
     assert_eq!(cli(&dir, &["proposals"]).out, "No pending proposals.");
+}
+
+#[test]
+fn a_test_that_never_ran_was_skipped_or_went_missing_fails_the_check() {
+    let dir = project();
+    with_runner(&dir);
+    fs::write(dir.join("src/C.sol"), "contract C { }").expect("write");
+    assert_eq!(cli(&dir, &["check"]).code, 0);
+
+    // A node whose test name matches nothing in the report proves nothing.
+    edit_map(&dir, |m| {
+        m["nodes"].as_array_mut().expect("nodes").push(json!({
+            "id": "inv.typo", "kind": "invariant", "title": "typo",
+            "test": { "file": "test/C.t.sol", "contract": "CT", "name": "invariant_summ" }
+        }));
+    });
+    let typo = cli(&dir, &["check"]);
+    assert_eq!(typo.code, 1, "{}", typo.out);
+    assert!(typo.out.contains("untested  inv.typo"), "{}", typo.out);
+    edit_map(&dir, |m| {
+        m["nodes"].as_array_mut().expect("nodes").pop();
+    });
+
+    let report = |status: &str| {
+        format!("printf '%s\\n' '{{\"test/C.t.sol:CT\":{{\"test_results\":{{{status}}}}}}}'\n")
+    };
+    fs::write(
+        dir.join("runner.sh"),
+        report("\"invariant_sum()\":{\"status\":\"Skipped\",\"reason\":null}"),
+    )
+    .expect("write");
+    let skipped = cli(&dir, &["check"]);
+    assert_eq!(skipped.code, 1, "{}", skipped.out);
+    assert!(skipped.out.contains("skipped  inv.sum"), "{}", skipped.out);
+
+    // The whole suite runs and the invariant is no longer in it.
+    fs::write(
+        dir.join("runner.sh"),
+        report("\"test_other()\":{\"status\":\"Success\",\"reason\":null}"),
+    )
+    .expect("write");
+    let gone = cli(&dir, &["check"]);
+    assert_eq!(gone.code, 1, "{}", gone.out);
+    assert!(gone.out.contains("MISSING  inv.sum"), "{}", gone.out);
+}
+
+#[test]
+fn concurrent_runs_keep_one_chain_and_a_broken_log_can_be_repaired() {
+    let dir = project();
+    with_runner(&dir);
+    let runs: Vec<_> = (0..6)
+        .map(|_| {
+            Command::new(env!("CARGO_BIN_EXE_vibloom"))
+                .arg("run")
+                .current_dir(&dir)
+                .env_remove("VIBLOOM_ROLE")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("spawn")
+        })
+        .collect();
+    for mut r in runs {
+        r.wait().expect("wait");
+    }
+    assert_eq!(cli(&dir, &["verify"]).out, "6 runs, chain intact.");
+
+    // Someone edits run 4 by hand: runs 1 to 3 still verify, the rest do not.
+    let path = dir.join(".vibloom/log.jsonl");
+    let text = fs::read_to_string(&path).expect("log");
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    lines[3] = lines[3].replace("\"fail\"", "\"pass\"");
+    fs::write(&path, lines.join("\n") + "\n").expect("write");
+    assert_eq!(cli(&dir, &["verify"]).code, 1);
+    let stuck = cli(&dir, &["run"]);
+    assert!(stuck.err.contains("vibloom repair"), "{}", stuck.err);
+    assert_eq!(cli(&dir, &["repair"]).code, 1);
+    let repaired = vibloom(&dir, &["repair"], "", true);
+    assert!(
+        repaired
+            .out
+            .starts_with("Kept 3 verified runs; moved 3 unverified lines"),
+        "{}",
+        repaired.out
+    );
+    assert_eq!(cli(&dir, &["verify"]).out, "3 runs, chain intact.");
+    assert!(cli(&dir, &["run"]).out.starts_with("Run 4:"));
+}
+
+#[test]
+fn rejects_mistyped_map_keys_and_options() {
+    let dir = project();
+    with_runner(&dir);
+    assert_eq!(cli(&dir, &["run"]).code, 0);
+    let before = fs::read_to_string(dir.join(".vibloom/log.jsonl")).expect("log");
+
+    // A mistyped option is not handed to the runner, and records nothing.
+    let bad = cli(&dir, &["run", "--mt", "x"]);
+    assert_eq!(bad.code, 1);
+    assert!(bad.err.contains("go after `--`"), "{}", bad.err);
+    assert!(cli(&dir, &["run", "--help"]).out.starts_with("vibloom:"));
+    assert_eq!(
+        fs::read_to_string(dir.join(".vibloom/log.jsonl")).expect("log"),
+        before
+    );
+    assert!(
+        cli(&dir, &["run", "--", "--mt", "x"])
+            .out
+            .starts_with("Run 2:")
+    );
+
+    let j: Value = serde_json::from_str(&cli(&dir, &["status", "--json"]).out).expect("json");
+    assert_eq!(j["nodes"][0]["id"], "inv.sum");
+    assert_eq!(j["nodes"][0]["state"], "BROKEN");
+    assert_eq!(j["nodes"][0]["needs_attention"], true);
+
+    edit_map(&dir, |m| m["nodes"][0]["wach"] = json!(["src/"]));
+    let typo = cli(&dir, &["status"]);
+    assert_eq!(typo.code, 1);
+    assert!(
+        typo.err.contains("inv.sum: unknown key \"wach\""),
+        "{}",
+        typo.err
+    );
+}
+
+#[test]
+fn ignored_files_in_a_watched_folder_do_not_count_as_changes() {
+    let dir = project();
+    with_runner(&dir);
+    fs::write(dir.join("src/C.sol"), "contract C { }").expect("write");
+    git(&dir, &["init", "-q"]);
+    fs::write(dir.join(".gitignore"), "src/cache/\n*.pyc\n").expect("write");
+    edit_map(&dir, |m| m["nodes"][0]["watch"] = json!(["src/"]));
+    assert_eq!(cli(&dir, &["check"]).code, 0);
+
+    // Build output the project ignores appears after the run.
+    fs::create_dir_all(dir.join("src/cache")).expect("dir");
+    fs::write(dir.join("src/cache/a.json"), "{}").expect("write");
+    fs::write(dir.join("src/C.pyc"), "x").expect("write");
+    assert_eq!(cli(&dir, &["status"]).code, 0);
+
+    // A new source file is a change, tracked or not.
+    fs::write(dir.join("src/New.sol"), "contract N { }").expect("write");
+    let s = cli(&dir, &["status"]);
+    assert_eq!(s.code, 1);
+    assert!(s.out.contains("pending review"), "{}", s.out);
 }
 
 #[test]

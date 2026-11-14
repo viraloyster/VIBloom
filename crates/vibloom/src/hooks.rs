@@ -78,7 +78,14 @@ pub fn is_guarded(map: &RootsMap, rel: &str) -> bool {
 // Shell commands that plainly write to a file: redirection, in-place edits,
 // moves, deletes, copies. A heuristic, not a sandbox.
 static WRITES: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(^|[\s;&|])(>|>>|tee\b|sed\s+-i|perl\s+-i|rm\b|mv\b|cp\b|truncate\b|dd\b)")
+    Regex::new(
+        r"(^|[\s;&|])(>|>>|tee\b|sed\s+-i|perl\s+-i|rm\b|mv\b|cp\b|truncate\b|dd\b|git\s+(checkout|restore|apply|am|mv|rm|stash|reset|revert|cherry-pick|merge|rebase)\b)",
+    )
+    .expect("static regex")
+});
+// A commit that skips the commit check.
+static NO_VERIFY: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\bgit\b[^;&|]*\bcommit\b[^;&|]*(--no-verify\b|\s-[a-zA-Z]*n[a-zA-Z]*\b)")
         .expect("static regex")
 });
 
@@ -116,6 +123,19 @@ pub fn pre_tool(
     }
     if input.tool_name == "Bash" {
         let cmd = input.command.as_deref().unwrap_or_default();
+        // The role is given by whoever starts the agent, never taken by it.
+        if cmd.contains("VIBLOOM_ROLE") {
+            return deny(
+                "VIBloom: a builder does not set VIBLOOM_ROLE. Ask the person to do what needs the verifier."
+                    .into(),
+            );
+        }
+        if NO_VERIFY.is_match(cmd) {
+            return deny(
+                "VIBloom: this commit would skip the commit check. Commit without --no-verify."
+                    .into(),
+            );
+        }
         if let Some(hit) = guarded(map)
             .into_iter()
             .find(|g| cmd.contains(g.trim_end_matches('/')))
@@ -352,6 +372,44 @@ pub(crate) mod tests {
         )));
         assert_eq!(
             pre_tool(&bash("cat test/C.t.sol"), &map(), Role::Builder, &rel),
+            HookOutput::default()
+        );
+    }
+
+    #[test]
+    fn denies_taking_the_role_skipping_the_check_or_restoring_a_guarded_file() {
+        for cmd in [
+            "VIBLOOM_ROLE=verifier vibloom proposals accept p1",
+            "export VIBLOOM_ROLE=verifier",
+            "git commit --no-verify -m x",
+            "git add -A && git commit -nm x",
+            "git checkout HEAD~1 -- test/C.t.sol",
+            "git restore --source=HEAD~3 test/C.t.sol",
+        ] {
+            assert!(
+                denied(&pre_tool(&bash(cmd), &map(), Role::Builder, &rel)),
+                "{cmd}"
+            );
+        }
+        for cmd in [
+            "git commit -m 'fix the sum'",
+            "git commit --amend -m x",
+            "git checkout -b feature",
+            "git log -n 3",
+        ] {
+            assert_eq!(
+                pre_tool(&bash(cmd), &map(), Role::Builder, &rel),
+                HookOutput::default(),
+                "{cmd}"
+            );
+        }
+        assert_eq!(
+            pre_tool(
+                &bash("git commit --no-verify -m x"),
+                &map(),
+                Role::Verifier,
+                &rel
+            ),
             HookOutput::default()
         );
     }

@@ -22,7 +22,20 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const SKIP_DIRS: [&str; 5] = [".git", "node_modules", "out", "cache", "broadcast"];
+// Skipped only when git cannot say what is ignored (not a repository).
+const SKIP_DIRS: [&str; 10] = [
+    ".git",
+    "node_modules",
+    "out",
+    "cache",
+    "broadcast",
+    "artifacts",
+    "target",
+    "__pycache__",
+    ".venv",
+    "dist",
+];
+const LOCK_PATH: &str = ".vibloom/lock";
 
 pub struct Io<'a> {
     pub cwd: PathBuf,
@@ -88,7 +101,32 @@ fn load_book(root: &Path) -> Book {
     Book::read(&fs::read_to_string(root.join(PROPOSALS_PATH)).unwrap_or_default())
 }
 
-fn append(root: &Path, rel: &str, line: &str) -> Fallible<()> {
+/// Holds the guard's lock while `f` runs, so two processes (two agents, a hook
+/// and a person) never write the record at once. Released when the file
+/// closes, even if the process dies.
+pub fn locked<T>(root: &Path, f: impl FnOnce() -> Fallible<T>) -> Fallible<T> {
+    fs::create_dir_all(root.join(".vibloom")).map_err(|e| e.to_string())?;
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(root.join(LOCK_PATH))
+        .map_err(|e| format!("cannot open {LOCK_PATH}: {e}"))?;
+    file.lock()
+        .map_err(|e| format!("cannot lock {LOCK_PATH}: {e}"))?;
+    let out = f();
+    let _ = file.unlock();
+    out
+}
+
+// Written beside the target and renamed over it: a crash leaves the old file.
+fn write_atomic(path: &Path, text: &str) -> Fallible<()> {
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, text).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
+    fs::rename(&tmp, path).map_err(|e| format!("cannot write {}: {e}", path.display()))
+}
+
+pub fn append(root: &Path, rel: &str, line: &str) -> Fallible<()> {
     fs::create_dir_all(root.join(".vibloom")).map_err(|e| e.to_string())?;
     let mut f = fs::OpenOptions::new()
         .create(true)
@@ -125,6 +163,31 @@ fn walk(root: &Path, dir: &str, out: &mut Vec<String>) {
     }
 }
 
+// The files of a watched directory: what git tracks or would track there, so
+// build output and caches that the project ignores never count as a change.
+fn files_under(root: &Path, dir: &str, out: &mut Vec<String>) {
+    let listed = git(
+        root,
+        &[
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--",
+            &format!("{dir}/"),
+        ],
+    );
+    match listed {
+        Ok(text) => out.extend(
+            text.split('\0')
+                .filter(|f| !f.is_empty())
+                .map(str::to_string),
+        ),
+        Err(_) => walk(root, dir, out),
+    }
+}
+
 /// The hash of every file any node watches, as the tree is right now.
 pub fn hash_watched(root: &Path, map: &RootsMap) -> Files {
     let mut out = Files::new();
@@ -132,7 +195,7 @@ pub fn hash_watched(root: &Path, map: &RootsMap) -> Files {
     for w in watches {
         let mut files = Vec::new();
         if let Some(dir) = w.strip_suffix('/') {
-            walk(root, dir, &mut files);
+            files_under(root, dir, &mut files);
         } else {
             files.push(w);
         }
@@ -163,7 +226,7 @@ pub fn run(root: &Path, extra: &[String]) -> Fallible<RunReport> {
     let log = load_log(root);
     if !log.problems.is_empty() {
         return Err(format!(
-            "{LOG_PATH} failed verification:\n- {}",
+            "{LOG_PATH} failed verification:\n- {}\nA verifier can set the broken part aside with `vibloom repair`.",
             log.problems.join("\n- ")
         ));
     }
@@ -215,18 +278,29 @@ pub fn run(root: &Path, extra: &[String]) -> Fallible<RunReport> {
             }
         }
     }
-    let entry = next_entry(
-        log.entries.last(),
-        RunBody {
-            at: iso_now(),
-            command,
-            outcomes,
-            files,
-            error,
-        },
-    );
-    append(root, LOG_PATH, &to_line(&entry))?;
-    let mut entries = log.entries;
+    // The tests may have taken minutes and another run may have been recorded
+    // meanwhile: the entry is chained to the log as it is now, under the lock.
+    let (entry, mut entries) = locked(root, || {
+        let log = load_log(root);
+        if !log.problems.is_empty() {
+            return Err(format!(
+                "{LOG_PATH} failed verification:\n- {}",
+                log.problems.join("\n- ")
+            ));
+        }
+        let entry = next_entry(
+            log.entries.last(),
+            RunBody {
+                at: iso_now(),
+                command,
+                outcomes,
+                files,
+                error,
+            },
+        );
+        append(root, LOG_PATH, &to_line(&entry))?;
+        Ok((entry, log.entries))
+    })?;
     entries.push(entry.clone());
     let views = derive(&map, &entries, &hash_watched(root, &map));
     Ok(RunReport { entry, views })
@@ -422,18 +496,19 @@ pub const USAGE: &str = "vibloom: assumptions, invariants and intentions for a c
 
   vibloom init               create .vibloom/roots.json and list the invariant tests found
   vibloom scan               add invariant tests the map does not list yet
-  vibloom status             the derived state of every node (exit 1 if any needs attention)
+  vibloom status [--json]    the derived state of every node (exit 1 if any needs attention)
   vibloom run [-- args]      run the tests, record the run, show what changed
   vibloom check [--base ref] [-- args]
                              run, then exit 1 if any node needs attention (for CI); with
                              --base, first require the log to extend the one on that commit
   vibloom context [file]     what an agent should know before touching a file
   vibloom verify             check the run log's hash chain
+  vibloom repair             set aside everything after a broken link in the log (verifier)
   vibloom precommit          refuse a commit that changes guarded files or leaves a node
                              broken or untested since its files changed (any agent, any editor)
   vibloom proposals          list what agents proposed and nobody decided yet
   vibloom proposals accept|reject <id>
-                             move a proposal into the map, or turn it down
+                             move a proposal into the map, or turn it down (verifier)
   vibloom mcp                serve the map to any MCP client over stdio
 
 Optional, for Claude Code:
@@ -461,23 +536,55 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
             return Ok(1);
         }
     };
-    // Our options come first; anything else, or anything after "--", goes to the runner.
+    // Our options come first; only what follows "--" goes to the runner, so a
+    // mistyped option is never run as a test filter.
     let mut base: Option<String> = None;
+    let mut as_json = false;
     let mut extra: Vec<String> = vec![];
+    let mut words: Vec<&str> = vec![];
+    let runs = matches!(cmd, "run" | "check");
     let mut i = 0;
     while i < rest.len() {
         match rest[i].as_str() {
-            "--" => {
+            "--" if runs => {
                 extra.extend(rest[i + 1..].iter().cloned());
                 break;
             }
+            "--help" | "-h" => {
+                (io.out)(USAGE);
+                return Ok(0);
+            }
             "--base" if cmd == "check" => {
                 i += 1;
-                base = rest.get(i).cloned();
+                base = Some(
+                    rest.get(i)
+                        .cloned()
+                        .ok_or("--base needs a commit, for example --base origin/main")?,
+                );
             }
-            a => extra.push(a.to_string()),
+            "--json" if cmd == "status" => as_json = true,
+            a if a.starts_with('-') && cmd != "hook" => {
+                return Err(if runs {
+                    format!("Unknown option {a}. Arguments for the test runner go after `--`.")
+                } else {
+                    format!("Unknown option {a} for `vibloom {cmd}`.")
+                });
+            }
+            a => words.push(a),
         }
         i += 1;
+    }
+    let takes_words = matches!(cmd, "hook" | "context" | "proposals");
+    if !takes_words && !words.is_empty() {
+        return Err(format!(
+            "`vibloom {cmd}` takes no argument like {}.{}",
+            words[0],
+            if runs {
+                " Arguments for the test runner go after `--`."
+            } else {
+                ""
+            }
+        ));
     }
 
     match cmd {
@@ -515,7 +622,7 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
             }
             fs::create_dir_all(io.cwd.join(".vibloom")).map_err(|e| e.to_string())?;
             let (map, added) = scan(&io.cwd, &RootsMap::empty());
-            fs::write(io.cwd.join(MAP_PATH), serialize_map(&map)).map_err(|e| e.to_string())?;
+            write_atomic(&io.cwd.join(MAP_PATH), &serialize_map(&map))?;
             (io.out)(&format!(
                 "Created {MAP_PATH} with {} invariant tests found.",
                 added.len()
@@ -536,7 +643,7 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
         "scan" => {
             let (map, added) = scan(&root, &load_map(&root)?);
             if !added.is_empty() {
-                fs::write(root.join(MAP_PATH), serialize_map(&map)).map_err(|e| e.to_string())?;
+                write_atomic(&root.join(MAP_PATH), &serialize_map(&map))?;
             }
             (io.out)(&if added.is_empty() {
                 "No new invariant tests.".to_string()
@@ -554,7 +661,20 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
                     problems.join("\n- ")
                 ));
             }
-            (io.out)(&table(&vs));
+            if as_json {
+                let nodes: Vec<Value> = vs
+                    .iter()
+                    .map(|v| {
+                        let mut j = serde_json::to_value(v).unwrap_or(Value::Null);
+                        j["state"] = json!(label(v));
+                        j["needs_attention"] = json!(troubled(v));
+                        j
+                    })
+                    .collect();
+                (io.out)(&json!({ "nodes": nodes, "log_problems": problems }).to_string());
+            } else {
+                (io.out)(&table(&vs));
+            }
             Ok(i32::from(vs.iter().any(troubled) || !problems.is_empty()))
         }
         "run" | "check" => {
@@ -604,8 +724,9 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
             let failed = report.views.iter().any(troubled) || report.entry.error.is_some();
             Ok(i32::from(cmd == "check" && failed))
         }
+        "repair" => repair(&root, io),
         "context" => {
-            let file = rest.first().and_then(|f| relative_to(&root, &io.cwd, f));
+            let file = words.first().and_then(|f| relative_to(&root, &io.cwd, f));
             (io.out)(&context(&views(&root)?, file.as_deref()));
             Ok(0)
         }
@@ -621,7 +742,15 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
         "precommit" => {
             let staged: Vec<String> = git(
                 &root,
-                &["diff", "--cached", "--name-only", "-z", "--relative"],
+                // Without rename detection, so a moved file shows its old path too.
+                &[
+                    "diff",
+                    "--cached",
+                    "--name-only",
+                    "--no-renames",
+                    "-z",
+                    "--relative",
+                ],
             )
             .map_err(|e| format!("git diff --cached failed: {e}"))?
             .split('\0')
@@ -647,14 +776,47 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
             );
             Ok(1)
         }
-        "proposals" => proposals(&root, rest, io),
+        "proposals" => proposals(&root, &words, io),
         other => Err(format!("Unknown command {other}.\n\n{USAGE}")),
     }
 }
 
-fn proposals(root: &Path, rest: &[String], io: &mut Io) -> Fallible<i32> {
+// Sets aside everything from the first broken link on. The runs before it
+// still verify; the rest was never trusted and is kept apart, not deleted.
+fn repair(root: &Path, io: &mut Io) -> Fallible<i32> {
+    if io.role != Role::Verifier {
+        return Err(
+            "Only the verifier repairs the record: run it as VIBLOOM_ROLE=verifier.".into(),
+        );
+    }
+    locked(root, || {
+        let text = fs::read_to_string(root.join(LOG_PATH)).unwrap_or_default();
+        let log = read_log(&text);
+        if log.problems.is_empty() {
+            (io.out)("The run log verifies; nothing to repair.");
+            return Ok(0);
+        }
+        let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+        let (kept, rejected) = lines.split_at(log.entries.len());
+        let aside = format!(
+            ".vibloom/log.rejected-{}.jsonl",
+            iso_now().replace([':', '.'], "-")
+        );
+        let join = |ls: &[&str]| ls.iter().map(|l| format!("{l}\n")).collect::<String>();
+        fs::write(root.join(&aside), join(rejected)).map_err(|e| e.to_string())?;
+        write_atomic(&root.join(LOG_PATH), &join(kept))?;
+        (io.out)(&format!(
+            "Kept {} verified runs; moved {} unverified lines to {aside}. Run the tests again.",
+            kept.len(),
+            rejected.len()
+        ));
+        Ok(0)
+    })
+}
+
+fn proposals(root: &Path, rest: &[&str], io: &mut Io) -> Fallible<i32> {
     let book = load_book(root);
-    match (rest.first().map(String::as_str), rest.get(1)) {
+    match (rest.first().copied(), rest.get(1)) {
         (None | Some("list"), _) => {
             let pending = book.pending();
             if pending.is_empty() {
@@ -676,14 +838,20 @@ fn proposals(root: &Path, rest: &[String], io: &mut Io) -> Fallible<i32> {
             Ok(0)
         }
         (Some(action @ ("accept" | "reject")), Some(id)) => {
-            let Some(p) = book.pending().into_iter().find(|p| &p.id == id).cloned() else {
+            // Deciding changes the map: the same role that may edit it by hand.
+            if io.role != Role::Verifier {
+                return Err(format!(
+                    "Only the verifier decides proposals: VIBLOOM_ROLE=verifier vibloom proposals {action} {id}"
+                ));
+            }
+            let Some(p) = book.pending().into_iter().find(|p| p.id == *id).cloned() else {
                 return Err(format!("No pending proposal {id}."));
             };
             let mut node = None;
             if action == "accept" {
                 let (map, new_id) = accept(&load_map(root)?, &p)
                     .map_err(|e| format!("{id} cannot be accepted:\n- {}", e.join("\n- ")))?;
-                fs::write(root.join(MAP_PATH), serialize_map(&map)).map_err(|e| e.to_string())?;
+                write_atomic(&root.join(MAP_PATH), &serialize_map(&map))?;
                 node = Some(new_id);
             }
             let d = Decision {

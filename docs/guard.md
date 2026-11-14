@@ -102,12 +102,28 @@ a mocha reporter such as `mocha-junit-reporter` set in `hardhat.config`.)
 | UNSUPPORTED    | something it depends on is broken, off or unsupported                         |
 | AT RISK        | the same, for an intention                                                    |
 | untested       | its test has never run                                                        |
+| skipped        | the latest run skipped its test                                               |
+| MISSING        | its test ran once, but the latest run of the whole suite did not include it   |
 | off            | switched off by a person; a choice, not a problem                             |
+
+Every state but holds and off needs attention: `status` and `check` exit 1,
+the commit check refuses and the agent is sent back. A test that never ran,
+was skipped or went missing is not evidence, so a mistyped test name or a
+deleted invariant can never read as passing. What rests on such a node is
+pending review.
 
 A failure stays a failure until a newer run passes. A pass only counts while
 the files it ran against are unchanged: the log stores the hash of every
 watched file at the start of each run. A file added to a watched directory, or
-not recorded by the run, counts as changed.
+not recorded by the run, counts as changed. In a git repository a watched
+directory holds what git tracks or would track there, so build output and
+caches the project ignores never count.
+
+The whole suite is the map's `runner` with no extra arguments. A filtered run
+(`vibloom run -- --mt X`) records what it ran and says nothing about the rest.
+
+The map is checked strictly: an unknown key, such as a mistyped `watch`, is an
+error, not something ignored.
 
 ## The log
 
@@ -117,6 +133,11 @@ the one before. `vibloom verify` checks the chain; an edited or removed entry
 breaks it, and nothing after the break is trusted. A run whose output is not a
 report (a compilation error, a missing binary) is recorded as an error, never
 as a pass.
+
+Runs may happen at the same time (two agents, a hook and a person): each is
+chained under a lock when it finishes, so the log stays one chain. If the log
+is damaged anyway, `VIBLOOM_ROLE=verifier vibloom repair` keeps the runs
+before the break and moves the rest to `.vibloom/log.rejected-<time>.jsonl`.
 
 ## Install
 
@@ -141,14 +162,15 @@ publishing.
 ```bash
 vibloom init            # create the map, adding every invariant test found under tests/
 vibloom scan            # add invariant tests the map does not list yet
-vibloom status          # derived state of every node; exit 1 if any needs attention
-vibloom run -- --mt X   # run the tests (extra args go to the runner), record, show what changed
+vibloom status [--json] # derived state of every node; exit 1 if any needs attention
+vibloom run -- --mt X   # run the tests (what follows -- goes to the runner), record, show what changed
 vibloom check           # run, then exit 1 if any node needs attention: for CI
 vibloom context [file]  # what an agent should know before touching a file
 vibloom verify          # check the log's hash chain
+vibloom repair          # set aside everything after a broken link (verifier)
 vibloom precommit       # the commit check, for .git/hooks/pre-commit
 vibloom proposals       # what agents proposed and nobody decided yet
-vibloom proposals accept p1 | reject p1
+VIBLOOM_ROLE=verifier vibloom proposals accept p1   # or reject p1
 vibloom mcp             # serve the map to any MCP client over stdio
 vibloom hooks           # optional: print the Claude Code hooks configuration
 ```
@@ -200,8 +222,8 @@ claude mcp add vibloom -- vibloom mcp
 | `proposals` | what is still pending                                                     |
 
 There is no tool to accept a proposal, set a state or edit the record. A
-proposal waits in `.vibloom/proposals.jsonl` until a person runs
-`vibloom proposals accept <id>`, which checks it against the map as it is and
+proposal waits in `.vibloom/proposals.jsonl` until the verifier runs
+`VIBLOOM_ROLE=verifier vibloom proposals accept <id>`, which checks it against the map as it is and
 adds it (an assumption enters as hypothetical), or `reject <id>`. Models
 propose; people and code decide.
 
@@ -277,7 +299,8 @@ hooks do three things:
 - **Before a tool runs**: an edit to a protected test, to a path in `protect`
   or to `.vibloom/` is denied unless `VIBLOOM_ROLE=verifier`. Shell commands
   that plainly write to those paths (redirection, `sed -i`, `mv`, `rm`, `cp`,
-  `tee`) are denied too.
+  `tee`, `git checkout`, `git restore`...) are denied too, and so are commands
+  that set `VIBLOOM_ROLE` or commit with `--no-verify`.
 - **After a tool runs**: after a `forge test` command, the guard re-runs the
   same subset with `--json` and records it, so the agent's own output is never
   what counts. If anything is broken, unsupported or pending, the agent is sent

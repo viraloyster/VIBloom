@@ -1,9 +1,9 @@
 //! The check before a commit. It works with any agent, any editor and no AI at
 //! all: whoever commits goes through it.
 
-use crate::derive::{Evidence, NodeView, label, troubled};
+use crate::derive::{NodeView, label, troubled};
 use crate::hooks::{Role, guarded_for_commit};
-use crate::map::{Kind, RootsMap, Stance};
+use crate::map::RootsMap;
 
 pub fn precommit(
     map: &RootsMap,
@@ -23,14 +23,7 @@ pub fn precommit(
         }
     }
     problems.extend(log_problems.iter().map(|p| format!("run log: {p}")));
-    // Before a commit, an invariant that never ran counts too: nothing says it holds.
-    let blocking = |v: &NodeView| {
-        troubled(v)
-            || (v.stance != Stance::Off
-                && v.kind == Kind::Invariant
-                && v.evidence == Evidence::Untested)
-    };
-    for v in views.iter().filter(|v| blocking(v)) {
+    for v in views.iter().filter(|v| troubled(v)) {
         let why = if !v.changed.is_empty() {
             let run = v.run.map_or_else(|| "?".to_string(), |r| r.to_string());
             format!("; changed since run {run}: {}", v.changed.join(", "))
@@ -49,6 +42,7 @@ pub fn precommit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::derive::Evidence;
     use crate::hooks::tests::view;
     use crate::map::parse_map;
     use serde_json::json;

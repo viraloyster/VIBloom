@@ -143,6 +143,24 @@ pub fn safe_path(p: &str) -> bool {
     !p.is_empty() && !p.starts_with('/') && !p.split('/').any(|s| s == "..") && !p.contains('\\')
 }
 
+// A key the guard does not know is a mistake to report, not to ignore: a
+// mistyped "watch" would leave a node watching nothing.
+fn unknown_keys(
+    obj: &serde_json::Map<String, Value>,
+    known: &[&str],
+    at: &str,
+    errors: &mut Vec<String>,
+) {
+    for k in obj.keys() {
+        if !known.contains(&k.as_str()) {
+            errors.push(format!(
+                "{at}: unknown key \"{k}\" (known: {})",
+                known.join(", ")
+            ));
+        }
+    }
+}
+
 fn strings(v: &Value) -> Option<Vec<String>> {
     v.as_array()?
         .iter()
@@ -162,6 +180,12 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
     let Some(obj) = raw.as_object() else {
         return Err(vec!["the map must be a JSON object".into()]);
     };
+    unknown_keys(
+        obj,
+        &["version", "runner", "report", "tests", "protect", "nodes"],
+        "the map",
+        &mut errors,
+    );
     if obj.get("version") != Some(&Value::from(1)) {
         errors.push("version must be 1".into());
     }
@@ -216,6 +240,30 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
         };
         if !seen.insert(id.to_string()) {
             errors.push(format!("{id}: duplicate id"));
+        }
+        unknown_keys(
+            n,
+            &[
+                "id",
+                "kind",
+                "title",
+                "detail",
+                "stance",
+                "test",
+                "watch",
+                "depends_on",
+                "protected",
+            ],
+            id,
+            &mut errors,
+        );
+        if let Some(t) = n.get("test").and_then(Value::as_object) {
+            unknown_keys(
+                t,
+                &["file", "contract", "name"],
+                &format!("{id}.test"),
+                &mut errors,
+            );
         }
         let Some(kind) = n.get("kind").and_then(Value::as_str).and_then(Kind::parse) else {
             errors.push(format!(
@@ -284,7 +332,11 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
         }
         let protected = match n.get("protected") {
             None => kind == Kind::Invariant,
-            Some(v) => v == &Value::Bool(true),
+            Some(Value::Bool(b)) => *b,
+            Some(_) => {
+                errors.push(format!("{id}: protected must be true or false"));
+                false
+            }
         };
         nodes.push(RootNode {
             id: id.into(),
