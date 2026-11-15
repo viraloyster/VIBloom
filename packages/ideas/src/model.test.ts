@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BudgetExceeded, Ledger } from "./cost";
-import { Model, ModelError, type ModelConfig } from "./model";
+import { mismatch, Model, ModelError, type ModelConfig } from "./model";
 
 interface Seen {
   url: string;
@@ -69,7 +69,7 @@ describe("OpenAI-compatible providers", () => {
 
   it("uses max_completion_tokens for OpenAI, a custom base URL, and no key for a local model", async () => {
     const seen: Seen[] = [];
-    const reply = { choices: [{ message: { content: "{}" }, finish_reason: "stop" }] };
+    const reply = { choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }] };
     await model({}, fake(200, reply, seen)).ask(ask, "c", SCHEMA);
     expect(seen[0]!.body.max_completion_tokens).toBe(100);
     await model(
@@ -86,6 +86,154 @@ describe("OpenAI-compatible providers", () => {
       fake(200, { choices: [{ message: { content: '{"ok":' }, finish_reason: "length" }] }, []),
     );
     await expect(m.ask(ask, "c", SCHEMA)).rejects.toMatchObject({ code: "length" });
+  });
+});
+
+// Replies in order, one per request, recording what was sent.
+function sequence(replies: [number, unknown][], seen: Seen[]): typeof fetch {
+  let i = 0;
+  return (url: string | URL | Request, init?: RequestInit) => {
+    seen.push({
+      url: url instanceof Request ? url.url : url.toString(),
+      headers: init?.headers as Record<string, string>,
+      body: JSON.parse(typeof init?.body === "string" ? init.body : "{}") as Record<
+        string,
+        unknown
+      >,
+    });
+    const [status, reply] = replies[Math.min(i++, replies.length - 1)]!;
+    return Promise.resolve(new Response(JSON.stringify(reply), { status }));
+  };
+}
+
+const good = { choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }] };
+
+describe("a provider that is busy, limited or less capable", () => {
+  it("asks again after an overload and settles the budget once", async () => {
+    const seen: Seen[] = [];
+    const waits: number[] = [];
+    const m = model(
+      {
+        fetch: sequence(
+          [
+            [429, { error: { message: "slow down" } }],
+            [503, {}],
+            [200, good],
+          ],
+          seen,
+        ),
+        sleep: (ms) => {
+          waits.push(ms);
+          return Promise.resolve();
+        },
+      },
+      sequence([], []),
+    );
+    expect((await m.ask(ask, "c", SCHEMA)).value).toEqual({ ok: true });
+    expect(seen).toHaveLength(3);
+    expect(waits).toEqual([1500, 3000]);
+    expect(m.ledger.entries).toHaveLength(1);
+  });
+
+  it("gives up after three attempts and returns the reservation", async () => {
+    const seen: Seen[] = [];
+    const m = model(
+      { fetch: sequence([[529, { error: "overloaded" }]], seen), sleep: () => Promise.resolve() },
+      sequence([], []),
+    );
+    await expect(m.ask(ask, "c", SCHEMA)).rejects.toMatchObject({ code: "rejected_529" });
+    expect(seen).toHaveLength(3);
+    expect(m.ledger.total).toBe(0);
+  });
+
+  it("falls back to plain JSON when the server takes no strict schema, and remembers", async () => {
+    const seen: Seen[] = [];
+    const fenced = {
+      choices: [{ message: { content: '```json\n{"ok":false}\n```' }, finish_reason: "stop" }],
+    };
+    const m = model(
+      {
+        provider: "local",
+        fetch: sequence(
+          [
+            [400, { error: { message: "response_format json_schema is not supported" } }],
+            [200, fenced],
+            [200, good],
+          ],
+          seen,
+        ),
+      },
+      sequence([], []),
+    );
+    expect((await m.ask(ask, "c", SCHEMA)).value).toEqual({ ok: false });
+    expect(seen[1]!.body.response_format).toEqual({ type: "json_object" });
+    const system = (seen[1]!.body.messages as { content: string }[])[0]!.content;
+    expect(system).toContain('"required":["ok"]');
+    // The next request goes straight to plain JSON.
+    await m.ask(ask, "c", SCHEMA);
+    expect(seen).toHaveLength(3);
+    expect(seen[2]!.body.response_format).toEqual({ type: "json_object" });
+  });
+
+  it("does not take another kind of refused request for a missing feature", async () => {
+    const seen: Seen[] = [];
+    const m = model(
+      { fetch: sequence([[400, { error: { message: "model not found" } }]], seen) },
+      sequence([], []),
+    );
+    await expect(m.ask(ask, "c", SCHEMA)).rejects.toMatchObject({ code: "rejected_400" });
+    expect(seen).toHaveLength(1);
+  });
+
+  it("refuses an answer that is JSON but not the format asked for", async () => {
+    const wrong = { choices: [{ message: { content: '{"ok":"yes"}' }, finish_reason: "stop" }] };
+    await expect(model({}, fake(200, wrong, [])).ask(ask, "c", SCHEMA)).rejects.toMatchObject({
+      code: "unparsable",
+      message: "the answer did not follow the format: answer.ok is not true or false",
+    });
+  });
+
+  it("reports a model that declines to answer", async () => {
+    const declined = {
+      choices: [
+        { message: { content: null, refusal: "I cannot help with that" }, finish_reason: "stop" },
+      ],
+    };
+    await expect(model({}, fake(200, declined, [])).ask(ask, "c", SCHEMA)).rejects.toMatchObject({
+      code: "refused",
+      message: "I cannot help with that",
+    });
+  });
+});
+
+describe("checking an answer against its schema", () => {
+  const schema = {
+    type: "object",
+    required: ["intent", "nodes"],
+    properties: {
+      intent: { type: "string", enum: ["answer", "run"] },
+      nodes: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string" }, n: { type: "number" } },
+        },
+      },
+    },
+  };
+  it("accepts what fits and names the first thing that does not", () => {
+    expect(mismatch({ intent: "run", nodes: [{ id: "a", n: 1 }] }, schema)).toBeUndefined();
+    expect(mismatch({ intent: "fly", nodes: [] }, schema)).toBe(
+      "answer.intent is not one of answer, run",
+    );
+    expect(mismatch({ intent: "run", nodes: [{ id: "a" }, { n: 2 }] }, schema)).toBe(
+      "answer.nodes[1].id is missing",
+    );
+    expect(mismatch({ intent: "run", nodes: [{ id: "a", n: "x" }] }, schema)).toBe(
+      "answer.nodes[0].n is not a number",
+    );
+    expect(mismatch([], schema)).toBe("answer is not an object");
   });
 });
 

@@ -29,6 +29,7 @@ export { BudgetExceeded, estimate, estimateTokens, Ledger, used } from "./cost";
 export {
   Model,
   ModelError,
+  mismatch,
   PROVIDERS,
   type AskRequest,
   type GrowReply,

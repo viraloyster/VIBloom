@@ -1027,6 +1027,13 @@ function explain(e: unknown): string {
       return "the provider rejected the key.";
     if (e.code === "length") return "the AI ran out of room for this answer; nothing was added.";
     if (e.code === "no_model") return "choose a model in Settings.";
+    if (e.code === "refused") return `the AI declined to answer: ${e.message.slice(0, 160)}`;
+    if (e.code === "rejected_404")
+      return "the provider does not know that model, or the base URL is wrong. Check Settings.";
+    if (e.code === "rejected_429" || e.code === "rejected_529")
+      return "the provider is limiting requests right now; it was tried three times. Wait a moment.";
+    if (e.code === "network")
+      return `the provider could not be reached (${e.message.slice(0, 100)}). For a local model, check that it is running and allows this page.`;
     return `the AI could not answer (${e.code}: ${e.message.slice(0, 120)}).`;
   }
   return e instanceof Error ? e.message : String(e);
