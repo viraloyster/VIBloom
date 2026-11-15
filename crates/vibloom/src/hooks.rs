@@ -83,6 +83,14 @@ static WRITES: LazyLock<Regex> = LazyLock::new(|| {
     )
     .expect("static regex")
 });
+// Anything that signs or sends: an agent reads the chain, it does not write
+// to it.
+static CHAIN_WRITE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"\bcast\s+(send|publish|mktx|wallet)\b|\bforge\s+create\b|\bforge\s+script\b[^;&|]*--broadcast\b|--private-key\b|--mnemonic\b|--ledger\b|--trezor\b|--keystore\b",
+    )
+    .expect("static regex")
+});
 // A commit that skips the commit check.
 static NO_VERIFY: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\bgit\b[^;&|]*\bcommit\b[^;&|]*(--no-verify\b|\s-[a-zA-Z]*n[a-zA-Z]*\b)")
@@ -127,6 +135,12 @@ pub fn pre_tool(
         if cmd.contains("VIBLOOM_ROLE") {
             return deny(
                 "VIBloom: a builder does not set VIBLOOM_ROLE. Ask the person to do what needs the verifier."
+                    .into(),
+            );
+        }
+        if CHAIN_WRITE.is_match(cmd) {
+            return deny(
+                "VIBloom: this command would sign or send a transaction. A builder only reads the chain (cast call, cast code, cast storage); a person sends."
                     .into(),
             );
         }
@@ -319,6 +333,7 @@ pub(crate) mod tests {
             depends_on: vec![],
             watch: vec!["src/C.sol".into(), "test/C.t.sol".into()],
             test_file: Some("test/C.t.sol".into()),
+            sources: vec![],
         }
     }
 
@@ -396,6 +411,10 @@ pub(crate) mod tests {
     #[test]
     fn denies_taking_the_role_skipping_the_check_or_restoring_a_guarded_file() {
         for cmd in [
+            "cast send 0xabc 'mint(address,uint256)' 0xdef 1 --rpc-url $ETH_RPC_URL",
+            "cast call 0xabc 'owner()' --private-key 0x01",
+            "forge script script/Deploy.s.sol --rpc-url x --broadcast",
+            "forge create src/C.sol:C",
             "VIBLOOM_ROLE=verifier vibloom proposals accept p1",
             "export VIBLOOM_ROLE=verifier",
             "git commit --no-verify -m x",
@@ -409,6 +428,9 @@ pub(crate) mod tests {
             );
         }
         for cmd in [
+            "cast call 0xabc 'totalSupply()(uint256)' --block 21000000",
+            "cast storage 0xabc 0",
+            "forge script script/Check.s.sol",
             "git commit -m 'fix the sum'",
             "git commit --amend -m x",
             "git checkout -b feature",

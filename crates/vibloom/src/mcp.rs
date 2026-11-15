@@ -32,19 +32,24 @@ fn tools() -> Value {
           "inputSchema": { "type": "object", "properties": { "filters": {
               "type": "array", "items": { "type": "string" },
               "description": "Flag and value pairs, for example [\"--match-path\", \"test/A.t.sol\"]." } } } },
+        { "name": "research", "description": "Start here when asked to find a project's assumptions and invariants: the person's notes, what the code says, and how to propose with evidence.",
+          "inputSchema": { "type": "object", "properties": {} } },
         { "name": "gaps", "description": "Foundry projects: state-changing functions no test names, and handler functions whose every call reverted.",
           "inputSchema": { "type": "object", "properties": {} } },
         { "name": "verify", "description": "Check the run log's hash chain.",
           "inputSchema": { "type": "object", "properties": {} } },
-        { "name": "propose", "description": "Propose an assumption, invariant or intention. It is kept apart as hypothetical until a person accepts it.",
-          "inputSchema": { "type": "object", "required": ["kind", "title"], "properties": {
+        { "name": "propose", "description": "Propose an assumption, invariant or intention, with where it comes from. It is kept apart until the verifier accepts it.",
+          "inputSchema": { "type": "object", "required": ["kind", "title", "evidence"], "properties": {
               "kind": { "type": "string", "enum": ["assumption", "invariant", "intention"] },
               "title": { "type": "string" },
               "detail": { "type": "string", "description": "Why it matters, or what would show it false." },
               "depends_on": strings.clone(),
-              "watch": strings,
+              "watch": strings.clone(),
+              "evidence": { "type": "array", "items": { "type": "string" },
+                  "description": "Where it comes from, one entry each: src/File.sol:120, a document's URL and section, or a chain read with its block." },
               "test": { "type": "object", "required": ["file", "name"], "properties": {
                   "file": { "type": "string" }, "contract": { "type": "string" }, "name": { "type": "string" } } },
+              "id": { "type": "string", "description": "Optional short id for the node, like asm.oracle-is-fresh." },
               "by": { "type": "string", "description": "Which agent is proposing." } } } },
         { "name": "proposals", "description": "Proposals nobody has decided on yet.",
           "inputSchema": { "type": "object", "properties": {} } }
@@ -92,6 +97,7 @@ fn call(cwd: &Path, name: &str, args: &Value) -> Result<String, String> {
             Ok(context(&views(&root)?, file.as_deref()))
         }
         "gaps" => crate::cli::gaps(&root),
+        "research" => crate::cli::research(&root),
         "verify" => {
             let log = load_log(&root);
             if log.problems.is_empty() {
@@ -139,6 +145,8 @@ fn call(cwd: &Path, name: &str, args: &Value) -> Result<String, String> {
                 detail: s("detail"),
                 depends_on: strings(args.get("depends_on")),
                 watch: strings(args.get("watch")),
+                evidence: strings(args.get("evidence")),
+                node_id: s("id"),
                 test,
                 by: s("by"),
             };
@@ -281,6 +289,7 @@ mod tests {
                 "status",
                 "context",
                 "run",
+                "research",
                 "gaps",
                 "verify",
                 "propose",

@@ -1,9 +1,11 @@
-//! What an agent reads before touching code: full detail for the nodes the file
-//! at hand touches and the nodes they rest on, one line for everything else.
+//! What an agent reads before touching code. Detail is spent where it helps:
+//! everything about the nodes that name the file at hand, one line for the
+//! nodes connected to them, the reason for anything in trouble elsewhere, and
+//! a count of the rest. On a large map that is a small part of it.
 
 use crate::derive::{NodeView, label, troubled};
 use crate::map::covers;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 fn line(v: &NodeView) -> String {
     format!("- {} [{}] {}", v.id, label(v), v.title)
@@ -48,6 +50,9 @@ fn full(v: &NodeView, by_id: &HashMap<&str, &NodeView>) -> String {
     if !watch.is_empty() {
         out.push(format!("  watches: {}", watch.join(", ")));
     }
+    if !v.sources.is_empty() {
+        out.push(format!("  from: {}", v.sources.join("; ")));
+    }
     if !v.depends_on.is_empty() {
         let deps: Vec<String> = v
             .depends_on
@@ -84,71 +89,130 @@ fn full(v: &NodeView, by_id: &HashMap<&str, &NodeView>) -> String {
     out.join("\n")
 }
 
+// A node is about a file when it names it: as something it watches, as its
+// test, or in where it comes from ("src/Vault.sol:120").
+fn names(v: &NodeView, path: &str) -> bool {
+    v.watch.iter().any(|w| w == path)
+        || v.test_file.as_deref() == Some(path)
+        || v.sources.iter().any(|s| s.contains(path))
+}
+
 pub fn context(views: &[NodeView], path: Option<&str>) -> String {
     let by_id: HashMap<&str, &NodeView> = views.iter().map(|v| (v.id.as_str(), v)).collect();
-    let mut near: HashSet<&str> = HashSet::new();
+    let mut about: HashSet<&str> = HashSet::new();
+    let mut connected: HashSet<&str> = HashSet::new();
     if let Some(p) = path {
         for v in views {
-            if v.watch.iter().any(|w| covers(w, p)) {
-                near.insert(&v.id);
+            if names(v, p) {
+                about.insert(&v.id);
+            } else if v.watch.iter().any(|w| covers(w, p)) {
+                // It only watches the folder the file is in.
+                connected.insert(&v.id);
             }
         }
-        // What the touched nodes rest on, and what rests on them.
-        let mut queue: Vec<&str> = near.iter().copied().collect();
+        // What those rest on, however deep, and what rests on them.
+        let mut queue: Vec<&str> = about.iter().chain(&connected).copied().collect();
         while let Some(id) = queue.pop() {
             for d in by_id
                 .get(id)
                 .map(|v| v.depends_on.as_slice())
                 .unwrap_or_default()
             {
-                if near.insert(d) {
+                if !about.contains(d.as_str()) && connected.insert(d) {
                     queue.push(d);
                 }
             }
         }
         let above: Vec<&str> = views
             .iter()
-            .filter(|v| v.depends_on.iter().any(|d| near.contains(d.as_str())))
+            .filter(|v| {
+                v.depends_on
+                    .iter()
+                    .any(|d| about.contains(d.as_str()) || connected.contains(d.as_str()))
+            })
             .map(|v| v.id.as_str())
+            .filter(|id| !about.contains(id))
             .collect();
-        near.extend(above);
+        connected.extend(above);
     }
     let trouble = views.iter().filter(|v| troubled(v)).count();
     let mut out = vec![
         "VIBloom roots. States are derived from test runs; an agent cannot set them.".to_string(),
-        format!("{} nodes, {trouble} need attention.", views.len()),
+        format!(
+            "{} nodes, {trouble} {} attention.",
+            views.len(),
+            if trouble == 1 { "needs" } else { "need" }
+        ),
     ];
+    // Within a group, what needs attention comes first.
+    let pick = |set: &HashSet<&str>| -> Vec<&NodeView> {
+        let mut vs: Vec<&NodeView> = views
+            .iter()
+            .filter(|v| set.contains(v.id.as_str()))
+            .collect();
+        vs.sort_by_key(|v| !troubled(v));
+        vs
+    };
     if let Some(p) = path {
         out.push(String::new());
-        out.push(format!("Touching {p}:"));
-        let close: Vec<String> = views
-            .iter()
-            .filter(|v| near.contains(v.id.as_str()))
-            .map(|v| full(v, &by_id))
-            .collect();
-        if close.is_empty() {
-            out.push("- nothing in the map watches it".into());
+        if about.is_empty() && connected.is_empty() {
+            out.push(format!("Nothing in the map watches {p}."));
         } else {
-            out.extend(close);
+            if !about.is_empty() {
+                out.push(format!("About {p}:"));
+                out.extend(pick(&about).into_iter().map(|v| full(v, &by_id)));
+            }
+            if !connected.is_empty() {
+                out.push(format!(
+                    "{} its folder, or connected to the above:",
+                    if about.is_empty() {
+                        "Watching"
+                    } else {
+                        "Also watching"
+                    }
+                ));
+                out.extend(
+                    pick(&connected).into_iter().map(
+                        |v| {
+                            if troubled(v) { why(v) } else { line(v) }
+                        },
+                    ),
+                );
+            }
         }
     }
-    let rest: Vec<&NodeView> = views
-        .iter()
-        .filter(|v| !near.contains(v.id.as_str()))
-        .collect();
-    if !rest.is_empty() {
+    let shown = |v: &NodeView| about.contains(v.id.as_str()) || connected.contains(v.id.as_str());
+    let elsewhere: Vec<&NodeView> = views.iter().filter(|v| !shown(v)).collect();
+    let bad: Vec<&&NodeView> = elsewhere.iter().filter(|v| troubled(v)).collect();
+    if !bad.is_empty() {
         out.push(String::new());
         out.push(
             if path.is_some() {
-                "Elsewhere:"
+                "Needs attention elsewhere:"
             } else {
-                "All nodes:"
+                "Needs attention:"
             }
             .into(),
         );
-        // What needs attention says why; the rest is one line each.
-        out.extend(rest.iter().filter(|v| troubled(v)).map(|v| why(v)));
-        out.extend(rest.iter().filter(|v| !troubled(v)).map(|v| line(v)));
+        out.extend(bad.iter().map(|v| why(v)));
+    }
+    // The rest is only counted: `vibloom status` lists it when it is wanted.
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for v in elsewhere.iter().filter(|v| !troubled(v)) {
+        *counts.entry(label(v)).or_default() += 1;
+    }
+    if !counts.is_empty() {
+        let parts: Vec<String> = counts.iter().map(|(l, n)| format!("{n} {l}")).collect();
+        out.push(String::new());
+        out.push(format!(
+            "{}: {} (`vibloom status` lists them).",
+            if path.is_some() || !bad.is_empty() {
+                "The rest"
+            } else {
+                "All sound"
+            },
+            parts.join(", ")
+        ));
     }
     out.push(String::new());
     out.push(
@@ -157,4 +221,94 @@ pub fn context(views: &[NodeView], path: Option<&str>) -> String {
     );
     out.push("The task is not done while `vibloom status` exits 1.".into());
     out.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::derive::{Evidence, Support};
+    use crate::map::{Kind, Stance};
+
+    fn node(id: &str, kind: Kind, evidence: Evidence) -> NodeView {
+        NodeView {
+            id: id.into(),
+            kind,
+            title: format!("title of {id}"),
+            detail: Some(format!("detail of {id}")),
+            stance: Stance::Adopted,
+            protected: kind == Kind::Invariant,
+            evidence,
+            support: Support::Ok,
+            because: vec![],
+            changed: vec![],
+            reason: None,
+            run: None,
+            fuzz: None,
+            depends_on: vec![],
+            watch: vec![],
+            test_file: None,
+            sources: vec![],
+        }
+    }
+
+    fn map() -> Vec<NodeView> {
+        // About the vault by evidence; watches the whole folder.
+        let mut cap = node("inv.cap", Kind::Invariant, Evidence::Holds);
+        cap.watch = vec!["src/".into(), "test/Vault.t.sol".into()];
+        cap.test_file = Some("test/Vault.t.sol".into());
+        cap.sources = vec!["src/Vault.sol:120".into()];
+        cap.depends_on = vec!["asm.oracle".into()];
+        // Only watches the folder the vault is in.
+        let mut supply = node("inv.supply", Kind::Invariant, Evidence::Holds);
+        supply.watch = vec!["src/".into()];
+        let oracle = node("asm.oracle", Kind::Assumption, Evidence::None);
+        let mut promise = node("int.promise", Kind::Intention, Evidence::None);
+        promise.depends_on = vec!["inv.cap".into()];
+        // Nothing to do with the vault: one broken, two fine.
+        let mut broken = node("inv.other", Kind::Invariant, Evidence::Broken);
+        broken.reason = Some("drift".into());
+        let far = node("asm.far", Kind::Assumption, Evidence::None);
+        let far2 = node("asm.far2", Kind::Assumption, Evidence::None);
+        vec![cap, supply, oracle, promise, broken, far, far2]
+    }
+
+    #[test]
+    fn spends_detail_on_what_names_the_file_and_counts_the_rest() {
+        let text = context(&map(), Some("src/Vault.sol"));
+        let about = text.find("About src/Vault.sol:").expect("about");
+        let also = text.find("Also watching its folder").expect("also");
+        let elsewhere = text.find("Needs attention elsewhere:").expect("elsewhere");
+        let rest = text.find("The rest: 2 adopted").expect("rest");
+        assert!(
+            about < also && also < elsewhere && elsewhere < rest,
+            "{text}"
+        );
+        // Full detail only for the node that names the file.
+        assert!(text[about..also].contains("detail of inv.cap"));
+        assert!(text[about..also].contains("rests on: asm.oracle [adopted]"));
+        // One line each for the folder watcher, what it rests on and what rests on it.
+        let middle = &text[also..elsewhere];
+        for id in ["inv.supply", "asm.oracle", "int.promise"] {
+            assert!(middle.contains(&format!("- {id} [")), "{id} in {middle}");
+        }
+        assert!(!middle.contains("detail of"));
+        // Trouble elsewhere says why; the rest is a count, not a list.
+        assert!(text[elsewhere..rest].contains("- inv.other [BROKEN]"));
+        assert!(text[elsewhere..rest].contains("why: drift"));
+        assert!(!text.contains("asm.far"));
+    }
+
+    #[test]
+    fn the_overview_is_what_is_wrong_and_a_count() {
+        let text = context(&map(), None);
+        assert!(text.contains("7 nodes, 1 needs attention."));
+        assert!(text.contains("Needs attention:\n- inv.other [BROKEN]"));
+        assert!(text.contains("The rest: 4 adopted, 2 holds"));
+        assert!(!text.contains("inv.supply"));
+        let sound: Vec<NodeView> = map().into_iter().filter(|v| v.id != "inv.other").collect();
+        assert!(context(&sound, None).contains("All sound: 4 adopted, 2 holds"));
+        assert!(
+            context(&sound, Some("README.md")).contains("Nothing in the map watches README.md.")
+        );
+    }
 }

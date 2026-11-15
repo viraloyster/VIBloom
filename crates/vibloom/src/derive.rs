@@ -62,6 +62,9 @@ pub struct NodeView {
     pub watch: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub test_file: Option<String>,
+    /// Where the node comes from, as its author recorded it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<String>,
 }
 
 fn matches(n: &RootNode, o: &Outcome) -> bool {
@@ -290,6 +293,7 @@ pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<Node
                 depends_on: n.depends_on.clone(),
                 watch: watched_by(n),
                 test_file: n.test.as_ref().map(|t| t.file.clone()),
+                sources: n.evidence.clone(),
             }
         })
         .collect()

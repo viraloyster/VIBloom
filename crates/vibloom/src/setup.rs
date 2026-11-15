@@ -197,6 +197,51 @@ pub fn helpers(
     out.into_iter().collect()
 }
 
+/// Whether a source file is test or script code rather than the project's
+/// own: dapptools projects keep their tests in `src/test/`, next to the code.
+pub fn is_test_code(file: &str, tests: &str, script: &str) -> bool {
+    let under = |d: &str| {
+        let d = d.trim_matches('/');
+        !d.is_empty() && file.starts_with(&format!("{d}/"))
+    };
+    let mut folders = file.split('/').rev().skip(1);
+    file.ends_with(".t.sol")
+        || file.ends_with(".s.sol")
+        || under(tests)
+        || under(script)
+        || folders.any(|p| {
+            matches!(
+                p.to_lowercase().as_str(),
+                "test" | "tests" | "mock" | "mocks"
+            )
+        })
+}
+
+/// Where the tests are when the planned folder holds none of the test files
+/// the runner lists: the deepest folder they all share (`src/test/`).
+pub fn tests_dir(planned: &str, listed: &[String]) -> Option<String> {
+    let planned = dir(planned);
+    if listed.is_empty() || listed.iter().any(|f| f.starts_with(&planned)) {
+        return None;
+    }
+    let folder = |f: &str| {
+        let mut parts: Vec<String> = f.split('/').map(str::to_string).collect();
+        parts.pop();
+        parts
+    };
+    let mut common = folder(&listed[0]);
+    for f in &listed[1..] {
+        let other = folder(f);
+        let same = common
+            .iter()
+            .zip(&other)
+            .take_while(|(a, b)| a == b)
+            .count();
+        common.truncate(same);
+    }
+    (!common.is_empty()).then(|| dir(&common.join("/")))
+}
+
 /// The state-changing functions of a compiled contract, from its artifact:
 /// what a call can use to move the contract's state.
 pub fn entry_points(artifact: &Value) -> Vec<String> {
@@ -305,6 +350,43 @@ mod tests {
     }
 
     #[test]
+    fn tells_test_and_script_code_from_the_project_s_own() {
+        let test = |f: &str| is_test_code(f, "test/", "script");
+        assert!(test("src/test/vat.t.sol"));
+        assert!(test("src/test/Helpers.sol"));
+        assert!(test("src/Deploy.s.sol"));
+        assert!(test("test/Base.sol"));
+        assert!(test("script/Deploy.sol"));
+        assert!(test("src/Mocks/Token.sol"));
+        assert!(test("contracts/mock/Oracle.sol"));
+        assert!(!test("src/vat.sol"));
+        // A file named like a folder is no folder.
+        assert!(!test("src/test.sol"));
+        assert!(!test("src/testing/Lib.sol"));
+        assert!(!is_test_code("src/vat.sol", "", ""));
+    }
+
+    #[test]
+    fn finds_the_tests_folder_from_the_listed_test_files() {
+        let listed = |fs: &[&str]| fs.iter().map(|f| (*f).to_string()).collect::<Vec<_>>();
+        let dss = listed(&["src/test/vat.t.sol", "src/test/dai.t.sol"]);
+        assert_eq!(tests_dir("test/", &dss).as_deref(), Some("src/test/"));
+        let nested = listed(&["src/test/a/x.t.sol", "src/test/b/y.t.sol"]);
+        assert_eq!(tests_dir("test", &nested).as_deref(), Some("src/test/"));
+        // The planned folder holds some of them: it stays.
+        assert_eq!(
+            tests_dir("test/", &listed(&["test/A.t.sol", "src/B.t.sol"])),
+            None
+        );
+        assert_eq!(tests_dir("test/", &[]), None);
+        // Nothing in common is no folder.
+        assert_eq!(
+            tests_dir("test/", &listed(&["a/x.t.sol", "b/y.t.sol"])),
+            None
+        );
+    }
+
+    #[test]
     fn finds_the_handlers_an_invariant_test_leans_on() {
         let read = |f: &str| {
             Some(
@@ -322,6 +404,15 @@ mod tests {
         assert_eq!(
             helpers(&["test/Vault.t.sol".into()], "test/", &read),
             vec!["test/Base.sol", "test/handlers/Handler.sol"]
+        );
+        // Tests next to the sources: the sources they import are no helpers.
+        let dss = |f: &str| {
+            (f == "src/test/vat.t.sol")
+                .then(|| "import \"../vat.sol\";\nimport \"./Base.sol\";".to_string())
+        };
+        assert_eq!(
+            helpers(&["src/test/vat.t.sol".into()], "src/test/", &dss),
+            vec!["src/test/Base.sol"]
         );
         assert_eq!(
             relative_imports("test/a/B.sol", "import \"../../../outside.sol\";"),

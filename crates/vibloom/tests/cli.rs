@@ -302,7 +302,8 @@ fn serves_mcp_and_keeps_proposals_out_of_the_map_until_accepted() {
         json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "run", "arguments": { "filters": ["--fork-url", "x"] } } }),
         json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "run", "arguments": { "filters": ["--mt", "invariant_sum"] } } }),
         json!({ "jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": { "name": "propose", "arguments": {
-            "kind": "assumption", "title": "Only add() changes total", "depends_on": ["inv.sum"], "by": "test-agent" } } }),
+            "kind": "assumption", "title": "Only add() changes total", "depends_on": ["inv.sum"],
+            "evidence": ["src/C.sol:1"], "by": "test-agent" } } }),
         json!({ "jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": { "name": "context", "arguments": { "file": "src/C.sol" } } }),
     ];
     let input: String = msgs.iter().map(|m| format!("{m}\n")).collect();
@@ -659,6 +660,44 @@ fn sync_takes_the_base_log_when_two_branches_both_ran() {
 }
 
 #[test]
+fn a_project_in_a_folder_of_a_larger_repository_keeps_to_itself() {
+    let repo = project();
+    git(&repo, &["init", "-q"]);
+    let dir = repo.join("contracts");
+    fs::create_dir_all(dir.join("src")).expect("dir");
+    fs::create_dir_all(dir.join("test")).expect("dir");
+    fs::write(dir.join("src/C.sol"), "contract C { /* bug */ }").expect("write");
+    fs::write(
+        dir.join("test/C.t.sol"),
+        "contract CT { function invariant_sum() public {} }",
+    )
+    .expect("write");
+    fs::write(dir.join("runner.sh"), RUNNER).expect("write");
+
+    // init does not take over the hooks of the repository it sits in.
+    let out = cli(&dir, &["init"]).out;
+    assert!(out.contains("inside a larger repository"), "{out}");
+    assert!(!repo.join(".git/hooks/pre-commit").exists());
+    edit_map(&dir, |m| m["runner"] = json!(["sh", "runner.sh"]));
+
+    // Asked for, the check goes to the project's folder before it runs.
+    assert_eq!(cli(&dir, &["install-hook"]).code, 0);
+    let hook = fs::read_to_string(repo.join(".git/hooks/pre-commit")).expect("hook");
+    assert!(hook.contains("cd \"contracts\" || exit 1"), "{hook}");
+
+    // The invariant is broken, but this commit touches nothing of the project.
+    assert_eq!(cli(&dir, &["check"]).code, 1);
+    fs::write(repo.join("NOTES.md"), "unrelated").expect("write");
+    git(&repo, &["add", "NOTES.md"]);
+    assert_eq!(cli(&dir, &["precommit"]).code, 0);
+    // One that does is judged.
+    git(&repo, &["add", "contracts/src/C.sol"]);
+    let refused = cli(&dir, &["precommit"]);
+    assert_eq!(refused.code, 1);
+    assert!(refused.err.contains("inv.sum [BROKEN]"), "{}", refused.err);
+}
+
+#[test]
 fn stops_a_runner_that_hangs() {
     let dir = project();
     with_runner(&dir);
@@ -795,6 +834,34 @@ fn an_invariant_whose_every_call_reverted_fails_the_check() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn a_reader_that_stops_early_is_not_a_crash() {
+    let dir = project();
+    with_runner(&dir);
+    // Enough pending proposals that the list is still being written when
+    // `head` has taken its line and closed the pipe.
+    let many: String = (1..=400)
+        .map(|i| {
+            format!(
+                "{}\n",
+                json!({ "id": format!("p{i}"), "at": "2026-11-15T00:00:00.000Z", "kind": "assumption",
+                        "title": format!("assumption number {i}"), "detail": "x".repeat(200),
+                        "evidence": ["src/C.sol:1"] })
+            )
+        })
+        .collect();
+    fs::write(dir.join(".vibloom/proposals.jsonl"), many).expect("write");
+    let out = Command::new("sh")
+        .args(["-c", "\"$VIBLOOM\" proposals | head -1"])
+        .env("VIBLOOM", env!("CARGO_BIN_EXE_vibloom"))
+        .current_dir(&dir)
+        .output()
+        .expect("sh");
+    assert!(String::from_utf8_lossy(&out.stdout).starts_with("p1  assumption"));
+    assert_eq!(String::from_utf8_lossy(&out.stderr), "");
+}
+
 #[test]
 fn does_nothing_in_a_project_without_a_map() {
     let dir = project();
@@ -805,4 +872,117 @@ fn does_nothing_in_a_project_without_a_map() {
         false,
     );
     assert_eq!((r.code, r.out.as_str(), r.err.as_str()), (0, "", ""));
+}
+
+// Stands in for forge in a dapptools layout: tests in src/test/, the build
+// already in out/.
+const FORGE: &str = r#"#!/bin/sh
+case "$1 $2" in
+  "test --list") echo '{"src/test/vat.t.sol":{"VatTest":["invariant_debt","test_frob"]}}' ;;
+  "config --json") echo '{"src":"src","test":"test","script":"script","out":"out"}' ;;
+esac
+"#;
+
+fn dapptools() -> PathBuf {
+    let dir = project();
+    fs::remove_dir_all(dir.join("test")).expect("rm");
+    fs::remove_file(dir.join("src/C.sol")).expect("rm");
+    fs::create_dir_all(dir.join("src/test")).expect("dir");
+    fs::create_dir_all(dir.join("bin")).expect("dir");
+    fs::write(dir.join("bin/forge"), FORGE).expect("write");
+    Command::new("chmod")
+        .args(["+x", "bin/forge"])
+        .current_dir(&dir)
+        .status()
+        .expect("chmod");
+    let vat = "contract Vat {\n  function file() external {}\n  function file(uint x) external {}\n  function frob() external {}\n}\n";
+    let test = "contract VatTest {\n  Vat vat;\n  function test_frob() public { vat.frob(); }\n  function invariant_debt() public {}\n}\n";
+    fs::write(dir.join("src/vat.sol"), vat).expect("write");
+    fs::write(dir.join("src/test/vat.t.sol"), test).expect("write");
+    let func = |name: &str, at: usize| {
+        json!({ "nodeType": "FunctionDefinition", "kind": "function", "name": name, "visibility": "external",
+                "stateMutability": "nonpayable", "modifiers": [], "src": format!("{at}:1:0"), "body": {} })
+    };
+    let artifact = |path: &str, contract: &str, funcs: Vec<Value>| {
+        json!({ "bytecode": { "object": "0x60" }, "abi": [],
+                "ast": { "absolutePath": path, "nodes": [
+                    { "nodeType": "ContractDefinition", "name": contract, "contractKind": "contract", "nodes": funcs }
+                ] } })
+    };
+    for (folder, name, a) in [
+        (
+            "vat.sol",
+            "Vat",
+            artifact(
+                "src/vat.sol",
+                "Vat",
+                vec![func("file", 17), func("file", 50), func("frob", 90)],
+            ),
+        ),
+        (
+            "vat.t.sol",
+            "VatTest",
+            artifact("src/test/vat.t.sol", "VatTest", vec![func("test_frob", 40)]),
+        ),
+    ] {
+        fs::create_dir_all(dir.join("out").join(folder)).expect("dir");
+        fs::write(
+            dir.join("out").join(folder).join(format!("{name}.json")),
+            a.to_string(),
+        )
+        .expect("write");
+    }
+    dir
+}
+
+fn with_forge(dir: &Path, args: &[&str]) -> Out {
+    let path = format!(
+        "{}:{}",
+        dir.join("bin").display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let o = Command::new(env!("CARGO_BIN_EXE_vibloom"))
+        .args(args)
+        .current_dir(dir)
+        .env("PATH", path)
+        .env("VIBLOOM_ROLE", "verifier")
+        .stdin(Stdio::null())
+        .output()
+        .expect("run");
+    Out {
+        code: o.status.code().unwrap_or(-1),
+        out: String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        err: String::from_utf8_lossy(&o.stderr).trim().to_string(),
+    }
+}
+
+#[test]
+fn init_finds_tests_kept_next_to_the_sources() {
+    let dir = dapptools();
+    let out = with_forge(&dir, &["init"]);
+    assert!(out.out.contains("1 invariant tests found"), "{}", out.out);
+    let m = read_map(&dir);
+    assert_eq!(m["tests"], "src/test/");
+    assert_eq!(m["nodes"][0]["test"]["file"], "src/test/vat.t.sol");
+    assert_eq!(m["nodes"][0]["watch"], json!(["src/", "src/test/"]));
+}
+
+#[test]
+fn survey_and_gaps_leave_test_code_out_and_read_it_as_tests() {
+    let dir = dapptools();
+    assert_eq!(with_forge(&dir, &["init"]).code, 0);
+    // Even with the tests folder set elsewhere, src/test/ is test code.
+    edit_map(&dir, |m| m["tests"] = json!("test/"));
+    let survey = with_forge(&dir, &["survey"]);
+    assert_eq!(survey.code, 0, "{}", survey.err);
+    assert!(survey.out.contains("Vat (src/vat.sol)"), "{}", survey.out);
+    assert!(!survey.out.contains("VatTest"), "{}", survey.out);
+    let gaps = with_forge(&dir, &["gaps"]);
+    assert_eq!(gaps.code, 0, "{}", gaps.err);
+    assert!(
+        gaps.out.contains("- Vat (src/vat.sol): file\n"),
+        "{}",
+        gaps.out
+    );
+    assert!(!gaps.out.contains("VatTest"), "{}", gaps.out);
 }

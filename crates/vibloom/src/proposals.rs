@@ -23,6 +23,12 @@ pub struct Proposal {
     pub watch: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub test: Option<TestRef>,
+    /// Where it comes from: code lines, documents, reads of the chain.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<String>,
+    /// The id the node should get if it is accepted and the id is still free.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<String>,
     /// Who proposed it, as the agent described itself; informational only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub by: Option<String>,
@@ -81,6 +87,8 @@ pub struct Draft {
     pub depends_on: Vec<String>,
     pub watch: Vec<String>,
     pub test: Option<TestRef>,
+    pub evidence: Vec<String>,
+    pub node_id: Option<String>,
     pub by: Option<String>,
 }
 
@@ -119,6 +127,33 @@ pub fn propose(
     if kind == Some(Kind::Invariant) && draft.test.is_none() {
         errors.push("an invariant needs a test".into());
     }
+    // A proposal with nothing behind it is an opinion: the reviewer has to be
+    // able to check where it comes from.
+    let evidence: Vec<String> = draft
+        .evidence
+        .iter()
+        .map(|e| e.trim().to_string())
+        .filter(|e| !e.is_empty())
+        .collect();
+    if evidence.is_empty() {
+        errors.push(
+            "evidence is required: where this comes from (file:line, a document's URL and section, a read of the chain with its block)"
+                .into(),
+        );
+    }
+    if let Some(id) = &draft.node_id
+        && !valid_id(id)
+    {
+        errors.push(format!(
+            "id {id} is not valid: lowercase letters, digits, dots and dashes"
+        ));
+    }
+    if book.pending().iter().any(|p| p.title == draft.title.trim()) {
+        errors.push("a pending proposal already says this".into());
+    }
+    if map.nodes.iter().any(|n| n.title == draft.title.trim()) {
+        errors.push("a node in the map already says this".into());
+    }
     if !errors.is_empty() {
         return Err(errors);
     }
@@ -131,6 +166,8 @@ pub fn propose(
         depends_on: draft.depends_on,
         watch: draft.watch,
         test: draft.test,
+        evidence,
+        node_id: draft.node_id,
         by: draft.by,
     })
 }
@@ -195,7 +232,12 @@ pub fn accept(map: &RootsMap, p: &Proposal) -> Result<(RootsMap, String), Vec<St
     let Some(kind) = Kind::parse(&p.kind) else {
         return Err(vec!["the proposal's kind is not valid".into()]);
     };
-    let id = fresh_id(map, kind, &p.title);
+    // The id the proposal asked for, unless something took it meanwhile.
+    let id = p
+        .node_id
+        .clone()
+        .filter(|id| valid_id(id) && !map.nodes.iter().any(|n| n.id == *id))
+        .unwrap_or_else(|| fresh_id(map, kind, &p.title));
     let node = RootNode {
         id: id.clone(),
         kind,
@@ -213,6 +255,7 @@ pub fn accept(map: &RootsMap, p: &Proposal) -> Result<(RootsMap, String), Vec<St
         watch: p.watch.clone(),
         depends_on: p.depends_on.clone(),
         protected: kind == Kind::Invariant,
+        evidence: p.evidence.clone(),
     };
     Ok((with_node(map, node)?, id))
 }
@@ -239,6 +282,8 @@ mod tests {
             depends_on: deps.iter().map(|d| (*d).to_string()).collect(),
             watch: vec![],
             test: None,
+            evidence: vec!["src/C.sol:12".into()],
+            node_id: None,
             by: Some("claude".into()),
         }
     }

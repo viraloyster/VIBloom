@@ -86,6 +86,9 @@ pub struct RootNode {
     pub depends_on: Vec<String>,
     /// A protected node's test may only be edited by the verifier role.
     pub protected: bool,
+    /// Where the node comes from: a line of code, a document, a read of the
+    /// chain. Free text, for whoever reviews it.
+    pub evidence: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -266,6 +269,7 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
                 "watch",
                 "depends_on",
                 "protected",
+                "evidence",
             ],
             id,
             &mut errors,
@@ -351,6 +355,13 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
                 false
             }
         };
+        let evidence = match n.get("evidence") {
+            None => Some(vec![]),
+            Some(v) => strings(v),
+        };
+        if evidence.is_none() {
+            errors.push(format!("{id}: evidence must list texts"));
+        }
         nodes.push(RootNode {
             id: id.into(),
             kind,
@@ -361,6 +372,7 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
             watch: watch.unwrap_or_default(),
             depends_on: depends_on.unwrap_or_default(),
             protected,
+            evidence: evidence.unwrap_or_default(),
         });
     }
 
@@ -450,6 +462,8 @@ struct NodeOut<'a> {
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     depends_on: &'a [String],
     protected: bool,
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    evidence: &'a [String],
 }
 
 #[derive(Serialize)]
@@ -487,6 +501,7 @@ pub fn serialize_map(map: &RootsMap) -> String {
                 watch: &n.watch,
                 depends_on: &n.depends_on,
                 protected: n.protected,
+                evidence: &n.evidence,
             })
             .collect(),
     };
