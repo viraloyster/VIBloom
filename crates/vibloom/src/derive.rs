@@ -1,7 +1,7 @@
 //! Every state shown to a person or an agent is derived here, from the map, the
 //! verified log and the files as they are now. Nothing else can set one.
 
-use crate::forge::{Outcome, Status};
+use crate::forge::{Fuzz, Outcome, Status};
 use crate::log::RunEntry;
 use crate::map::{Kind, RootNode, RootsMap, Stance, covers, watched_by};
 use serde::Serialize;
@@ -20,6 +20,9 @@ pub enum Evidence {
     /// It ran once, but the latest run of the whole suite did not include it:
     /// the test was removed, renamed or filtered out.
     Missing,
+    /// Its invariant passed, but every call the fuzzer made reverted (or it
+    /// made none): nothing was exercised, so the pass says nothing.
+    Vacuous,
     Stale,
     None,
 }
@@ -52,6 +55,9 @@ pub struct NodeView {
     pub reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run: Option<u64>,
+    /// The fuzz campaign behind the evidence, for an invariant test.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fuzz: Option<Fuzz>,
     pub depends_on: Vec<String>,
     pub watch: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -107,6 +113,7 @@ struct Own {
     changed: Vec<String>,
     reason: Option<String>,
     run: Option<u64>,
+    fuzz: Option<Fuzz>,
 }
 
 pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<NodeView> {
@@ -126,6 +133,7 @@ pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<Node
                     changed: vec![],
                     reason: None,
                     run: None,
+                    fuzz: None,
                 },
             );
             continue;
@@ -142,6 +150,7 @@ pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<Node
                     changed: vec![],
                     reason: None,
                     run: None,
+                    fuzz: None,
                 },
             );
             continue;
@@ -160,6 +169,7 @@ pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<Node
                         full.unwrap_or_default()
                     )),
                     run: Some(entry.seq),
+                    fuzz: None,
                 },
             );
             continue;
@@ -167,6 +177,29 @@ pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<Node
         let changed = changed_since(n, entry, current);
         // A failure stays a failure until a new run says otherwise; a pass only
         // counts while the files it ran against are unchanged.
+        let vacuous = outcome
+            .fuzz
+            .filter(|f| outcome.status == Status::Pass && f.reverts >= f.calls);
+        if let Some(f) = vacuous {
+            own.insert(
+                &n.id,
+                Own {
+                    evidence: Evidence::Vacuous,
+                    changed: vec![],
+                    reason: Some(if f.calls == 0 {
+                        "the fuzzer made no calls: check the handler and its targets".to_string()
+                    } else {
+                        format!(
+                            "all {} calls reverted, so the invariant was never exercised: check the handler",
+                            f.calls
+                        )
+                    }),
+                    run: Some(entry.seq),
+                    fuzz: outcome.fuzz,
+                },
+            );
+            continue;
+        }
         let evidence = match outcome.status {
             Status::Fail => Evidence::Broken,
             Status::Skip => Evidence::Skipped,
@@ -180,6 +213,7 @@ pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<Node
                 changed,
                 reason: outcome.reason.clone(),
                 run: Some(entry.seq),
+                fuzz: outcome.fuzz,
             },
         );
     }
@@ -214,7 +248,13 @@ pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<Node
                 because.push(d.clone());
             } else if matches!(
                 ev,
-                Some(Evidence::Stale | Evidence::Untested | Evidence::Skipped | Evidence::Missing)
+                Some(
+                    Evidence::Stale
+                        | Evidence::Untested
+                        | Evidence::Skipped
+                        | Evidence::Missing
+                        | Evidence::Vacuous
+                )
             ) || below == Support::Pending
             {
                 if support == Support::Ok {
@@ -245,6 +285,7 @@ pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<Node
                 changed: o.map(|o| o.changed.clone()).unwrap_or_default(),
                 reason: o.and_then(|o| o.reason.clone()),
                 run: o.and_then(|o| o.run),
+                fuzz: o.and_then(|o| o.fuzz),
                 depends_on: n.depends_on.clone(),
                 watch: watched_by(n),
                 test_file: n.test.as_ref().map(|t| t.file.clone()),
@@ -265,6 +306,7 @@ pub fn troubled(v: &NodeView) -> bool {
                 | Evidence::Untested
                 | Evidence::Skipped
                 | Evidence::Missing
+                | Evidence::Vacuous
         ) || v.support != Support::Ok)
 }
 
@@ -275,6 +317,7 @@ pub fn label(v: &NodeView) -> &'static str {
     match (v.evidence, v.support) {
         (Evidence::Broken, _) => "BROKEN",
         (Evidence::Missing, _) => "MISSING",
+        (Evidence::Vacuous, _) => "VACUOUS",
         (_, Support::Unsupported) if v.kind == Kind::Intention => "AT RISK",
         (_, Support::Unsupported) => "UNSUPPORTED",
         (Evidence::Stale, _) | (_, Support::Pending) => "pending review",
@@ -324,6 +367,7 @@ mod tests {
             name: name.into(),
             status,
             reason: (status == Status::Fail).then(|| "drift".into()),
+            fuzz: None,
         }
     }
 
@@ -468,6 +512,33 @@ mod tests {
             v["inv.sum"].reason.as_deref(),
             Some("its test last ran in run 1 and was not in run 3")
         );
+        assert_eq!(v["inv.bound"].evidence, Evidence::Holds);
+    }
+
+    #[test]
+    fn a_pass_where_every_call_reverted_proves_nothing() {
+        use crate::forge::Fuzz;
+        let mut e = entry(None, Status::Pass, Status::Pass, files());
+        e.outcomes[0].fuzz = Some(Fuzz {
+            runs: 64,
+            calls: 2048,
+            reverts: 2048,
+        });
+        e.outcomes[1].fuzz = Some(Fuzz {
+            runs: 64,
+            calls: 2048,
+            reverts: 31,
+        });
+        let v = by_id(derive(&map(), &[e], &files()));
+        assert_eq!(label(&v["inv.sum"]), "VACUOUS");
+        assert!(troubled(&v["inv.sum"]));
+        assert_eq!(
+            v["inv.sum"].reason.as_deref(),
+            Some(
+                "all 2048 calls reverted, so the invariant was never exercised: check the handler"
+            )
+        );
+        assert_eq!(v["asm.only-add"].support, Support::Pending);
         assert_eq!(v["inv.bound"].evidence, Evidence::Holds);
     }
 

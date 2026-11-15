@@ -14,6 +14,15 @@ pub enum Status {
     Skip,
 }
 
+/// How hard a fuzz or invariant campaign pushed: without it a pass could mean
+/// that every call reverted and nothing was exercised.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Fuzz {
+    pub runs: u64,
+    pub calls: u64,
+    pub reverts: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Outcome {
     pub file: String,
@@ -22,6 +31,8 @@ pub struct Outcome {
     pub status: Status,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fuzz: Option<Fuzz>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -67,6 +78,15 @@ pub fn parse_forge(stdout: &str) -> Result<Vec<Outcome>, RunnerOutputError> {
                 .filter(|s| !s.is_empty())
                 .map(|s| s.chars().take(500).collect::<String>())
         };
+        let fuzz_of = |v: &Value| {
+            let i = v.pointer("/kind/Invariant")?;
+            let n = |k: &str| i.get(k).and_then(Value::as_u64);
+            Some(Fuzz {
+                runs: n("runs")?,
+                calls: n("calls")?,
+                reverts: n("reverts")?,
+            })
+        };
         for (sig, r) in results {
             // Since forge 1.9 the invariants of a contract run as one campaign,
             // reported under one of their names with a result for each.
@@ -85,6 +105,8 @@ pub fn parse_forge(stdout: &str) -> Result<Vec<Outcome>, RunnerOutputError> {
                         name: name.split('(').next().unwrap_or(name).into(),
                         status,
                         reason: unknown.or_else(|| reason_of(p)),
+                        // One campaign: its numbers are every invariant's.
+                        fuzz: fuzz_of(r),
                     });
                 }
                 continue;
@@ -96,6 +118,7 @@ pub fn parse_forge(stdout: &str) -> Result<Vec<Outcome>, RunnerOutputError> {
                 name: sig.split('(').next().unwrap_or(sig).into(),
                 status,
                 reason: unknown.or_else(|| reason_of(r)),
+                fuzz: fuzz_of(r),
             });
         }
     }

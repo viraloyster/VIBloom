@@ -115,7 +115,13 @@ fn call(cwd: &Path, name: &str, args: &Value) -> Result<String, String> {
             if let Some(e) = &report.entry.error {
                 text.push_str(&format!("The runner failed: {e}\n"));
             }
-            text.push_str(&table(&report.views));
+            // Only what needs attention: the whole table is one `status` away.
+            let bad = crate::hooks::summary(&report.views);
+            if bad.is_empty() {
+                text.push_str(&format!("All {} nodes are sound.", report.views.len()));
+            } else {
+                text.push_str(&format!("Needs attention:\n{bad}"));
+            }
             Ok(text)
         }
         "propose" => {

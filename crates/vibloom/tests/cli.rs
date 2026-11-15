@@ -674,6 +674,128 @@ fn stops_a_runner_that_hangs() {
 }
 
 #[test]
+fn connects_claude_code_and_codex_and_guards_their_settings() {
+    let dir = project();
+    git(&dir, &["init", "-q"]);
+    // Settings the person already had are kept.
+    fs::create_dir_all(dir.join(".claude")).expect("dir");
+    fs::write(
+        dir.join(".claude/settings.json"),
+        r#"{"permissions":{"allow":["Bash(forge build)"]},"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo bye"}]}]}}"#,
+    )
+    .expect("write");
+    let out = cli(&dir, &["init", "--agent", "claude", "--agent", "codex"]).out;
+    assert!(
+        out.contains("hooks added to .claude/settings.json"),
+        "{out}"
+    );
+    assert!(out.contains("Installed the commit check"), "{out}");
+    assert!(
+        out.contains("codex mcp add vibloom -- vibloom mcp"),
+        "{out}"
+    );
+
+    let read = |f: &str| -> Value {
+        serde_json::from_str(&fs::read_to_string(dir.join(f)).expect("file")).expect("json")
+    };
+    let settings = read(".claude/settings.json");
+    assert_eq!(settings["permissions"]["allow"][0], "Bash(forge build)");
+    assert_eq!(settings["hooks"]["Stop"].as_array().map(Vec::len), Some(2));
+    assert_eq!(
+        settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+        "vibloom hook pre-tool"
+    );
+    assert_eq!(
+        read(".mcp.json")["mcpServers"]["vibloom"]["args"],
+        json!(["mcp"])
+    );
+    let agents = fs::read_to_string(dir.join("AGENTS.md")).expect("agents");
+    assert!(agents.contains("`vibloom context <file>`"));
+
+    // The builder cannot switch the guard off by editing the agent's settings.
+    for f in [
+        ".claude/settings.json",
+        ".claude/settings.local.json",
+        ".mcp.json",
+    ] {
+        let input = json!({ "cwd": dir, "tool_name": "Edit",
+            "tool_input": { "file_path": dir.join(f) } })
+        .to_string();
+        assert!(
+            vibloom(&dir, &["hook", "pre-tool"], &input, false)
+                .out
+                .contains("deny"),
+            "{f}"
+        );
+    }
+
+    // Running it again changes nothing.
+    assert_eq!(cli(&dir, &["setup", "claude"]).code, 1);
+    let again = vibloom(&dir, &["setup", "claude"], "", true).out;
+    assert!(
+        again.contains("already in .claude/settings.json"),
+        "{again}"
+    );
+    vibloom(&dir, &["setup", "codex"], "", true);
+    assert_eq!(read(".claude/settings.json"), settings);
+    assert_eq!(
+        fs::read_to_string(dir.join("AGENTS.md")).expect("agents"),
+        agents
+    );
+    assert_eq!(vibloom(&dir, &["setup", "cursor"], "", true).code, 1);
+}
+
+#[test]
+fn tells_the_agent_once_that_an_edit_put_a_node_up_for_review() {
+    let dir = project();
+    with_runner(&dir);
+    edit_map(&dir, |m| m["nodes"][0]["watch"] = json!(["src/"]));
+    cli(&dir, &["run"]);
+    let edit = json!({ "cwd": dir, "tool_name": "Edit",
+        "tool_input": { "file_path": dir.join("src/C.sol") } })
+    .to_string();
+    let first = vibloom(&dir, &["hook", "post-tool"], &edit, false).out;
+    assert!(first.contains("src/C.sol is watched by inv.sum"), "{first}");
+    assert_eq!(vibloom(&dir, &["hook", "post-tool"], &edit, false).out, "");
+    // A new run starts over.
+    cli(&dir, &["run"]);
+    assert!(
+        vibloom(&dir, &["hook", "post-tool"], &edit, false)
+            .out
+            .contains("watched by")
+    );
+}
+
+#[test]
+fn an_invariant_whose_every_call_reverted_fails_the_check() {
+    let dir = project();
+    with_runner(&dir);
+    let report = |reverts: u32| {
+        format!(
+            "printf '%s\\n' '{{\"test/C.t.sol:CT\":{{\"test_results\":{{\"invariant_sum()\":{{\"status\":\"Success\",\"reason\":null,\"kind\":{{\"Invariant\":{{\"runs\":64,\"calls\":2048,\"reverts\":{reverts}}}}}}}}}}}}}'\n"
+        )
+    };
+    fs::write(dir.join("runner.sh"), report(12)).expect("write");
+    assert_eq!(cli(&dir, &["check"]).code, 0);
+    let j: Value = serde_json::from_str(&cli(&dir, &["status", "--json"]).out).expect("json");
+    assert_eq!(
+        j["nodes"][0]["fuzz"],
+        json!({ "runs": 64, "calls": 2048, "reverts": 12 })
+    );
+
+    fs::write(dir.join("runner.sh"), report(2048)).expect("write");
+    let vacuous = cli(&dir, &["check"]);
+    assert_eq!(vacuous.code, 1, "{}", vacuous.out);
+    assert!(vacuous.out.contains("VACUOUS  inv.sum"), "{}", vacuous.out);
+    assert!(
+        cli(&dir, &["context"])
+            .out
+            .contains("all 2048 calls reverted"),
+        "the agent is told why"
+    );
+}
+
+#[test]
 fn does_nothing_in_a_project_without_a_map() {
     let dir = project();
     let r = vibloom(

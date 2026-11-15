@@ -9,6 +9,21 @@ fn line(v: &NodeView) -> String {
     format!("- {} [{}] {}", v.id, label(v), v.title)
 }
 
+// A troubled node away from the file at hand: its line and the reason.
+fn why(v: &NodeView) -> String {
+    let mut out = vec![line(v)];
+    if let Some(r) = &v.reason {
+        out.push(format!("  why: {r}"));
+    }
+    if !v.because.is_empty() {
+        out.push(format!("  because of: {}", v.because.join(", ")));
+    }
+    if !v.changed.is_empty() {
+        out.push(format!("  changed: {}", v.changed.join(", ")));
+    }
+    out.join("\n")
+}
+
 fn full(v: &NodeView, by_id: &HashMap<&str, &NodeView>) -> String {
     let mut out = vec![line(v)];
     if let Some(d) = &v.detail {
@@ -20,8 +35,18 @@ fn full(v: &NodeView, by_id: &HashMap<&str, &NodeView>) -> String {
             if v.protected { " (protected)" } else { "" }
         ));
     }
-    if !v.watch.is_empty() {
-        out.push(format!("  watches: {}", v.watch.join(", ")));
+    let watch: Vec<&str> = v
+        .watch
+        .iter()
+        .filter(|w| {
+            !v.watch
+                .iter()
+                .any(|d| d.ends_with('/') && *w != d && covers(d, w))
+        })
+        .map(String::as_str)
+        .collect();
+    if !watch.is_empty() {
+        out.push(format!("  watches: {}", watch.join(", ")));
     }
     if !v.depends_on.is_empty() {
         let deps: Vec<String> = v
@@ -41,8 +66,14 @@ fn full(v: &NodeView, by_id: &HashMap<&str, &NodeView>) -> String {
             v.changed.join(", ")
         ));
     }
+    if let Some(f) = &v.fuzz {
+        out.push(format!(
+            "  fuzzed: {} runs, {} calls, {} reverted",
+            f.runs, f.calls, f.reverts
+        ));
+    }
     if let Some(r) = &v.reason {
-        out.push(format!("  last failure: {r}"));
+        out.push(format!("  why: {r}"));
     }
     out.join("\n")
 }
@@ -109,17 +140,15 @@ pub fn context(views: &[NodeView], path: Option<&str>) -> String {
             }
             .into(),
         );
-        out.extend(rest.iter().filter(|v| troubled(v)).map(|v| line(v)));
+        // What needs attention says why; the rest is one line each.
+        out.extend(rest.iter().filter(|v| troubled(v)).map(|v| why(v)));
         out.extend(rest.iter().filter(|v| !troubled(v)).map(|v| line(v)));
     }
     out.push(String::new());
     out.push(
-        "Rules: propose new assumptions as hypothetical; do not weaken or edit protected tests;"
+        "Rules: fix the code, not the test; never edit protected tests, their handlers or .vibloom/."
             .into(),
     );
-    out.push(
-        "a task is not done while any node is BROKEN, UNSUPPORTED, AT RISK or pending review."
-            .into(),
-    );
+    out.push("The task is not done while `vibloom status` exits 1.".into());
     out.join("\n")
 }

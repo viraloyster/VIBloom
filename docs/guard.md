@@ -19,10 +19,25 @@ Code hooks below, are optional extras on top.
 In the project's root:
 
 ```bash
-vibloom init           # detects Foundry, Hardhat, Cargo or pytest; --stack to choose
-vibloom install-hook   # the commit check, in this clone's git hooks
-vibloom check          # run the tests and record the run
+vibloom init --agent claude   # or --agent codex, or both, or neither
+vibloom check                 # run the tests and record the run
 ```
+
+`init` detects Foundry, Hardhat, Cargo or pytest (`--stack` to choose), writes
+the map, installs the commit check in this clone's git hooks and, with
+`--agent`, connects that agent. No API key is involved anywhere: the guard is
+a local program and the agent runs on whatever plan it already uses.
+
+- `--agent claude` adds the hooks to `.claude/settings.json` and the tools to
+  `.mcp.json`, keeping what those files already hold, and guards both files
+  (and `.claude/settings.local.json`) so the agent cannot switch the guard off.
+- `--agent codex` adds a short section to `AGENTS.md` and prints the one
+  command that registers the tools. Codex has no hooks that can stop an edit
+  while it works, so there the commit check and CI are what hold.
+
+On a project that already has a map, `VIBLOOM_ROLE=verifier vibloom setup
+claude` (or `codex`) does the same, and `vibloom install-hook` installs the
+commit check in another clone.
 
 For a Foundry project `init` asks forge for its tests (`forge test --list`), so
 an invariant inherited from a base contract is found under the contract it
@@ -43,6 +58,36 @@ vibloom add invariant "shares never exceed assets" --file test/Vault.t.sol --con
 
 `--watch` (repeatable) sets what a node watches; a node with a test watches
 the source and test folders when none is given. Or edit the map directly.
+
+## For smart contracts
+
+What a test suite proves is only as good as what it was asked. The map is
+where that is written down, so it is worth being exact about three kinds of
+thing:
+
+- **Invariants**: what must hold after any sequence of calls. The ones that
+  matter are usually about accounting (assets equal the sum of what entered
+  minus what left), solvency (what can be claimed never exceeds what is
+  held), access (only a role can move a parameter) and monotonic quantities (a
+  nonce, a share price that never falls on deposit). Each is a node tied to
+  its `invariant_` test.
+- **Assumptions**: what the code takes as given and no test of yours proves:
+  the token is a standard ERC-20 (no fee on transfer, no rebase), the oracle
+  is fresh and correct, the admin key is safe, rounding always favours the
+  protocol, the handler covers every entry point. Write each as an assumption
+  node on the invariants it supports. It starts hypothetical; when it is
+  switched off or contradicted, everything resting on it shows as unsupported.
+- **Intentions**: what a contract or a change is for ("nobody can take out
+  more than their shares are worth"), resting on the invariants and
+  assumptions that make it true. An intention at risk is the plain-language
+  answer to "what did this break?".
+
+The guard also reads how hard each invariant was pushed. `vibloom context`
+shows `fuzzed: 64 runs, 2048 calls, 12 reverted` under an invariant, and a
+pass in which every call reverted (or none was made) is not a pass: the node
+is VACUOUS and the check fails, because a handler that never gets a call
+through tests nothing. With `fail_on_revert = false` that is the easiest way
+for an invariant to go green without meaning it.
 
 ## The map
 
@@ -125,17 +170,18 @@ a mocha reporter such as `mocha-junit-reporter` set in `hardhat.config`.)
 
 ## Derived states
 
-| State          | When                                                                          |
-| -------------- | ----------------------------------------------------------------------------- |
-| holds          | the latest run of its test passed, and no watched file changed since          |
-| BROKEN         | the latest run of its test failed                                             |
-| pending review | it passed, but a watched file changed since; or something below it is pending |
-| UNSUPPORTED    | something it depends on is broken, off or unsupported                         |
-| AT RISK        | the same, for an intention                                                    |
-| untested       | its test has never run                                                        |
-| skipped        | the latest run skipped its test                                               |
-| MISSING        | its test ran once, but the latest run of the whole suite did not include it   |
-| off            | switched off by a person; a choice, not a problem                             |
+| State          | When                                                                           |
+| -------------- | ------------------------------------------------------------------------------ |
+| holds          | the latest run of its test passed, and no watched file changed since           |
+| BROKEN         | the latest run of its test failed                                              |
+| pending review | it passed, but a watched file changed since; or something below it is pending  |
+| UNSUPPORTED    | something it depends on is broken, off or unsupported                          |
+| AT RISK        | the same, for an intention                                                     |
+| untested       | its test has never run                                                         |
+| skipped        | the latest run skipped its test                                                |
+| MISSING        | its test ran once, but the latest run of the whole suite did not include it    |
+| VACUOUS        | its invariant passed, but every call the fuzzer made reverted, or it made none |
+| off            | switched off by a person; a choice, not a problem                              |
 
 Every state in the table but holds and off needs attention: `status` and
 `check` exit 1, the commit check refuses and the agent is sent back. (A node
@@ -194,8 +240,9 @@ does.
 ## Commands
 
 ```bash
-vibloom init            # create the map for this project, adding every invariant test found
-vibloom install-hook    # install the commit check in this clone's git hooks
+vibloom init [--agent claude|codex]   # create the map, install the commit check, connect an agent
+vibloom setup claude|codex   # connect an agent to an existing map (verifier)
+vibloom install-hook    # install the commit check in another clone
 vibloom add <kind> "<title>" ...   # add a node (verifier); see Start
 vibloom scan            # add invariant tests the map does not list yet (verifier)
 vibloom status [--json] # derived state of every node; exit 1 if any needs attention
@@ -340,8 +387,9 @@ the record or edits a protected test without the owner's review.
 ## Optional: Claude Code
 
 Claude Code can call the guard while it works instead of only at commit time.
-Add the output of `vibloom hooks` to the project's `.claude/settings.json`. The
-hooks do three things:
+`vibloom init --agent claude` (or `vibloom setup claude`) adds the hooks to the
+project's `.claude/settings.json`; `vibloom hooks` prints them. They do three
+things:
 
 - **Before a tool runs**: an edit to a protected test, to a path in `protect`
   or to `.vibloom/` is denied unless `VIBLOOM_ROLE=verifier`. Shell commands
@@ -353,7 +401,8 @@ hooks do three things:
   what counts. With Foundry it re-runs the same subset (`--match-test` and the
   other filters); with another runner, the whole suite. If anything is broken, unsupported or pending, the agent is sent
   back with the list and the rule "fix the code, not the invariant". After an
-  edit to a watched file, the agent is told which nodes are now pending review.
+  edit to a watched file, the agent is told which nodes are now pending
+  review, once per file between runs.
 - **Before the agent stops**: if any node needs attention, or the log fails
   verification, the agent is sent back once. Claude Code marks the second
   attempt, which the guard lets through so the session cannot loop; the state

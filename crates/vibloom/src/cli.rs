@@ -102,19 +102,26 @@ fn load_book(root: &Path) -> Book {
     Book::read(&fs::read_to_string(root.join(PROPOSALS_PATH)).unwrap_or_default())
 }
 
+// Where the guard keeps what must never be staged or committed (its lock,
+// what it already told the agent): the repository's git folder, or a folder
+// of its own in the temp folder when there is no repository.
+fn state_dir(root: &Path) -> PathBuf {
+    git(root, &["rev-parse", "--absolute-git-dir"]).map_or_else(
+        |_| {
+            let id = sha256_hex(real(root).to_string_lossy().as_bytes());
+            let dir = std::env::temp_dir().join(format!("vibloom-{}", &id[..16]));
+            let _ = fs::create_dir_all(&dir);
+            dir
+        },
+        |d| PathBuf::from(d.trim()),
+    )
+}
+
 /// Holds the guard's lock while `f` runs, so two processes (two agents, a hook
 /// and a person) never write the record at once. Released when the file
 /// closes, even if the process dies.
 pub fn locked<T>(root: &Path, f: impl FnOnce() -> Fallible<T>) -> Fallible<T> {
-    // Kept out of the working tree, so it is never staged or committed: in
-    // the repository's git folder, or the temp folder when there is none.
-    let path = git(root, &["rev-parse", "--absolute-git-dir"]).map_or_else(
-        |_| {
-            let id = sha256_hex(real(root).to_string_lossy().as_bytes());
-            std::env::temp_dir().join(format!("vibloom-{}.lock", &id[..16]))
-        },
-        |d| PathBuf::from(d.trim()).join("vibloom.lock"),
-    );
+    let path = state_dir(root).join("vibloom.lock");
     let file = fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -575,7 +582,29 @@ fn hook(kind: &str, stdin: &str, role: Role, cwd: &Path) -> Fallible<HookOutput>
                 Some(f) => run(&root, &f)?.views,
                 None => views(&root)?,
             };
-            Ok(post_tool(&input, &vs, ran, &rel))
+            let out = post_tool(&input, &vs, ran, &rel);
+            // The same note after every edit of the same file would only fill
+            // the agent's context: it is given once per file and run.
+            if !ran && out.stdout.is_some() {
+                let seq = load_log(&root).entries.last().map_or(0, |e| e.seq);
+                let key = format!(
+                    "{seq}\t{}",
+                    input.file_path.as_deref().and_then(rel).unwrap_or_default()
+                );
+                let path = state_dir(&root).join("vibloom-notified");
+                let seen = fs::read_to_string(&path).unwrap_or_default();
+                if seen.lines().any(|l| l == key) {
+                    return Ok(HookOutput::default());
+                }
+                // Notes from earlier runs no longer matter.
+                let kept: String = seen
+                    .lines()
+                    .filter(|l| l.starts_with(&format!("{seq}\t")))
+                    .map(|l| format!("{l}\n"))
+                    .collect();
+                let _ = fs::write(&path, format!("{kept}{key}\n"));
+            }
+            Ok(out)
         }
         "stop" => Ok(stop(&input, &views(&root)?, &load_log(&root).problems)),
         other => Ok(HookOutput {
@@ -634,9 +663,12 @@ fn check_base(root: &Path, base: &str) -> Vec<String> {
 
 pub const USAGE: &str = "vibloom: assumptions, invariants and intentions for a code project.
 
-  vibloom init [--stack S]   create .vibloom/roots.json for this project (foundry, hardhat,
-                             cargo or pytest; detected when not given)
-  vibloom install-hook       install the commit check in this clone's git hooks
+  vibloom init [--stack S] [--agent claude|codex]
+                             create .vibloom/roots.json for this project (foundry, hardhat,
+                             cargo or pytest; detected when not given), install the commit
+                             check and, with --agent, connect that agent
+  vibloom setup claude|codex connect an agent to an existing map (verifier)
+  vibloom install-hook       install the commit check in another clone
   vibloom add <kind> \"<title>\" [--file F --test N [--contract C]] [--watch P] [--on ID]
                              add an assumption, invariant or intention (verifier)
   vibloom scan               add invariant tests the map does not list yet (verifier)
@@ -686,7 +718,7 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
     // mistyped option is never run as a test filter.
     let valued: &[&str] = match cmd {
         "check" | "sync" => &["--base"],
-        "init" => &["--stack"],
+        "init" => &["--stack", "--agent"],
         "add" => &[
             "--id",
             "--file",
@@ -746,7 +778,7 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
     };
     let base = opt("--base").map(str::to_string);
     let as_json = set.contains(&"--json");
-    let takes_words = matches!(cmd, "hook" | "context" | "proposals" | "add");
+    let takes_words = matches!(cmd, "hook" | "context" | "proposals" | "add" | "setup");
     if !takes_words && !words.is_empty() {
         return Err(format!(
             "`vibloom {cmd}` takes no argument like {}.{}",
@@ -799,11 +831,18 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
                 })?),
             };
             let p = project_plan(&io.cwd, stack);
+            let mut agent_notes = Vec::new();
+            let mut protect = p.protect.clone();
+            for agent in all("--agent") {
+                let (notes, guard) = setup_agent(&io.cwd, &agent)?;
+                agent_notes.extend(notes);
+                protect.extend(guard);
+            }
             let start = RootsMap {
                 runner: p.runner.clone(),
                 report: p.report.clone(),
                 tests: p.tests.clone(),
-                protect: p.protect.clone(),
+                protect,
                 ..RootsMap::empty()
             };
             let found = scan(&io.cwd, &start, p.src.as_deref());
@@ -820,11 +859,17 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
                     found.map.protect.join(", ")
                 ));
             }
-            for n in &p.notes {
+            for n in p.notes.iter().chain(&agent_notes) {
                 (io.out)(n);
             }
+            // The commit check comes with the map when this is a git clone
+            // with no pre-commit hook of its own.
+            match install_hook(&io.cwd) {
+                Ok(done) => (io.out)(&done),
+                Err(why) => (io.out)(&format!("Commit check not installed: {why}")),
+            }
             (io.out)(
-                "Next: `vibloom install-hook` for the commit check, `vibloom check` to run the tests, `vibloom add` for assumptions and intentions.",
+                "Next: `vibloom check` to run the tests; `vibloom add` for assumptions and intentions.",
             );
             return Ok(0);
         }
@@ -913,40 +958,26 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
             Ok(0)
         }
         "install-hook" => {
-            let rel = git(&root, &["rev-parse", "--git-path", "hooks/pre-commit"])
-                .map_err(|e| format!("This is not a git repository: {e}"))?;
-            let path = root.join(rel.trim());
-            let line = "vibloom precommit";
-            if let Ok(existing) = fs::read_to_string(&path) {
-                if existing.contains(line) {
-                    (io.out)("The commit check is already installed.");
-                    return Ok(0);
+            (io.out)(&install_hook(&root)?);
+            Ok(0)
+        }
+        "setup" => {
+            verifier(io.role, "changes what is guarded")?;
+            let agent = words.first().copied().unwrap_or_default();
+            let (notes, guard) = setup_agent(&root, agent)?;
+            let mut map = load_map(&root)?;
+            let before = map.protect.len();
+            for g in guard {
+                if !crate::hooks::is_guarded(&map, &g) {
+                    map.protect.push(g);
                 }
-                return Err(format!(
-                    "{} already exists. Add this line to it: {line} || exit 1",
-                    path.display()
-                ));
             }
-            if let Some(dir) = path.parent() {
-                fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            if map.protect.len() != before {
+                write_atomic(&root.join(MAP_PATH), &serialize_map(&map))?;
             }
-            fs::write(
-                &path,
-                format!(
-                    "#!/bin/sh\n# VIBloom: refuse a commit that breaks the map.\nif ! command -v vibloom >/dev/null 2>&1; then\n  echo \"VIBloom: vibloom is not on PATH, so the commit check cannot run.\" >&2\n  exit 1\nfi\nexec {line}\n"
-                ),
-            )
-            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt as _;
-                fs::set_permissions(&path, fs::Permissions::from_mode(0o755))
-                    .map_err(|e| e.to_string())?;
+            for n in notes {
+                (io.out)(&n);
             }
-            (io.out)(&format!(
-                "Installed the commit check at {}. Each clone installs its own.",
-                path.display()
-            ));
             Ok(0)
         }
         "status" => {
@@ -1110,6 +1141,172 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
         }
         "proposals" => proposals(&root, &words, io),
         other => Err(format!("Unknown command {other}.\n\n{USAGE}")),
+    }
+}
+
+const HOOK_LINE: &str = "vibloom precommit";
+
+// The commit check in this clone's git hooks. Says what it did; an existing
+// hook of another tool is never overwritten.
+fn install_hook(root: &Path) -> Fallible<String> {
+    let rel = git(root, &["rev-parse", "--git-path", "hooks/pre-commit"])
+        .map_err(|e| format!("This is not a git repository: {e}"))?;
+    let path = root.join(rel.trim());
+    if let Ok(existing) = fs::read_to_string(&path) {
+        if existing.contains(HOOK_LINE) {
+            return Ok("The commit check is already installed.".into());
+        }
+        return Err(format!(
+            "{} already exists. Add this line to it: {HOOK_LINE} || exit 1",
+            path.display()
+        ));
+    }
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\n# VIBloom: refuse a commit that breaks the map.\nif ! command -v vibloom >/dev/null 2>&1; then\n  echo \"VIBloom: vibloom is not on PATH, so the commit check cannot run.\" >&2\n  exit 1\nfi\nexec {HOOK_LINE}\n"
+        ),
+    )
+    .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+    }
+    Ok(format!(
+        "Installed the commit check at {}. Each clone installs its own.",
+        path.display()
+    ))
+}
+
+fn read_json(path: &Path) -> Fallible<Value> {
+    match fs::read_to_string(path) {
+        Err(_) => Ok(json!({})),
+        Ok(text) if text.trim().is_empty() => Ok(json!({})),
+        Ok(text) => serde_json::from_str::<Value>(&text)
+            .ok()
+            .filter(Value::is_object)
+            .ok_or_else(|| format!("{} is not a JSON object; fix it first.", path.display())),
+    }
+}
+
+fn write_json(path: &Path, v: &Value) -> Fallible<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    write_atomic(
+        path,
+        &format!("{}\n", serde_json::to_string_pretty(v).unwrap_or_default()),
+    )
+}
+
+const AGENTS_START: &str = "<!-- vibloom:start -->";
+const AGENTS_SECTION: &str = "<!-- vibloom:start -->
+## VIBloom
+
+This project keeps its assumptions, invariants and intentions in
+`.vibloom/roots.json`. Their states come from recorded test runs, not from
+anyone's say-so.
+
+- Before changing a file: `vibloom context <file>`.
+- After changing code: `vibloom run`. It runs the tests and records them.
+- The task is not done while `vibloom status` exits 1.
+- Never edit a protected test, its handler, the test configuration or
+  `.vibloom/` to make a check pass. If an invariant looks wrong, stop and say
+  why.
+- To suggest an assumption, invariant or intention, use the `propose` tool of
+  the vibloom MCP server. A person decides.
+<!-- vibloom:end -->
+";
+
+// Connects an agent to the guard, changing only the guard's own entries in
+// the agent's files. Returns what it did and which files to guard, so the
+// agent cannot switch the guard off by editing them.
+fn setup_agent(root: &Path, agent: &str) -> Fallible<(Vec<String>, Vec<String>)> {
+    match agent {
+        "claude" => {
+            let settings = root.join(".claude/settings.json");
+            let mut v = read_json(&settings)?;
+            let ours = hooks_config();
+            let mut added = 0;
+            for (event, entries) in ours["hooks"].as_object().into_iter().flatten() {
+                let list = &mut v["hooks"][event];
+                if !list.is_array() {
+                    *list = json!([]);
+                }
+                if !list.to_string().contains("vibloom hook") {
+                    for e in entries.as_array().into_iter().flatten() {
+                        list.as_array_mut()
+                            .into_iter()
+                            .for_each(|l| l.push(e.clone()));
+                        added += 1;
+                    }
+                }
+            }
+            if added > 0 {
+                write_json(&settings, &v)?;
+            }
+            let mcp = root.join(".mcp.json");
+            let mut m = read_json(&mcp)?;
+            let had = m.pointer("/mcpServers/vibloom").is_some();
+            if !had {
+                m["mcpServers"]["vibloom"] = json!({ "command": "vibloom", "args": ["mcp"] });
+                write_json(&mcp, &m)?;
+            }
+            Ok((
+                vec![
+                    if added > 0 {
+                        "Claude Code: hooks added to .claude/settings.json.".into()
+                    } else {
+                        "Claude Code: the hooks were already in .claude/settings.json.".into()
+                    },
+                    if had {
+                        "Claude Code: the vibloom tools were already in .mcp.json.".into()
+                    } else {
+                        "Claude Code: vibloom tools added to .mcp.json. Approve the server when Claude Code asks.".into()
+                    },
+                ],
+                // The local settings file can switch every hook off.
+                vec![
+                    ".claude/settings.json".into(),
+                    ".claude/settings.local.json".into(),
+                    ".mcp.json".into(),
+                ],
+            ))
+        }
+        "codex" => {
+            let path = root.join("AGENTS.md");
+            let text = fs::read_to_string(&path).unwrap_or_default();
+            let wrote = !text.contains(AGENTS_START);
+            if wrote {
+                let sep = if text.is_empty() || text.ends_with("\n\n") {
+                    ""
+                } else if text.ends_with('\n') {
+                    "\n"
+                } else {
+                    "\n\n"
+                };
+                write_atomic(&path, &format!("{text}{sep}{AGENTS_SECTION}"))?;
+            }
+            Ok((
+                vec![
+                    if wrote {
+                        "Codex: instructions added to AGENTS.md.".into()
+                    } else {
+                        "Codex: AGENTS.md already has the instructions.".into()
+                    },
+                    "Codex: register the tools once with: codex mcp add vibloom -- vibloom mcp".into(),
+                    "Codex has no hooks to stop an edit while it works: the commit check and `vibloom check` in CI are what hold.".into(),
+                ],
+                vec![],
+            ))
+        }
+        other => Err(format!(
+            "Unknown agent {other:?}: use `vibloom setup claude` or `vibloom setup codex`."
+        )),
     }
 }
 

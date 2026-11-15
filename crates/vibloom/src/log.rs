@@ -149,6 +149,7 @@ mod tests {
                 name: "invariant_a".into(),
                 status,
                 reason: None,
+                fuzz: None,
             }],
             files: BTreeMap::from([("src/A.sol".into(), Some("abc".into()))]),
             error: None,

@@ -65,6 +65,7 @@ pub fn parse_junit(xml: &str, root: &str) -> Result<Vec<Outcome>, RunnerOutputEr
                     name: attr(e, b"name").unwrap_or_default(),
                     status: Status::Pass,
                     reason: None,
+                    fuzz: None,
                 };
                 if empty {
                     out.push(c);

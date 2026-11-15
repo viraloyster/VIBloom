@@ -75,10 +75,12 @@ The solver agrees with SciPy (Radau) on Oregonator periods to a relative 5e-4
   Then, in the project:
 
   ```bash
-  vibloom init           # detects Foundry, Hardhat, Cargo or pytest
-  vibloom install-hook   # the commit check
-  vibloom check          # run the tests and record the run
+  vibloom init --agent claude   # or codex; detects Foundry, Hardhat, Cargo or pytest
+  vibloom check                 # run the tests and record the run
   ```
+
+  No API key is needed: the guard is a local program, and Claude Code or
+  Codex run on the plan they already use.
 
   See [docs/guard.md](docs/guard.md) and the two projects in
   [examples/](examples/).
