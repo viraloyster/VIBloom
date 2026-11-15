@@ -2,6 +2,13 @@
 
 Changes to the `vibloom` binary. The web app is not versioned.
 
+## 0.5.1
+
+### Fixed
+
+- `forge` is found in `~/.foundry/bin` when the PATH of the process lacks it,
+  as happens when an editor starts the MCP server or the hooks on Windows.
+
 ## 0.5.0
 
 ### Added

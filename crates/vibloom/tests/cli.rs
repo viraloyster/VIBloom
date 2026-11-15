@@ -961,6 +961,27 @@ fn with_forge(dir: &Path, args: &[&str]) -> Out {
 
 #[cfg(unix)]
 #[test]
+fn finds_forge_where_foundryup_installs_it_when_the_path_lacks_it() {
+    let dir = dapptools();
+    let home = dir.join("home");
+    fs::create_dir_all(home.join(".foundry/bin")).expect("dir");
+    fs::rename(dir.join("bin/forge"), home.join(".foundry/bin/forge")).expect("move");
+    let run = |home: &Path| {
+        Command::new(env!("CARGO_BIN_EXE_vibloom"))
+            .arg("init")
+            .current_dir(&dir)
+            .env("PATH", "/usr/bin:/bin")
+            .env("HOME", home)
+            .stdin(Stdio::null())
+            .output()
+            .expect("run")
+    };
+    let out = String::from_utf8_lossy(&run(&home).stdout).into_owned();
+    assert!(out.contains("1 invariant tests found"), "{out}");
+}
+
+#[cfg(unix)]
+#[test]
 fn init_finds_tests_kept_next_to_the_sources() {
     let dir = dapptools();
     let out = with_forge(&dir, &["init"]);

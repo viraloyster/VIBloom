@@ -240,17 +240,43 @@ struct Finished {
 // The runner with a time limit: a test that hangs must not hang the agent's
 // hook or CI for ever. Output is drained on threads so a full pipe cannot
 // block the child.
+// A Foundry tool where foundryup puts it, when it is there.
+fn foundry_bin(exe: &str) -> Option<PathBuf> {
+    if !matches!(exe, "forge" | "cast" | "anvil") {
+        return None;
+    }
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
+    let dir = PathBuf::from(home).join(".foundry").join("bin");
+    [exe.to_string(), format!("{exe}.exe")]
+        .iter()
+        .map(|name| dir.join(name))
+        .find(|p| p.is_file())
+}
+
 fn run_child(exe: &str, args: &[String], root: &Path, limit: u64) -> Result<Finished, String> {
     use std::io::Read as _;
     use std::process::Stdio;
-    let mut child = Command::new(exe)
-        .args(args)
-        .current_dir(root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("could not start {exe}: {e}"))?;
+    let spawn = |program: &std::ffi::OsStr| {
+        Command::new(program)
+            .args(args)
+            .current_dir(root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+    };
+    let mut child = match spawn(exe.as_ref()) {
+        // An editor or an agent often starts with a PATH that lacks the
+        // folder foundryup installs into, though a terminal has it.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => foundry_bin(exe)
+            .and_then(|p| spawn(p.as_os_str()).ok())
+            .ok_or_else(|| {
+                format!(
+                    "could not start {exe}: it is not on the PATH this process was started with"
+                )
+            })?,
+        other => other.map_err(|e| format!("could not start {exe}: {e}"))?,
+    };
     let drain = |pipe: Option<Box<dyn std::io::Read + Send>>| {
         std::thread::spawn(move || {
             let mut buf = Vec::new();

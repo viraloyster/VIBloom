@@ -1,6 +1,6 @@
 [package]
 name = "vibloom"
-version = "0.5.0"
+version = "0.5.1"
 description = "Assumptions, invariants and intentions for code projects and the AI agents working in them."
 edition.workspace = true
 license.workspace = true
