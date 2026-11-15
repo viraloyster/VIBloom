@@ -875,7 +875,8 @@ fn does_nothing_in_a_project_without_a_map() {
 }
 
 // Stands in for forge in a dapptools layout: tests in src/test/, the build
-// already in out/.
+// already in out/. A shell script, so these tests run where one can.
+#[cfg(unix)]
 const FORGE: &str = r#"#!/bin/sh
 case "$1 $2" in
   "test --list") echo '{"src/test/vat.t.sol":{"VatTest":["invariant_debt","test_frob"]}}' ;;
@@ -883,6 +884,7 @@ case "$1 $2" in
 esac
 "#;
 
+#[cfg(unix)]
 fn dapptools() -> PathBuf {
     let dir = project();
     fs::remove_dir_all(dir.join("test")).expect("rm");
@@ -935,6 +937,7 @@ fn dapptools() -> PathBuf {
     dir
 }
 
+#[cfg(unix)]
 fn with_forge(dir: &Path, args: &[&str]) -> Out {
     let path = format!(
         "{}:{}",
@@ -956,6 +959,7 @@ fn with_forge(dir: &Path, args: &[&str]) -> Out {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn init_finds_tests_kept_next_to_the_sources() {
     let dir = dapptools();
@@ -967,6 +971,7 @@ fn init_finds_tests_kept_next_to_the_sources() {
     assert_eq!(m["nodes"][0]["watch"], json!(["src/", "src/test/"]));
 }
 
+#[cfg(unix)]
 #[test]
 fn survey_and_gaps_leave_test_code_out_and_read_it_as_tests() {
     let dir = dapptools();
