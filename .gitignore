@@ -9,3 +9,7 @@ __pycache__/
 .venv/
 *.tsbuildinfo
 /target/
+
+# Playwright output
+test-results/
+playwright-report/

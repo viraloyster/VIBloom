@@ -783,8 +783,10 @@ export function mountMonitor(host: HTMLElement, actions: MonitorActions) {
         "p",
         { class: "fine" },
         tree.results.has(n.id)
-          ? "The AI predicts before every run on its own. A run of these values is already in the log, so a prediction made now is kept but not scored."
-          : "The AI predicts first; the engine runs; a surprise makes the AI propose two explanations and one more run decides between them.",
+          ? "A prediction is made before every run. A run of these values is already in the log, so a prediction made now is kept but not scored."
+          : actions.ai()
+            ? "The AI predicts first; the engine runs; a surprise makes the AI propose two explanations and one more run decides between them."
+            : "You predict first; the engine runs; a surprise is where to look: change one value and run again.",
       ),
     );
     for (const p of tree.predictions.filter((x) => x.node === n.id)) {
@@ -1042,7 +1044,7 @@ function predictionsLine(tree: IdeaTree) {
   const c = tree.calibration();
   if (!c.made && !c.pending) return null;
   const parts = [
-    `The AI's predictions: ${String(c.right)} of ${String(c.made)} right`,
+    `Predictions: ${String(c.right)} of ${String(c.made)} right`,
     c.brier !== undefined ? `Brier score ${c.brier.toFixed(2)} (0 best, 0.25 a coin flip)` : "",
     c.pending ? `${String(c.pending)} re-checking here` : "",
     `${String(tree.lessons.filter((l) => tree.decided(l)).length)} lesson(s) decided`,
@@ -1095,7 +1097,7 @@ function experiment(
     el(
       "p",
       { class: "fine" },
-      `At s ${fmt(r.inputs.s ?? NaN)}, q ${fmt(r.inputs.q ?? NaN)}, eps ${fmt(r.inputs.eps ?? NaN)}, eps_prime ${fmt(r.inputs.eps_prime ?? NaN)}. Computed by VIBloom's chemistry engine, checked against SciPy; the question was chosen by the AI.`,
+      `At s ${fmt(r.inputs.s ?? NaN)}, q ${fmt(r.inputs.q ?? NaN)}, eps ${fmt(r.inputs.eps ?? NaN)}, eps_prime ${fmt(r.inputs.eps_prime ?? NaN)}. Computed by VIBloom's chemistry engine, checked against SciPy.`,
     ),
   );
 }

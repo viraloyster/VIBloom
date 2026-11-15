@@ -18,6 +18,9 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm run build
+      # The built app in a real browser, with no AI connected.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
 
   rust:
     runs-on: ubuntu-latest

@@ -711,7 +711,7 @@ export class IdeaTree {
     const given = new Map<string, string[]>();
     for (const g of grown.slice(0, 8)) {
       if (!isGrown(g)) {
-        this.refuse("engine", "node", `a root the AI wrote did not follow the protocol: ${g.key}`);
+        this.refuse("engine", "node", `a root did not follow the protocol: ${g.key}`);
         continue;
       }
       const slug =

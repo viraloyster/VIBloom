@@ -24,6 +24,7 @@
     "format:check": "prettier --check .",
     "check:text": "node scripts/check-text.mjs",
     "test": "vitest run",
+    "e2e": "playwright test --trace off",
     "build": "npm run build -w @vibloom/web",
     "dev": "npm run dev -w @vibloom/web"
   },
@@ -32,6 +33,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
+    "@playwright/test": "1.63.0",
     "@types/node": "^22.20.5",
     "eslint": "^9.39.5",
     "globals": "^15.15.0",

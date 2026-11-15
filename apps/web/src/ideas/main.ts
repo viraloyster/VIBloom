@@ -54,6 +54,7 @@ import { simulate } from "./chem";
 import { mountMonitor, viewData } from "./monitor";
 import { openPad } from "./pad";
 import { steps } from "./process";
+import { openRootForm } from "./rootform";
 import { mountTreeView, type Ghost } from "./view";
 
 // The domain whose experiments the engine can run today.
@@ -255,6 +256,12 @@ function landing() {
     }
   });
   const file = el("input", { type: "file", accept: "application/json", hidden: true });
+  const recipe = el(
+    "button",
+    { class: "ghost-btn", title: "A published recipe as a tree, ready to run. No AI needed." },
+    "Start from a BZ recipe",
+  );
+  recipe.addEventListener("click", startRecipe);
   const open = el("button", { class: "ghost-btn" }, "Open an exported tree");
   const replayFile = el("button", { class: "ghost-btn" }, "Replay one step by step");
   let replaying = false;
@@ -363,7 +370,7 @@ function landing() {
           aiSettings(label),
         ),
         note,
-        el("div", { class: "row center" }, resume, open, replayFile, file),
+        el("div", { class: "row center" }, resume, recipe, open, replayFile, file),
       ),
     ),
   );
@@ -1041,7 +1048,7 @@ async function experiment(n: IdeaNode) {
   const settled = t.settledBy(n.id, inputs);
   if (!recorded && !settled) {
     try {
-      made = hasAi() ? await foresee(n, inputs) : foreseeByHand(n, inputs);
+      made = hasAi() ? await foresee(n, inputs) : await foreseeByHand(n, inputs);
     } catch (e) {
       // No prediction (budget, network): the run still happens, unscored.
       monitor.status(`Running without a prediction: ${explain(e)}`);
@@ -1299,14 +1306,12 @@ async function start(goal: string, sketch?: string) {
 
 // Without an AI, a person makes the prediction before the run, through the
 // same record: it is scored the same way, and a surprise teaches the same.
-function foreseeByHand(n: IdeaNode, inputs: Record<string, number>) {
-  const answer = prompt(
-    `Before the run: will "${n.title}" hold at these values?\nType holds or fails, and a confidence from 50 to 99 (for example: holds 70). Leave it empty to run without predicting.`,
-  );
-  const m = /^\s*(holds|fails)\s*(\d{2})?/i.exec(answer ?? "");
-  if (!m?.[1]) return undefined;
-  const expect = m[1].toLowerCase() as "holds" | "fails";
-  const confidence = Math.min(99, Math.max(50, Number(m[2] ?? "60"))) / 100;
+async function foreseeByHand(n: IdeaNode, inputs: Record<string, number>) {
+  const t = tree;
+  const answer = await askPrediction(n.title);
+  // The project changed while the question was open.
+  if (!answer || tree !== t) return undefined;
+  const { expect, confidence } = answer;
   const id = `p${String(tree.predictions.length + 1)}`;
   tree.append("person", {
     type: "predict",
@@ -1325,48 +1330,207 @@ function foreseeByHand(n: IdeaNode, inputs: Record<string, number>) {
 
 const BY_HAND = { model: "person", input: 0, cached: 0, output: 0, reasoning: 0 };
 
+// The person's prediction before a run: an outcome and how sure they are,
+// or nothing to run without predicting.
+function askPrediction(
+  title: string,
+): Promise<{ expect: "holds" | "fails"; confidence: number } | undefined> {
+  return new Promise((resolve) => {
+    const sure = el("input", {
+      type: "range",
+      min: "50",
+      max: "99",
+      value: "70",
+      "aria-label": "How sure",
+    });
+    const shown = el("span", { class: "fine" }, "70% sure");
+    sure.addEventListener("input", () => {
+      shown.textContent = `${sure.value}% sure`;
+    });
+    const holds = el("button", { class: "primary", type: "button" }, "It will hold");
+    const fails = el("button", { class: "primary", type: "button" }, "It will fail");
+    const skip = el("button", { class: "ghost-btn", type: "button" }, "Run without predicting");
+    const sheet = el(
+      "div",
+      { class: "pad", role: "dialog", "aria-label": "Your prediction" },
+      el(
+        "div",
+        { class: "pad-card predict-card" },
+        el("h3", {}, "Before the run"),
+        el("p", {}, `Will "${title}" hold at these values?`),
+        el("div", { class: "row" }, sure, shown),
+        el("div", { class: "row" }, holds, fails, el("span", { class: "spacer" }), skip),
+        el(
+          "p",
+          { class: "fine" },
+          "The prediction is recorded before the engine runs and scored against the result.",
+        ),
+      ),
+    );
+    const done = (expect?: "holds" | "fails") => {
+      sheet.remove();
+      resolve(expect ? { expect, confidence: Number(sure.value) / 100 } : undefined);
+    };
+    holds.addEventListener("click", () => {
+      done("holds");
+    });
+    fails.addEventListener("click", () => {
+      done("fails");
+    });
+    skip.addEventListener("click", () => {
+      done();
+    });
+    document.body.append(sheet);
+    holds.focus();
+  });
+}
+
 // A root written by a person: it goes through the same protocol check as one
 // an AI proposes, and the engine checks it the same way.
 function addByHand(under: string) {
-  if (busy || !tree.nodes.has(under)) return;
-  const title = prompt("A new root under this one. Its title:")?.trim();
-  if (!title) return;
-  const statement =
-    prompt("The assumption, as one sentence that could be false:", title)?.trim() || title;
-  const names = [...tree.nodes.values()].flatMap((n) => n.params.map((p) => p.name));
-  const formula = prompt(
-    `Optional: a check the engine can compute, as value op limit unit, using numbers${
-      names.length ? ` or these names: ${names.join(", ")}` : ""
-    } (for example: 45 <= 50 kg). Leave it empty for none.`,
-  )?.trim();
-  const m = formula ? /^(.+?)\s*(<=|>=|<|>|==)\s*(\S+)\s*(.*)$/.exec(formula) : null;
-  const node: GrownNode = {
-    key: title,
-    title: title.slice(0, 80),
-    statement,
-    axis: AXES[0],
-    role: "assumption",
-    criticality: "major",
-    risk: "medium",
-    rationale: "written by hand",
-    params: [],
-    check: {
-      description: m ? (formula ?? "") : "not computable yet",
-      value: m?.[1]?.trim() ?? "",
-      op: m?.[2] ?? "<=",
-      limit: m?.[3] ?? "",
-      unit: m?.[4]?.trim() ?? "",
-    },
-    basis: [],
-  };
-  const nodes = tree.admit(under, [node]);
+  const parent = tree.nodes.get(under);
+  if (busy || !parent) return;
+  openRootForm({
+    under: parent.title,
+    names: Object.keys(tree.scope()),
+    onAdd: (node) => admitByHand(under, [node]),
+  });
+}
+
+// Returns why nothing was added, when the engine refused it.
+function admitByHand(under: string, grown: GrownNode[]): string | undefined {
+  const before = tree.refused.length;
+  const nodes = tree.admit(under, grown);
   if (!nodes.length) {
-    monitor.status("That root could not be added; see the refusals in the Process view.");
-    return;
+    return tree.refused[before]?.reason ?? "The engine refused that root.";
   }
   tree.append("person", { type: "grow", under, nodes, summary: "", usage: BY_HAND });
-  for (const n of nodes) void check(n).then(refresh);
+  // One at a time: each experiment asks for its prediction before it runs.
+  void (async () => {
+    for (const n of nodes) {
+      await check(n);
+      refresh();
+    }
+  })();
   select(nodes[0]?.id);
+  return undefined;
+}
+
+// A published BZ recipe as a starting tree, so the chemistry can be explored
+// with no AI: the same roots a person could write one by one with the form.
+const RECIPE_GOAL =
+  "A cerium-catalysed BZ oscillator with a period near 60 s: does the two-variable model keep the period of the full one for this recipe?";
+function recipeRoots(): GrownNode[] {
+  const base = {
+    axis: AXES[0],
+    role: "assumption" as const,
+    criticality: "major" as const,
+    risk: "medium" as const,
+    rationale: "from the built-in recipe",
+    basis: [],
+  };
+  const experiment = (question: string, tolerance: number, description: string) => ({
+    kind: "oregonator",
+    question,
+    tolerance,
+    description,
+    value: "",
+    op: "<=",
+    limit: "",
+    unit: "",
+  });
+  const design = (name: string, value: number) => ({
+    name,
+    kind: "design",
+    value,
+    unit: "M",
+    origin: "assumed",
+    source: "",
+  });
+  return [
+    {
+      ...base,
+      key: "full-oscillates",
+      title: "The full model oscillates for this recipe",
+      statement:
+        "The three-variable Oregonator derived from the bromate, malonic acid and acid concentrations settles into a limit cycle.",
+      params: [
+        design("bromate", 0.06),
+        design("malonic_acid", 0.2),
+        design("acid", 0.8),
+        {
+          name: "s",
+          kind: "external",
+          value: 1,
+          unit: "dimensionless",
+          origin: "assumed",
+          source: "",
+        },
+      ],
+      check: experiment("oscillates", 0.05, "The full model oscillates"),
+    },
+    {
+      ...base,
+      key: "reduction-keeps",
+      title: "The two-variable model keeps the period",
+      statement:
+        "The two-variable reduction gives the same oscillation period as the full model for this recipe, within 15 percent.",
+      params: [],
+      check: experiment(
+        "reduction_keeps_period",
+        0.15,
+        "The two-variable model keeps the full model's period",
+      ),
+    },
+    {
+      ...base,
+      key: "period-hits-target",
+      title: "The period is within 10 s of 60 s",
+      statement:
+        "The full model's period in seconds, between consecutive maxima, lies within 10 seconds of 60 seconds.",
+      params: [
+        {
+          name: "target_period_s",
+          kind: "requirement",
+          value: 60,
+          unit: "s",
+          origin: "assumed",
+          source: "",
+        },
+        {
+          name: "period_tolerance_s",
+          kind: "requirement",
+          value: 10,
+          unit: "s",
+          origin: "assumed",
+          source: "",
+        },
+      ],
+      check: {
+        kind: "arithmetic",
+        description: "abs(period - target) <= tolerance",
+        value: "abs(full_oscillates_period_full_s - target_period_s)",
+        op: "<=",
+        limit: "period_tolerance_s",
+        unit: "s",
+      },
+    },
+  ];
+}
+
+function startRecipe() {
+  stopPlayback();
+  recorded = false;
+  tree = new IdeaTree();
+  chatUsage.length = 0;
+  tree.append("person", { type: "goal", text: RECIPE_GOAL });
+  selectedId = undefined;
+  workspace(RECIPE_GOAL);
+  const refused = admitByHand("goal", recipeRoots());
+  monitor.status(
+    refused ??
+      "A BZ recipe to start from. Select a root and run its experiment; change a concentration and run it again.",
+  );
 }
 
 function select(id: string | undefined) {

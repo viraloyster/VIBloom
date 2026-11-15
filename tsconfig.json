@@ -2,10 +2,10 @@
   "extends": "./tsconfig.base.json",
   "include": [
     "packages/*/src",
-    "packages/*/eval",
-    "apps/*/src",
     "vitest.config.ts",
+    "playwright.config.ts",
+    "apps/web/e2e",
     "eslint.config.mjs"
   ],
-  "exclude": ["apps/api", "apps/web"]
+  "exclude": ["apps/web/src"]
 }
