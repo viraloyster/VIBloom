@@ -179,6 +179,7 @@ pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<Node
         // counts while the files it ran against are unchanged.
         let vacuous = outcome
             .fuzz
+            .as_ref()
             .filter(|f| outcome.status == Status::Pass && f.reverts >= f.calls);
         if let Some(f) = vacuous {
             own.insert(
@@ -195,7 +196,7 @@ pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<Node
                         )
                     }),
                     run: Some(entry.seq),
-                    fuzz: outcome.fuzz,
+                    fuzz: outcome.fuzz.clone(),
                 },
             );
             continue;
@@ -213,7 +214,7 @@ pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<Node
                 changed,
                 reason: outcome.reason.clone(),
                 run: Some(entry.seq),
-                fuzz: outcome.fuzz,
+                fuzz: outcome.fuzz.clone(),
             },
         );
     }
@@ -285,7 +286,7 @@ pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<Node
                 changed: o.map(|o| o.changed.clone()).unwrap_or_default(),
                 reason: o.and_then(|o| o.reason.clone()),
                 run: o.and_then(|o| o.run),
-                fuzz: o.and_then(|o| o.fuzz),
+                fuzz: o.and_then(|o| o.fuzz.clone()),
                 depends_on: n.depends_on.clone(),
                 watch: watched_by(n),
                 test_file: n.test.as_ref().map(|t| t.file.clone()),
@@ -523,11 +524,13 @@ mod tests {
             runs: 64,
             calls: 2048,
             reverts: 2048,
+            dead: vec![],
         });
         e.outcomes[1].fuzz = Some(Fuzz {
             runs: 64,
             calls: 2048,
             reverts: 31,
+            dead: vec![],
         });
         let v = by_id(derive(&map(), &[e], &files()));
         assert_eq!(label(&v["inv.sum"]), "VACUOUS");

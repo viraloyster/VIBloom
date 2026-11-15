@@ -2,6 +2,15 @@
 
 Changes to the `vibloom` binary. The web app is not versioned.
 
+## 0.4.0
+
+### Added
+
+- `vibloom gaps` (and the `gaps` tool), for Foundry projects: the
+  state-changing functions of the project's contracts that no test file
+  names, and the handler functions whose every call reverted in the latest
+  run. The second also shows under each invariant in `context`.
+
 ## 0.3.0
 
 ### Fixed

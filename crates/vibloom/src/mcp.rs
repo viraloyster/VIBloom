@@ -32,6 +32,8 @@ fn tools() -> Value {
           "inputSchema": { "type": "object", "properties": { "filters": {
               "type": "array", "items": { "type": "string" },
               "description": "Flag and value pairs, for example [\"--match-path\", \"test/A.t.sol\"]." } } } },
+        { "name": "gaps", "description": "Foundry projects: state-changing functions no test names, and handler functions whose every call reverted.",
+          "inputSchema": { "type": "object", "properties": {} } },
         { "name": "verify", "description": "Check the run log's hash chain.",
           "inputSchema": { "type": "object", "properties": {} } },
         { "name": "propose", "description": "Propose an assumption, invariant or intention. It is kept apart as hypothetical until a person accepts it.",
@@ -89,6 +91,7 @@ fn call(cwd: &Path, name: &str, args: &Value) -> Result<String, String> {
                 .and_then(|f| relative_to(&root, cwd, f));
             Ok(context(&views(&root)?, file.as_deref()))
         }
+        "gaps" => crate::cli::gaps(&root),
         "verify" => {
             let log = load_log(&root);
             if log.problems.is_empty() {
@@ -274,7 +277,15 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            vec!["status", "context", "run", "verify", "propose", "proposals"]
+            vec![
+                "status",
+                "context",
+                "run",
+                "gaps",
+                "verify",
+                "propose",
+                "proposals"
+            ]
         );
         let unknown = handle(
             &dir,

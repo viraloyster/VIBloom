@@ -197,6 +197,48 @@ pub fn helpers(
     out.into_iter().collect()
 }
 
+/// The state-changing functions of a compiled contract, from its artifact:
+/// what a call can use to move the contract's state.
+pub fn entry_points(artifact: &Value) -> Vec<String> {
+    // An interface or an abstract contract has no code of its own.
+    let code = artifact
+        .pointer("/bytecode/object")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if code.trim_start_matches("0x").is_empty() {
+        return vec![];
+    }
+    let mut out: Vec<String> = artifact
+        .get("abi")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|f| f.get("type").and_then(Value::as_str) == Some("function"))
+        .filter(|f| {
+            matches!(
+                f.get("stateMutability").and_then(Value::as_str),
+                Some("nonpayable" | "payable")
+            )
+        })
+        .filter_map(|f| f.get("name").and_then(Value::as_str).map(str::to_string))
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// The names that appear nowhere in the tests as a word. A name that does
+/// appear may still never be called; one that does not appear cannot be.
+pub fn unmentioned(names: &[String], tests: &str) -> Vec<String> {
+    names
+        .iter()
+        .filter(|n| {
+            Regex::new(&format!(r"\b{}\b", regex::escape(n))).is_ok_and(|r| !r.is_match(tests))
+        })
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,6 +281,27 @@ mod tests {
         assert_eq!(p.report.as_deref(), Some(".pytest_cache/vibloom-junit.xml"));
         assert!(p.runner[2].ends_with(".pytest_cache/vibloom-junit.xml"));
         assert_eq!(plan(Stack::Hardhat, None, &none).notes.len(), 1);
+    }
+
+    #[test]
+    fn lists_the_entry_points_no_test_mentions() {
+        let vault = json!({ "bytecode": { "object": "0x6080" }, "abi": [
+            { "type": "constructor", "stateMutability": "nonpayable" },
+            { "type": "function", "name": "deposit", "stateMutability": "nonpayable" },
+            { "type": "function", "name": "sweep", "stateMutability": "payable" },
+            { "type": "function", "name": "totalAssets", "stateMutability": "view" },
+            { "type": "function", "name": "deposit", "stateMutability": "nonpayable" }
+        ]});
+        let names = entry_points(&vault);
+        assert_eq!(names, vec!["deposit", "sweep"]);
+        assert_eq!(
+            unmentioned(&names, "vault.deposit(assets); // sweeping is later"),
+            vec!["sweep"]
+        );
+        let interface = json!({ "bytecode": { "object": "0x" }, "abi": [
+            { "type": "function", "name": "transfer", "stateMutability": "nonpayable" }
+        ]});
+        assert_eq!(entry_points(&interface), Vec::<String>::new());
     }
 
     #[test]

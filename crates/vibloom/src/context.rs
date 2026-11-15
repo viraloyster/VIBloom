@@ -71,6 +71,12 @@ fn full(v: &NodeView, by_id: &HashMap<&str, &NodeView>) -> String {
             "  fuzzed: {} runs, {} calls, {} reverted",
             f.runs, f.calls, f.reverts
         ));
+        if !f.dead.is_empty() {
+            out.push(format!(
+                "  never got a call through (every call reverted): {}",
+                f.dead.join(", ")
+            ));
+        }
     }
     if let Some(r) = &v.reason {
         out.push(format!("  why: {r}"));

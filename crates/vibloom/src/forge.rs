@@ -16,11 +16,15 @@ pub enum Status {
 
 /// How hard a fuzz or invariant campaign pushed: without it a pass could mean
 /// that every call reverted and nothing was exercised.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Fuzz {
     pub runs: u64,
     pub calls: u64,
     pub reverts: u64,
+    /// Handler functions the fuzzer called and that reverted every time: that
+    /// part of the surface was never exercised.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dead: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,10 +85,23 @@ pub fn parse_forge(stdout: &str) -> Result<Vec<Outcome>, RunnerOutputError> {
         let fuzz_of = |v: &Value| {
             let i = v.pointer("/kind/Invariant")?;
             let n = |k: &str| i.get(k).and_then(Value::as_u64);
+            let mut dead: Vec<String> = i
+                .get("metrics")
+                .and_then(Value::as_object)
+                .into_iter()
+                .flatten()
+                .filter(|(_, m)| {
+                    let k = |k: &str| m.get(k).and_then(Value::as_u64).unwrap_or(0);
+                    k("calls") > 0 && k("reverts") >= k("calls")
+                })
+                .map(|(name, _)| name.rsplit(':').next().unwrap_or(name).to_string())
+                .collect();
+            dead.sort();
             Some(Fuzz {
                 runs: n("runs")?,
                 calls: n("calls")?,
                 reverts: n("reverts")?,
+                dead,
             })
         };
         for (sig, r) in results {

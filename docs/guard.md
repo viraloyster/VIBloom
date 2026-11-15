@@ -89,6 +89,23 @@ is VACUOUS and the check fails, because a handler that never gets a call
 through tests nothing. With `fail_on_revert = false` that is the easiest way
 for an invariant to go green without meaning it.
 
+An invariant holding says nothing about code the fuzzer never reached.
+`vibloom gaps` lists the two ways that happens:
+
+```
+State-changing functions no file under test/ names, so no test can reach them:
+- Vault (src/Vault.sol): sweep
+Handler functions whose every call reverted in the latest run:
+- VaultHandler.overdraw
+```
+
+The first comes from the compiled contracts' ABIs and the text of the test
+files: a name that appears there may still not be exercised, but one that
+does not appear cannot be. The second comes from the fuzzer's own counts, and
+also shows under the invariant in `vibloom context`. Both are reports, not
+failures: a function may be left out on purpose, and then an assumption node
+is the place to say so.
+
 ## The map
 
 `.vibloom/roots.json`, written by people (or a verifier agent) and kept in git:
@@ -250,6 +267,7 @@ vibloom run -- --mt X   # run the tests (what follows -- goes to the runner), re
 vibloom check           # run, then exit 1 if any node needs attention: for CI
 vibloom sync --base origin/main   # take the base's run log and record the tests on top of it
 vibloom context [file]  # what an agent should know before touching a file
+vibloom gaps            # Foundry: functions no test names, handler functions that always reverted
 vibloom verify          # check the log's hash chain
 vibloom repair          # set aside everything after a broken link (verifier)
 vibloom precommit       # the commit check, for .git/hooks/pre-commit
@@ -295,6 +313,7 @@ claude mcp add vibloom -- vibloom mcp
 | `status`    | the derived state of every node                                           |
 | `context`   | what to know before touching a file                                       |
 | `run`       | run the tests and record the run; only forge's test filters are accepted  |
+| `gaps`      | Foundry: functions no test names, handler functions that always reverted  |
 | `verify`    | check the log's hash chain                                                |
 | `propose`   | propose an assumption, invariant or intention, kept apart as hypothetical |
 | `proposals` | what is still pending                                                     |

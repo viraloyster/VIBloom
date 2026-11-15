@@ -15,7 +15,7 @@ use crate::map::{
 };
 use crate::proposals::{Book, Decision, accept, fresh_id, with_node};
 use crate::scan::{Found, add_found, find_invariants};
-use crate::setup::{Plan, Stack, helpers, plan};
+use crate::setup::{Plan, Stack, entry_points, helpers, plan, unmentioned};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::fs;
@@ -424,6 +424,101 @@ fn forge_invariants(root: &Path, exe: &str) -> Option<Vec<Found>> {
     Some(out)
 }
 
+/// What the tests leave out, for a Foundry project: state-changing functions
+/// of the project's contracts that no test file even names, and handler
+/// functions whose every call reverted in the latest run.
+pub fn gaps(root: &Path) -> Fallible<String> {
+    let map = load_map(root)?;
+    if map.report.is_some() {
+        return Err(
+            "`vibloom gaps` reads Foundry's build output; this project uses another runner.".into(),
+        );
+    }
+    let config = run_child("forge", &["config".into(), "--json".into()], root, 60)
+        .ok()
+        .and_then(|r| last_json(&r.stdout));
+    let dir = |k: &str, default: &str| {
+        config
+            .as_ref()
+            .and_then(|c| c.get(k))
+            .and_then(Value::as_str)
+            .unwrap_or(default)
+            .trim_matches('/')
+            .to_string()
+    };
+    let (src, out_dir) = (dir("src", "src"), dir("out", "out"));
+    let mut sources = Vec::new();
+    files_under(root, &src, &mut sources);
+    let mut tests = Vec::new();
+    files_under(root, map.tests.trim_end_matches('/'), &mut tests);
+    let text: String = tests
+        .iter()
+        .filter_map(|f| fs::read_to_string(root.join(f)).ok())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut lines = Vec::new();
+    let mut built = false;
+    for file in sources.iter().filter(|f| f.ends_with(".sol")) {
+        let base = file.rsplit('/').next().unwrap_or(file);
+        let Ok(read) = fs::read_dir(root.join(&out_dir).join(base)) else {
+            continue;
+        };
+        let mut artifacts: Vec<PathBuf> = read.filter_map(|e| Some(e.ok()?.path())).collect();
+        artifacts.sort();
+        for path in artifacts {
+            let Some(artifact) = fs::read_to_string(&path)
+                .ok()
+                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+            else {
+                continue;
+            };
+            // Two files may share a name; the artifact says which it compiled.
+            let contract = artifact
+                .pointer("/metadata/settings/compilationTarget")
+                .and_then(|t| t.get(file))
+                .and_then(Value::as_str);
+            let Some(contract) = contract else { continue };
+            built = true;
+            let missing = unmentioned(&entry_points(&artifact), &text);
+            if !missing.is_empty() {
+                lines.push(format!("- {contract} ({file}): {}", missing.join(", ")));
+            }
+        }
+    }
+    if !built {
+        return Err(format!(
+            "No build output for {src}/ under {out_dir}/. Run `forge build` or `vibloom run` first."
+        ));
+    }
+    let mut out = Vec::new();
+    if lines.is_empty() {
+        out.push(format!(
+            "Every state-changing function under {src}/ is named somewhere in {}.",
+            map.tests
+        ));
+    } else {
+        out.push(format!(
+            "State-changing functions no file under {} names, so no test can reach them:",
+            map.tests
+        ));
+        out.extend(lines);
+    }
+    let dead: BTreeSet<String> = views(root)?
+        .iter()
+        .filter_map(|v| v.fuzz.as_ref())
+        .flat_map(|f| f.dead.iter().cloned())
+        .collect();
+    if !dead.is_empty() {
+        out.push("Handler functions whose every call reverted in the latest run:".into());
+        out.extend(dead.iter().map(|d| format!("- {d}")));
+    }
+    out.push(
+        "A name that appears in the tests may still not be exercised; one that does not appear cannot be."
+            .into(),
+    );
+    Ok(out.join("\n"))
+}
+
 struct Scanned {
     map: RootsMap,
     added: Vec<String>,
@@ -680,6 +775,8 @@ pub const USAGE: &str = "vibloom: assumptions, invariants and intentions for a c
   vibloom sync --base ref    after the base branch moved on: take its run log and record
                              the tests again on top of it
   vibloom context [file]     what an agent should know before touching a file
+  vibloom gaps               Foundry: state-changing functions no test names, and handler
+                             functions whose every call reverted
   vibloom verify             check the run log's hash chain
   vibloom repair             set aside everything after a broken link in the log (verifier)
   vibloom precommit          refuse a commit that changes guarded files or leaves a node
@@ -1088,6 +1185,10 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
             Ok(i32::from(cmd == "check" && failed))
         }
         "repair" => repair(&root, io),
+        "gaps" => {
+            (io.out)(&gaps(&root)?);
+            Ok(0)
+        }
         "context" => {
             let file = words.first().and_then(|f| relative_to(&root, &io.cwd, f));
             (io.out)(&context(&views(&root)?, file.as_deref()));
