@@ -25,7 +25,11 @@ vibloom check                 # run the tests and record the run
 
 `init` detects Foundry, Hardhat, Cargo or pytest (`--stack` to choose), writes
 the map, installs the commit check in this clone's git hooks and, with
-`--agent`, connects that agent. No API key is involved anywhere: the guard is
+`--agent`, connects that agent. It installs the commit check on its own only
+when the project is the repository root; in a folder of a larger repository
+it prints a hint, and `vibloom install-hook` adds the check when you want it.
+The installed hook changes into the project folder first, and `vibloom
+precommit` passes when a commit stages nothing of the project. No API key is involved anywhere: the guard is
 a local program and the agent runs on whatever plan it already uses.
 
 - `--agent claude` adds the hooks to `.claude/settings.json` and the tools to
@@ -41,7 +45,8 @@ commit check in another clone.
 
 For a Foundry project `init` asks forge for its tests (`forge test --list`), so
 an invariant inherited from a base contract is found under the contract it
-runs in. Each invariant found becomes a protected node that watches the source
+runs in. The same list gives the tests folder when the tests live inside the
+source folder (the dapptools layout, `src/test/*.t.sol`). Each invariant found becomes a protected node that watches the source
 and test folders. `init` also guards what the invariants lean on: the handlers
 and base contracts their test files import, and `foundry.toml`, where the fuzz
 and invariant runs and depth are set. Weakening a handler or lowering `runs`
@@ -57,7 +62,21 @@ vibloom add invariant "shares never exceed assets" --file test/Vault.t.sol --con
 ```
 
 `--watch` (repeatable) sets what a node watches; a node with a test watches
-the source and test folders when none is given. Or edit the map directly.
+the source and test folders when none is given. `--evidence` (repeatable)
+records where the node comes from. Or edit the map directly.
+
+Two more commands change a node that is already there, as the verifier:
+
+```bash
+vibloom edit asm.only-add-changes-total --stance adopted --evidence "docs/design.md#roles"
+vibloom remove asm.only-add-changes-total
+```
+
+`edit` takes `--title`, `--detail`, `--stance`, `--on` and `--not-on`,
+`--watch` and `--unwatch`, `--evidence` and `--drop-evidence`; the result must
+still be a valid map. `remove` is refused while other nodes rest on the node;
+point them elsewhere first, or switch it off with `edit --stance off`. Its
+recorded runs stay in the log.
 
 ## For smart contracts
 
@@ -90,21 +109,96 @@ through tests nothing. With `fail_on_revert = false` that is the easiest way
 for an invariant to go green without meaning it.
 
 An invariant holding says nothing about code the fuzzer never reached.
-`vibloom gaps` lists the two ways that happens:
+`vibloom gaps` lists the ways that happens, in this order:
 
 ```
+Contracts no file under test/ names, so no test reaches any of their functions:
+- Treasury (src/Treasury.sol): sweep, pause
 State-changing functions no file under test/ names, so no test can reach them:
-- Vault (src/Vault.sol): sweep
+- Vault (src/Vault.sol): sweep; inherited: setFee
 Handler functions whose every call reverted in the latest run:
 - VaultHandler.overdraw
 ```
 
-The first comes from the compiled contracts' ABIs and the text of the test
-files: a name that appears there may still not be exercised, but one that
-does not appear cannot be. The second comes from the fuzzer's own counts, and
+The first two come from the compiled contracts and the text of the test files:
+a name that appears there may still not be exercised, but one that does not
+appear cannot be. A contract no test names is listed on its own, since no test
+deploys it. Each contract's functions are listed, then the ones it takes from a base
+after `inherited:`. The last comes from the fuzzer's own counts, and
 also shows under the invariant in `vibloom context`. Both are reports, not
 failures: a function may be left out on purpose, and then an assumption node
 is the place to say so.
+
+## From code and notes to a map
+
+For a Foundry project the first draft of the map does not have to be written
+from a blank page. The steps, in order:
+
+1. **Notes.** Write what the system is meant to guarantee, in your own words,
+   in `.vibloom/notes.md`. Nothing reads it but the research brief below; it is
+   yours.
+2. **Survey.** `vibloom survey` runs `forge build --ast` and reads the
+   compiler's syntax trees. For each contract it reports who may call each
+   state-changing function (the gates), the other modifiers, the state
+   variables and which functions write them, what gates an upgrade, the calls
+   into other contracts and the low-level calls. It then lists assumption
+   candidates and invariant candidates. Test code is left out: `*.t.sol`,
+   `*.s.sol`, the tests and script folders and any folder named `test`,
+   `tests`, `mock` or `mocks`.
+3. **Propose.** `vibloom survey --propose` files the assumption candidates as
+   proposals, each with the `file:line` it comes from and a suggested node id.
+   One already pending, or already in the map, is not filed twice. Invariant
+   candidates are only listed: an invariant needs a test before it can enter
+   the map.
+4. **Decide.** `vibloom proposals` lists what is pending, with the test and
+   where each proposal comes from. As the verifier, accept or reject several at
+   once:
+
+   ```bash
+   VIBLOOM_ROLE=verifier vibloom proposals accept p1 p2 p3 --on inv.solvency
+   VIBLOOM_ROLE=verifier vibloom proposals reject p4 p5
+   ```
+
+   Each `--on` (repeatable) links the accepted nodes to a node they rest on.
+
+5. **Research.** `vibloom research`, or the `research` tool over MCP, prints
+   the brief an agent works from: the notes, the survey and how to work. The
+   agent reads the project's docs, audits and the standards it implements; it
+   reads the chain only with read-only `cast` commands (`cast code`, `call`,
+   `storage`, `implementation`, `admin`, `logs`) using `ETH_RPC_URL`, at a fixed
+   `--block` that it records; and it proposes each finding with its evidence.
+6. **Refine.** `vibloom edit` and `vibloom remove` fix what was accepted.
+
+How the survey reads a function's gate:
+
+- A modifier or a role check on the function is its gate.
+- A function with no gate that checks the caller in its body is reported as
+  `anyone, checks the caller at :LINE`. A caller check is a `require` or
+  `assert`, or an `if` that reverts, whose condition uses the caller
+  (`msg.sender`, `tx.origin`, `_msgSender()` or a local alias of it) outside a
+  `<` or `>` comparison and not only against the zero address.
+- `fallback` and `receive` count as entry points.
+- Calls with `{value: ...}` options are seen.
+- For a gate whose check reads the contract's own state, the candidate says
+  which functions decide who passes it.
+
+Every fact the survey gives is read from the code, so it can be wrong about
+what the code means but not invent a line that is not there. Nothing it files
+counts until the verifier accepts it.
+
+### Evidence
+
+A node and a proposal carry an `evidence` list: where each one comes from, as
+`file:line`, a URL with its section, or a chain read with its block.
+`vibloom context` and `vibloom proposals` show it as `from:`. Over MCP,
+`propose` requires at least one entry and takes an optional `id` for the node,
+such as `asm.oracle-is-fresh`.
+
+### Network and keys
+
+`vibloom` never touches the network and stores no key. The agent's own `cast`
+reads use the `ETH_RPC_URL` of the person's environment. The Claude Code
+pre-tool hook (see below) denies the commands that would send a transaction.
 
 ## The map
 
@@ -152,6 +246,7 @@ is the place to say so.
 - **invariant**: a property that must always hold, tied to a test. Protected by
   default.
 - **intention**: what a change or a piece of the system is meant to achieve.
+- `evidence` lists where the node comes from (see Evidence above).
 - `watch` lists files, or directories ending in `/`, whose change puts the
   node's evidence up for review. A node's test file is always watched.
 - `depends_on` links form a DAG; the map is rejected if they form a cycle or
@@ -261,21 +356,28 @@ vibloom init [--agent claude|codex]   # create the map, install the commit check
 vibloom setup claude|codex   # connect an agent to an existing map (verifier)
 vibloom install-hook    # install the commit check in another clone
 vibloom add <kind> "<title>" ...   # add a node (verifier); see Start
+vibloom edit <id> [--title T] [--detail D] [--stance S] [--on ID] [--not-on ID] [--watch P] [--unwatch P] [--evidence E] [--drop-evidence E]   # change a node (verifier)
+vibloom remove <id>     # take a node out; refused while others rest on it (verifier)
 vibloom scan            # add invariant tests the map does not list yet (verifier)
-vibloom status [--json] # derived state of every node; exit 1 if any needs attention
+vibloom survey [--propose]   # Foundry: who may call what, upgrades, external calls; --propose files assumptions
+vibloom research        # the brief an agent works from to find and propose nodes
+vibloom status [--json] # derived state of every node, troubled first; exit 1 if any needs attention
 vibloom run -- --mt X   # run the tests (what follows -- goes to the runner), record, show what changed
 vibloom check           # run, then exit 1 if any node needs attention: for CI
 vibloom sync --base origin/main   # take the base's run log and record the tests on top of it
 vibloom context [file]  # what an agent should know before touching a file
-vibloom gaps            # Foundry: functions no test names, handler functions that always reverted
+vibloom gaps            # Foundry: contracts and functions no test names, handler functions that always reverted
 vibloom verify          # check the log's hash chain
 vibloom repair          # set aside everything after a broken link (verifier)
 vibloom precommit       # the commit check, for .git/hooks/pre-commit
 vibloom proposals       # what agents proposed and nobody decided yet
-VIBLOOM_ROLE=verifier vibloom proposals accept p1   # or reject p1
+VIBLOOM_ROLE=verifier vibloom proposals accept p1 p2 [--on ID]...   # or reject p1 p2
 vibloom mcp             # serve the map to any MCP client over stdio
 vibloom hooks           # optional: print the Claude Code hooks configuration
 ```
+
+`status` starts with `N nodes, K need attention.` and lists the troubled nodes
+first. Output piped to a reader that stops early (`| head`) exits quietly.
 
 From this repository: `cargo run -p vibloom -- <command>`.
 
@@ -284,9 +386,11 @@ From this repository: `cargo run -p vibloom -- <command>`.
 Three pieces work the same whatever writes the code:
 
 - **Context**: give the agent the output of `vibloom context <file>` before it
-  touches a file, in its prompt, rules file or tool call. It has full detail for
-  the nodes that file touches, what they rest on and what rests on them, and one
-  line for every other node, troubled ones first.
+  touches a file, in its prompt, rules file or tool call. It is short: full
+  detail only for the nodes that name the file (they watch it exactly, it is
+  their test, or they cite it in evidence), one line for nodes that only watch
+  its folder or are connected to those, the reason for any trouble elsewhere,
+  and a count of the rest.
 - **The commit check**: `vibloom install-hook` puts `vibloom precommit` in this
   clone's `.git/hooks/pre-commit` (git does not share hooks, so each clone
   installs its own). It refuses a commit that changes a protected test, a path
@@ -308,15 +412,16 @@ directory, for example:
 claude mcp add vibloom -- vibloom mcp
 ```
 
-| Tool        | What it does                                                              |
-| ----------- | ------------------------------------------------------------------------- |
-| `status`    | the derived state of every node                                           |
-| `context`   | what to know before touching a file                                       |
-| `run`       | run the tests and record the run; only forge's test filters are accepted  |
-| `gaps`      | Foundry: functions no test names, handler functions that always reverted  |
-| `verify`    | check the log's hash chain                                                |
-| `propose`   | propose an assumption, invariant or intention, kept apart as hypothetical |
-| `proposals` | what is still pending                                                     |
+| Tool        | What it does                                                                                   |
+| ----------- | ---------------------------------------------------------------------------------------------- |
+| `status`    | the derived state of every node                                                                |
+| `context`   | what to know before touching a file                                                            |
+| `run`       | run the tests and record the run; only forge's test filters are accepted                       |
+| `research`  | the brief to start from: notes, survey, how to propose with evidence                           |
+| `gaps`      | Foundry: contracts and functions no test names, handlers that always reverted                  |
+| `verify`    | check the log's hash chain                                                                     |
+| `propose`   | propose a node with its `evidence` (required) and an optional `id`; kept apart as hypothetical |
+| `proposals` | what is still pending                                                                          |
 
 There is no tool to accept a proposal, set a state or edit the record. A
 proposal waits in `.vibloom/proposals.jsonl` until the verifier runs
@@ -415,6 +520,10 @@ things:
   that plainly write to those paths (redirection, `sed -i`, `mv`, `rm`, `cp`,
   `tee`, `git checkout`, `git restore`...) are denied too, and so are commands
   that set `VIBLOOM_ROLE` or commit with `--no-verify`.
+  Commands that would sign or send a transaction are denied for the builder:
+  `cast send`, `cast publish`, `cast mktx`, `cast wallet`, `forge create`,
+  `forge script ... --broadcast` and any `--private-key`, `--mnemonic`,
+  `--ledger`, `--trezor` or `--keystore` flag. Reads such as `cast call` pass.
 - **After a tool runs**: after a command that runs the project's tests, the
   guard runs them itself and records that, so the agent's own output is never
   what counts. With Foundry it re-runs the same subset (`--match-test` and the

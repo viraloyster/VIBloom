@@ -38,7 +38,13 @@ premise marks everything resting on it.
   requires the log to extend the base branch's, and context for any agent
   (`vibloom context <file>`).
 - An MCP server (`vibloom mcp`) and optional Claude Code hooks. Agents can
-  propose nodes; a person accepts or rejects them.
+  propose nodes, each with its evidence; a person accepts or rejects them.
+- For Foundry, from code and notes to a map: `vibloom survey` reads who may
+  call what and what the code leans on, `--propose` files assumptions with the
+  lines they come from, and `vibloom research` gives an agent the brief to find
+  the rest. `vibloom gaps` shows what the tests never name.
+- `vibloom edit` and `vibloom remove` change the map. No network, no stored
+  key: the builder cannot sign or send a transaction.
 - Runners: Foundry (`forge test --json`) and any runner that writes JUnit XML
   (cargo-nextest, pytest, Jest, mocha, Go).
 

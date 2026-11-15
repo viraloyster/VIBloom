@@ -2,6 +2,58 @@
 
 Changes to the `vibloom` binary. The web app is not versioned.
 
+## 0.5.0
+
+### Added
+
+- `vibloom survey [--propose]`, for Foundry projects: from the compiler's
+  syntax trees, who may call each state-changing function, the other
+  modifiers, state variables and the functions that write them, the upgrade
+  gate, calls into other contracts and low-level calls, then assumption and
+  invariant candidates. `--propose` files the assumptions as proposals with
+  the `file:line` they come from and a suggested node id. Test code is left
+  out. A function with no gate that checks the caller in its body is reported
+  as `anyone, checks the caller at :LINE`; `fallback` and `receive` are entry
+  points; calls with `{value: ...}` are seen; for a gate that reads the
+  contract's own state, a candidate says which functions decide who passes it.
+- `vibloom research` and the `research` tool: the brief an agent works from,
+  made of the person's notes in `.vibloom/notes.md`, the survey and how to
+  work (read docs, audits and standards; read the chain only with read-only
+  `cast` at a fixed block; propose each finding with evidence).
+- Nodes and proposals carry an `evidence` list. The `propose` tool requires it
+  and takes an optional `id`; `vibloom add --evidence`.
+- `vibloom edit <id>` and `vibloom remove <id>` (verifier only). `remove` is
+  refused while other nodes rest on the node.
+- `vibloom proposals accept` and `reject` take several ids; the list shows
+  each proposal's test and where it comes from.
+- The pre-tool hook denies the builder commands that sign or send a
+  transaction: `cast send|publish|mktx|wallet`, `forge create`,
+  `forge script ... --broadcast` and any `--private-key`, `--mnemonic`,
+  `--ledger`, `--trezor` or `--keystore` flag.
+- `vibloom gaps` first lists contracts no test file names at all, then
+  functions (own and inherited) no test names, then handler functions whose
+  every call reverted.
+
+### Changed
+
+- `vibloom context [path]` is shorter: full detail only for nodes that name
+  the file, one line for nodes that only watch its folder or are connected,
+  the reason for trouble elsewhere, and a count of the rest.
+- `vibloom status` starts with "N nodes, K need attention." and lists troubled
+  rows first.
+- `vibloom init` installs the commit check on its own only when the project is
+  the repository root; in a folder of a larger repository it prints a hint
+  (`vibloom install-hook`). The installed hook changes into the project folder
+  first, and `vibloom precommit` passes when the commit stages nothing of the
+  project.
+
+### Fixed
+
+- Output piped to a reader that stops early (`| head`) exits quietly.
+- For Foundry projects whose tests live inside the source folder (dapptools
+  layout, `src/test/*.t.sol`), `init` finds the tests folder from forge's own
+  test list.
+
 ## 0.4.0
 
 ### Added
