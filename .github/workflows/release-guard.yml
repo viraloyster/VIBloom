@@ -1,12 +1,19 @@
 name: Release guard
 
-# Push a tag like guard-v0.2.0 (matching crates/vibloom/Cargo.toml) to build
-# the vibloom binary for each platform and publish it with its SHA-256. Run it
-# by hand to build and test every platform without publishing.
+# Builds and tests the vibloom binary for each platform. It publishes them,
+# each with its SHA-256, when a tag like guard-v0.2.0 is pushed (it must match
+# crates/vibloom/Cargo.toml) or when it is run by hand with "publish" on, which
+# tags the commit as guard-v<the crate's version>. Run by hand without it, it
+# only builds and tests.
 on:
   push:
     tags: ["guard-v*"]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Tag this commit with the crate's version and publish the release
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -62,11 +69,12 @@ jobs:
 
   publish:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || inputs.publish
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -75,7 +83,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* \
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' crates/vibloom/Cargo.toml | head -1)"
+          tag="guard-v$version"
+          gh release create "$tag" dist/* \
             --repo "$GITHUB_REPOSITORY" \
-            --title "vibloom ${GITHUB_REF_NAME#guard-}" \
-            --notes "The vibloom binary for code projects. Check a download against its .sha256 file. The binaries are not code-signed yet."
+            --target "$GITHUB_SHA" \
+            --title "vibloom v$version" \
+            --notes "The vibloom binary for code projects. What changed: CHANGELOG.md. Check a download against its .sha256 file. The binaries are not code-signed yet."

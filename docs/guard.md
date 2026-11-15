@@ -186,9 +186,10 @@ cargo install --locked --git https://github.com/viraloyster/VIBloom vibloom
 One binary, no runtime to install. A hook call takes about 2 ms.
 
 A release is made by raising `version` in `crates/vibloom/Cargo.toml` and
-pushing a tag `guard-v<version>`; the Release guard workflow builds, tests and
-publishes it. Run that workflow by hand to build every platform without
-publishing.
+either pushing a tag `guard-v<version>` or running the Release guard workflow
+by hand with "publish" on, which tags the commit itself. The workflow builds
+and tests every platform first; run by hand without "publish", that is all it
+does.
 
 ## Commands
 
