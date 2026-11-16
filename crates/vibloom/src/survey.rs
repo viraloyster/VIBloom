@@ -1,18 +1,41 @@
 //! What a compiled Solidity contract says about itself, read from the
-//! compiler's own syntax tree: who may call what, what it can be upgraded or
+//! compiler's own syntax trees: who may call what, what it can be upgraded or
 //! paused by, which other contracts it calls. These are facts about the code,
 //! each with the line it comes from. What they mean for the protocol is a
 //! person's call, so they become proposals, never nodes.
+//!
+//! A contract is read with everything it inherits, across files: the bases
+//! are linearized as the compiler does, internal calls dispatch to the most
+//! derived override, and names are resolved through the imports. Node ids are
+//! only trusted inside one file, since files can come from different
+//! compiler runs.
 
 use crate::setup::entry_points;
 use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
+
+/// One source file as the compiler saw it.
+pub struct Unit {
+    /// `ast.absolutePath`: the path imports refer to it by.
+    pub path: String,
+    pub ast: Value,
+    /// The ABI of each contract compiled from it, by contract name.
+    pub abis: BTreeMap<String, Value>,
+    pub source: String,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Function {
     pub name: String,
+    /// Where it is defined: for an inherited function, the base's file.
+    pub file: String,
     pub line: usize,
+    /// The contract that defines it.
+    pub contract: String,
+    /// Defined in a file that is not the project's own (OpenZeppelin, Solady).
+    pub library: bool,
     /// Modifiers that restrict who may call: `onlyRole(MINTER_ROLE)`, `onlyOwner`.
     pub gates: Vec<String>,
     /// Every other modifier: `nonReentrant`, `whenNotPaused`, `initializer`.
@@ -20,85 +43,119 @@ pub struct Function {
     /// Lines of the caller checks in its body (see `own_checks`):
     /// `require(wish(src, msg.sender))`, or a call to a function that has one.
     pub checks: Vec<usize>,
+    /// Code it runs writes storage with `sstore` or `tstore`.
+    pub asm_store: bool,
 }
 
 /// A state variable and what can change it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StateVar {
     pub name: String,
+    pub file: String,
     pub line: usize,
+    pub contract: String,
     /// "constant" or "immutable"; empty for a variable that can change.
     pub fixed: &'static str,
-    /// This contract's own entry points that write it, directly or through
-    /// its internal functions and modifiers.
+    /// The entry points that write it, directly or through what they run.
     pub writers: Vec<String>,
-    /// Internal functions that write it and that no entry point of this
-    /// contract reaches: hooks called from inherited code.
+    /// Internal functions that write it and that no entry point reaches.
     pub hooks: Vec<String>,
-    pub in_constructor: bool,
+    /// Written by a constructor or given a value where it is declared.
+    pub at_deployment: bool,
+}
+
+/// A gate and the state its caller check reads: `auth` reads `wards`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Guard {
+    pub gate: String,
+    pub vars: Vec<String>,
+    /// The entry points that write any of `vars`.
+    pub writers: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Contract {
     pub name: String,
     pub file: String,
+    /// The direct bases, as written.
     pub bases: Vec<String>,
+    /// Every contract it inherits from, most derived first, without itself.
+    pub lineage: Vec<String>,
+    /// Bases whose source was not found: what they add is not read.
+    pub unresolved: Vec<String>,
     pub state: Vec<StateVar>,
-    /// State-changing functions callable from outside, defined in this contract.
+    /// State-changing functions callable from outside: its own first, then
+    /// the inherited ones, most derived base first.
     pub functions: Vec<Function>,
-    /// The same, inherited: only their names are known here.
-    pub inherited: Vec<String>,
-    /// `Type.member` of every call into another contract, with its line.
-    pub calls: BTreeMap<String, usize>,
-    /// The gate on `_authorizeUpgrade`, when the contract is upgradeable.
-    pub upgrade_gate: Option<(String, usize)>,
-    pub low_level: Vec<(String, usize)>,
-    /// Each gate defined in this file that the contract uses, with the state
-    /// variables of the contract its caller check reads: `auth` reads `wards`.
-    pub guards: Vec<(String, Vec<String>)>,
+    /// State-changing functions of the ABI that the source did not explain.
+    pub not_found: Vec<String>,
+    /// `Type.member` of every call into another contract, with `file:line`.
+    pub calls: BTreeMap<String, String>,
+    /// The gate on `_authorizeUpgrade` and its `file:line`, when upgradeable.
+    pub upgrade_gate: Option<(String, String)>,
+    pub low_level: Vec<(String, String)>,
+    pub guards: Vec<Guard>,
 }
 
 fn s<'a>(v: &'a Value, k: &str) -> &'a str {
     v.get(k).and_then(Value::as_str).unwrap_or_default()
 }
 
-fn line_of(node: &Value, source: &str) -> usize {
-    let start: usize = s(node, "src")
-        .split(':')
-        .next()
-        .and_then(|n| n.parse().ok())
-        .unwrap_or(0);
-    source
-        .as_bytes()
-        .iter()
-        .take(start)
-        .filter(|b| **b == b'\n')
-        .count()
-        + 1
+fn items<'a>(v: &'a Value, k: &str) -> &'a [Value] {
+    v.get(k)
+        .and_then(Value::as_array)
+        .map_or(&[], Vec::as_slice)
 }
 
-// A modifier as written, with simple arguments: `onlyRole(MINTER_ROLE)`.
+fn type_string(v: &Value) -> &str {
+    v.pointer("/typeDescriptions/typeString")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+}
+
+fn type_id(v: &Value) -> &str {
+    v.pointer("/typeDescriptions/typeIdentifier")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+}
+
+// An argument as written, when it is simple enough to read at a glance.
+fn arg_text(a: &Value, depth: usize) -> String {
+    match s(a, "nodeType") {
+        "Identifier" => s(a, "name").to_string(),
+        "Literal" if !s(a, "value").is_empty() => s(a, "value").to_string(),
+        "MemberAccess" => format!(
+            "{}.{}",
+            arg_text(a.get("expression").unwrap_or(&Value::Null), depth),
+            s(a, "memberName")
+        ),
+        "FunctionCall" if depth > 0 => {
+            let f = arg_text(a.get("expression").unwrap_or(&Value::Null), 0);
+            let args: Vec<String> = items(a, "arguments")
+                .iter()
+                .map(|x| arg_text(x, depth - 1))
+                .collect();
+            format!("{f}({})", args.join(", "))
+        }
+        "ElementaryTypeNameExpression" => a
+            .pointer("/typeName/name")
+            .and_then(Value::as_str)
+            .or_else(|| a.get("typeName").and_then(Value::as_str))
+            .unwrap_or("...")
+            .to_string(),
+        _ => "...".to_string(),
+    }
+}
+
+// A modifier as written, with simple arguments: `onlyRole(getRoleAdmin(role))`.
 fn modifier_text(m: &Value) -> String {
     let name = m
         .pointer("/modifierName/name")
         .and_then(Value::as_str)
         .unwrap_or("?");
-    let args: Vec<String> = m
-        .get("arguments")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .map(|a| match s(a, "nodeType") {
-            "Identifier" => s(a, "name").to_string(),
-            "MemberAccess" => format!(
-                "{}.{}",
-                a.pointer("/expression/name")
-                    .and_then(Value::as_str)
-                    .unwrap_or("?"),
-                s(a, "memberName")
-            ),
-            _ => "...".to_string(),
-        })
+    let args: Vec<String> = items(m, "arguments")
+        .iter()
+        .map(|a| arg_text(a, 1))
         .collect();
     if args.is_empty() {
         name.to_string()
@@ -108,7 +165,7 @@ fn modifier_text(m: &Value) -> String {
 }
 
 // A modifier that decides who may call, by the names every codebase uses:
-// for a modifier whose code is not in this file.
+// only for a modifier whose code could not be read.
 fn is_gate(text: &str) -> bool {
     let name = text.split('(').next().unwrap_or(text);
     // Proxy and initialization guards check how the code runs, not who calls.
@@ -155,9 +212,7 @@ fn referenced(v: &Value) -> Option<i64> {
 }
 
 fn args_of(call: &Value) -> &[Value] {
-    call.get("arguments")
-        .and_then(Value::as_array)
-        .map_or(&[], Vec::as_slice)
+    items(call, "arguments")
 }
 
 // The name a call is made by when it calls a plain identifier: `require(...)`.
@@ -180,11 +235,10 @@ fn unwrap_address(mut e: &Value) -> &Value {
         let to = e.pointer("/expression/typeName");
         let name = to.and_then(|t| t.get("name")).and_then(Value::as_str);
         let old = to.and_then(Value::as_str);
-        let result = e
-            .pointer("/typeDescriptions/typeString")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        if !(name == Some("address") || old == Some("address") || result.starts_with("address")) {
+        if !(name == Some("address")
+            || old == Some("address")
+            || type_string(e).starts_with("address"))
+        {
             break;
         }
         e = &args_of(e)[0];
@@ -203,7 +257,7 @@ fn is_zero(mut e: &Value) -> bool {
 }
 
 // The caller itself: `msg.sender`, `tx.origin`, `_msgSender()`, or a local
-// that holds one of them.
+// (or a parameter given the caller) that holds one of them.
 fn is_caller(e: &Value, aliases: &BTreeSet<i64>) -> bool {
     let e = unwrap_address(e);
     let on = e.pointer("/expression/name").and_then(Value::as_str);
@@ -258,26 +312,18 @@ fn uses_caller(e: &Value, aliases: &BTreeSet<i64>) -> bool {
     }
 }
 
-// The locals of a body that stand for the caller: assigned exactly from it,
-// or a bool computed from it.
-fn caller_aliases(body: &Value) -> BTreeSet<i64> {
+// The locals of a body that stand for the caller: the `seeds` (parameters
+// given the caller), locals assigned exactly from it, or bools computed from it.
+fn caller_aliases(body: &Value, seeds: &BTreeSet<i64>) -> BTreeSet<i64> {
     let mut is_bool: BTreeMap<i64, bool> = BTreeMap::new();
     let mut from: Vec<(i64, &Value)> = Vec::new();
     walk(body, &mut |x| match s(x, "nodeType") {
         "VariableDeclarationStatement" => {
-            let decls: Vec<&Value> = x
-                .get("declarations")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .collect();
+            let decls: Vec<&Value> = items(x, "declarations").iter().collect();
             if let [d] = decls.as_slice()
                 && let Some(id) = node_id(d)
             {
-                let ty = d
-                    .pointer("/typeDescriptions/typeString")
-                    .and_then(Value::as_str);
-                is_bool.insert(id, ty == Some("bool"));
+                is_bool.insert(id, type_string(d) == "bool");
                 if let Some(init) = x.get("initialValue").filter(|v| v.is_object()) {
                     from.push((id, init));
                 }
@@ -295,7 +341,7 @@ fn caller_aliases(body: &Value) -> BTreeSet<i64> {
         }
         _ => {}
     });
-    let mut out = BTreeSet::new();
+    let mut out = seeds.clone();
     loop {
         let before = out.len();
         for (id, e) in &from {
@@ -320,8 +366,9 @@ fn reverts(branch: &Value) -> bool {
     found
 }
 
-// Inline assembly that reads the caller and can revert.
-fn assembly_checks_caller(asm: &Value) -> bool {
+// The Yul builtins an inline assembly block calls. Before solc 0.6 the block
+// is only text.
+fn yul_calls(asm: &Value) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     walk(asm, &mut |x| {
         if s(x, "nodeType") == "YulFunctionCall"
@@ -331,51 +378,81 @@ fn assembly_checks_caller(asm: &Value) -> bool {
         }
     });
     let text = s(asm, "operations");
-    let has = |n: &str| names.contains(n) || text.contains(&format!("{n}("));
-    (has("caller") || has("origin")) && has("revert")
+    for (i, _) in text.match_indices('(') {
+        let word: String = text[..i]
+            .chars()
+            .rev()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect();
+        names.insert(word.chars().rev().collect());
+    }
+    names
+}
+
+// Inline assembly that reads the caller and can revert.
+fn assembly_checks_caller(asm: &Value) -> bool {
+    let names = yul_calls(asm);
+    (names.contains("caller") || names.contains("origin")) && names.contains("revert")
 }
 
 /// The caller checks written in one body, each with the condition it tests
-/// (none for assembly or a well-known check call).
+/// (none for assembly).
 ///
 /// A caller check is a `require(...)` or `assert(...)` call, an `if` whose
 /// branch reverts (a `revert` statement or a call to `revert`, `require` or
 /// `assert`), or an inline assembly block that has both `caller()` or
 /// `origin()` and `revert(`, where the condition uses the caller outside of
 /// a `<`, `>`, `<=` or `>=` comparison and not only in an `==` or `!=`
-/// against the zero address. The caller is `msg.sender`, `tx.origin`,
-/// `_msgSender()` or `msgSender()`, or a local that is an alias of one
-/// (declared or assigned exactly from it, possibly wrapped in `address(...)`
-/// or `payable(...)`), or a bool local whose initial value uses the caller
-/// under the same rule. A call to `_checkRole` or `_checkOwner` as a
-/// statement is one too: the standard libraries check the caller there.
-fn own_checks(body: &Value) -> Vec<(&Value, Option<&Value>)> {
-    let aliases = caller_aliases(body);
+/// against the zero address, and where passing takes more than the caller
+/// not being named (see `only_excludes`). An `if` that returns early, followed
+/// by a revert in the same block, counts too. The caller is `msg.sender`,
+/// `tx.origin`, `_msgSender()` or `msgSender()`, or one of `aliases` (see
+/// `caller_aliases`).
+fn own_checks<'a>(body: &'a Value, aliases: &BTreeSet<i64>) -> Vec<(&'a Value, Option<&'a Value>)> {
     let mut out = Vec::new();
     walk(body, &mut |x| match s(x, "nodeType") {
         "FunctionCall" if matches!(callee_name(x), "require" | "assert") => {
             if let Some(cond) = args_of(x).first()
-                && uses_caller(cond, &aliases)
+                && uses_caller(cond, aliases)
+                && !only_excludes(cond, false, aliases)
             {
                 out.push((x, Some(cond)));
             }
         }
         "IfStatement" => {
             let branch = |k: &str| x.get(k).is_some_and(reverts);
+            // A modifier that runs the function only for some callers:
+            // `if (msg.sender == admin()) { _; } else { _fallback(); }`.
+            let only = |k: &str, other: &str| {
+                x.get(k).is_some_and(has_placeholder) && !x.get(other).is_some_and(has_placeholder)
+            };
+            let pass_on_false = branch("trueBody") || only("falseBody", "trueBody");
             if let Some(cond) = x.get("condition")
-                && (branch("trueBody") || branch("falseBody"))
-                && uses_caller(cond, &aliases)
+                && (branch("trueBody")
+                    || branch("falseBody")
+                    || only("trueBody", "falseBody")
+                    || only("falseBody", "trueBody"))
+                && uses_caller(cond, aliases)
+                && !only_excludes(cond, pass_on_false, aliases)
             {
                 out.push((x, Some(cond)));
             }
         }
         "InlineAssembly" if assembly_checks_caller(x) => out.push((x, None)),
-        "ExpressionStatement" => {
-            if let Some(call) = x.get("expression")
-                && s(call, "nodeType") == "FunctionCall"
-                && matches!(callee_name(call), "_checkRole" | "_checkOwner")
-            {
-                out.push((x, None));
+        // `if (isOwner(msg.sender)) return; revert Unauthorized();`
+        "Block" | "UncheckedBlock" => {
+            let stmts = items(x, "statements");
+            for (i, st) in stmts.iter().enumerate() {
+                if s(st, "nodeType") == "IfStatement"
+                    && st.get("falseBody").is_none_or(Value::is_null)
+                    && st.get("trueBody").is_some_and(returns)
+                    && let Some(cond) = st.get("condition")
+                    && stmts[i + 1..].iter().any(always_reverts)
+                    && uses_caller(cond, aliases)
+                    && !only_excludes(cond, false, aliases)
+                {
+                    out.push((st, Some(cond)));
+                }
             }
         }
         _ => {}
@@ -383,152 +460,57 @@ fn own_checks(body: &Value) -> Vec<(&Value, Option<&Value>)> {
     out
 }
 
-// The functions and modifiers of one source file, to follow calls between them.
-struct File<'a> {
-    defs: BTreeMap<i64, &'a Value>,
-    /// Every node id in the file: a reference outside it is code from elsewhere.
-    ids: BTreeSet<i64>,
-    source: &'a str,
-    checked: RefCell<BTreeMap<i64, bool>>,
+// Whether a check lets every caller through except those named somewhere:
+// `require(!blacklisted[msg.sender])`. It stops some callers and trusts
+// nobody, so it is no caller check. `negated` is set when the check passes
+// on the condition being false (`if (cond) revert`).
+fn only_excludes(cond: &Value, negated: bool, aliases: &BTreeSet<i64>) -> bool {
+    match (s(cond, "nodeType"), s(cond, "operator")) {
+        ("UnaryOperation", "!") => only_excludes(
+            cond.get("subExpression").unwrap_or(&Value::Null),
+            !negated,
+            aliases,
+        ),
+        ("BinaryOperation", op @ ("==" | "!=")) => {
+            let l = cond.get("leftExpression").unwrap_or(&Value::Null);
+            let r = cond.get("rightExpression").unwrap_or(&Value::Null);
+            // `msg.sender == owner` names who passes; so does a lookup that
+            // must be set (`wards[msg.sender] == 1`, `minters[msg.sender] != 0`).
+            let names_who_passes =
+                is_caller(l, aliases) || is_caller(r, aliases) || !(is_zero(l) || is_zero(r));
+            let needs_equal = (op == "==") != negated;
+            needs_equal != names_who_passes
+        }
+        ("BinaryOperation", _) => false,
+        ("TupleExpression", _) => match items(cond, "components") {
+            [one] => only_excludes(one, negated, aliases),
+            _ => false,
+        },
+        _ => negated,
+    }
 }
 
-impl<'a> File<'a> {
-    fn new(ast: &'a Value, source: &'a str) -> Self {
-        let mut defs = BTreeMap::new();
-        let mut ids = BTreeSet::new();
-        walk(ast, &mut |x| {
-            ids.extend(node_id(x));
-            if matches!(
-                s(x, "nodeType"),
-                "FunctionDefinition" | "ModifierDefinition"
-            ) && let Some(id) = node_id(x)
-            {
-                defs.insert(id, x);
-            }
-        });
-        Self {
-            defs,
-            ids,
-            source,
-            checked: RefCell::new(BTreeMap::new()),
-        }
-    }
+fn has_placeholder(branch: &Value) -> bool {
+    let mut found = false;
+    walk(branch, &mut |x| {
+        found |= s(x, "nodeType") == "PlaceholderStatement"
+    });
+    found
+}
 
-    // Calls from a body to internal functions of this file. A public one is
-    // an entry point with its own report, and it may be called with the
-    // caller already as the argument it checks (`transferFrom(msg.sender, ...)`).
-    fn local_calls(&self, body: &'a Value) -> Vec<(i64, &'a Value)> {
-        let mut out = Vec::new();
-        walk(body, &mut |x| {
-            if s(x, "nodeType") == "FunctionCall"
-                && let Some(id) = x.get("expression").and_then(referenced)
-                && let Some(def) = self.defs.get(&id)
-                && s(def, "nodeType") == "FunctionDefinition"
-                && matches!(s(def, "visibility"), "internal" | "private")
-            {
-                out.push((id, x));
-            }
-        });
-        out
-    }
+fn returns(branch: &Value) -> bool {
+    let mut found = false;
+    walk(branch, &mut |x| found |= s(x, "nodeType") == "Return");
+    found && !reverts(branch)
+}
 
-    fn has_check(&self, id: i64) -> bool {
-        if let Some(known) = self.checked.borrow().get(&id) {
-            return *known;
-        }
-        // A recursive call is not a check of its own.
-        self.checked.borrow_mut().insert(id, false);
-        let body = self.defs.get(&id).and_then(|d| d.get("body"));
-        let found = body.is_some_and(|b| {
-            !own_checks(b).is_empty() || self.local_calls(b).iter().any(|(c, _)| self.has_check(*c))
-        });
-        self.checked.borrow_mut().insert(id, found);
-        found
-    }
-
-    /// The lines of the caller checks a function or modifier runs in its own
-    /// body: its own, and its calls to functions of this file that check.
-    fn checks(&self, def: &'a Value) -> Vec<usize> {
-        let body = def.get("body").unwrap_or(&Value::Null);
-        let mut out: Vec<usize> = own_checks(body)
-            .iter()
-            .map(|(x, _)| line_of(x, self.source))
-            .chain(
-                self.local_calls(body)
-                    .iter()
-                    .filter(|(id, _)| self.has_check(*id))
-                    .map(|(_, x)| line_of(x, self.source)),
-            )
-            .collect();
-        out.sort_unstable();
-        out.dedup();
-        out
-    }
-
-    // Every declaration the conditions of those checks refer to.
-    fn check_reads(&self, def: &'a Value, seen: &mut BTreeSet<i64>, out: &mut BTreeSet<i64>) {
-        let body = def.get("body").unwrap_or(&Value::Null);
-        for (_, cond) in own_checks(body) {
-            walk(cond.unwrap_or(&Value::Null), &mut |x| {
-                out.extend(referenced(x))
-            });
-        }
-        for (id, _) in self.local_calls(body) {
-            if seen.insert(id)
-                && self.has_check(id)
-                && let Some(d) = self.defs.get(&id)
-            {
-                self.check_reads(d, seen, out);
-            }
-        }
-    }
-
-    // Whether code reached from here calls something defined in another file.
-    fn calls_outside(&self, def: &'a Value) -> bool {
-        let mut seen = BTreeSet::new();
-        let mut todo = vec![def];
-        while let Some(d) = todo.pop() {
-            let mut found = false;
-            walk(d.get("body").unwrap_or(&Value::Null), &mut |x| {
-                if s(x, "nodeType") != "FunctionCall" || is_conversion(x) {
-                    return;
-                }
-                // A call into another contract (`token.isMintable()`) is not
-                // inherited code that could check the caller.
-                let Some(id) = x
-                    .get("expression")
-                    .filter(|e| {
-                        s(e, "nodeType") == "Identifier"
-                            || e.pointer("/expression/name").and_then(Value::as_str)
-                                == Some("super")
-                    })
-                    .and_then(referenced)
-                else {
-                    return;
-                };
-                // Builtins such as `require` have negative ids.
-                if id >= 0 && !self.ids.contains(&id) {
-                    found = true;
-                } else if let Some(next) = self.defs.get(&id)
-                    && seen.insert(id)
-                {
-                    todo.push(next);
-                }
-            });
-            if found {
-                return true;
-            }
-        }
-        false
-    }
-
-    /// A modifier of this file restricts who may call when it checks the
-    /// caller, itself or through functions of this file. When it calls code
-    /// from elsewhere that may do the check, its name decides.
-    fn is_gate(&self, modifier: &'a Value) -> bool {
-        node_id(modifier).is_some_and(|id| self.has_check(id))
-            || (self.calls_outside(modifier) && is_gate(s(modifier, "name")))
-    }
+// A statement that reverts whenever it runs.
+fn always_reverts(st: &Value) -> bool {
+    s(st, "nodeType") == "RevertStatement"
+        || (s(st, "nodeType") == "ExpressionStatement"
+            && st
+                .get("expression")
+                .is_some_and(|e| s(e, "nodeType") == "FunctionCall" && callee_name(e) == "revert"))
 }
 
 // What a function definition is. Before solc 0.5 the AST has no `kind`.
@@ -541,21 +523,75 @@ fn kind_of(n: &Value) -> &str {
     }
 }
 
-// The declarations an expression's storage starts from: `a[i].b` -> a.
-fn roots_of(expr: &Value, out: &mut Vec<i64>) {
+fn implemented(f: &Value) -> bool {
+    f.get("implemented")
+        .and_then(Value::as_bool)
+        .unwrap_or_else(|| f.get("body").is_some_and(Value::is_object))
+}
+
+fn params(f: &Value) -> &[Value] {
+    f.get("parameters").map_or(&[], |p| items(p, "parameters"))
+}
+
+fn param_types(f: &Value) -> Vec<&str> {
+    params(f).iter().map(type_string).collect()
+}
+
+// Where storage is written from: `a[i].b` -> a, and `$.b` keeps the member,
+// since `$` may be a pointer to namespaced storage.
+#[derive(Clone, Debug)]
+struct Root {
+    id: Option<i64>,
+    name: String,
+    member: Option<String>,
+    /// `_getStorage().field`: a field of namespaced storage, by struct.
+    slot: Option<String>,
+}
+
+// `_getStorage().field`, a field of the struct a function returned from storage.
+fn slot_member(x: &Value) -> Option<(String, String)> {
+    let base = x.get("expression")?;
+    let ty = type_string(base);
+    (s(x, "nodeType") == "MemberAccess"
+        && s(base, "nodeType") == "FunctionCall"
+        && ty.starts_with("struct ")
+        && ty.contains(" storage"))
+    .then(|| (struct_of(ty), s(x, "memberName").to_string()))
+}
+
+fn roots_of(expr: &Value, out: &mut Vec<Root>) {
     match s(expr, "nodeType") {
-        "Identifier" => out.extend(referenced(expr)),
+        "Identifier" => out.push(Root {
+            id: referenced(expr),
+            name: s(expr, "name").to_string(),
+            member: None,
+            slot: None,
+        }),
         "IndexAccess" | "IndexRangeAccess" => {
             roots_of(expr.get("baseExpression").unwrap_or(&Value::Null), out);
         }
-        "MemberAccess" => roots_of(expr.get("expression").unwrap_or(&Value::Null), out),
+        "MemberAccess" => {
+            let base = expr.get("expression").unwrap_or(&Value::Null);
+            if let Some((slot, member)) = slot_member(expr) {
+                out.push(Root {
+                    id: None,
+                    name: String::new(),
+                    member: Some(member),
+                    slot: Some(slot),
+                });
+            } else if s(base, "nodeType") == "Identifier" {
+                out.push(Root {
+                    id: referenced(base),
+                    name: s(base, "name").to_string(),
+                    member: Some(s(expr, "memberName").to_string()),
+                    slot: None,
+                });
+            } else {
+                roots_of(base, out);
+            }
+        }
         "TupleExpression" => {
-            for c in expr
-                .get("components")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-            {
+            for c in items(expr, "components") {
                 roots_of(c, out);
             }
         }
@@ -563,105 +599,1313 @@ fn roots_of(expr: &Value, out: &mut Vec<i64>) {
     }
 }
 
-// Every declaration a piece of code writes to: assignments, `delete`, `++`
-// and `--`, `push` and `pop`. A local `storage` pointer counts as the
-// variable it points into.
-fn writes_of(body: &Value) -> BTreeSet<i64> {
-    let mut alias: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
-    walk(body, &mut |x| {
-        if s(x, "nodeType") != "VariableDeclarationStatement" {
-            return;
-        }
-        let decls: Vec<&Value> = x
-            .get("declarations")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter(|d| d.is_object())
-            .collect();
-        if let ([d], Some(init)) = (decls.as_slice(), x.get("initialValue"))
-            && s(d, "storageLocation") == "storage"
-            && let Some(id) = node_id(d)
-        {
-            let mut to = Vec::new();
-            roots_of(init, &mut to);
-            alias.insert(id, to);
-        }
-    });
-    let mut direct = Vec::new();
-    walk(body, &mut |x| match s(x, "nodeType") {
-        "Assignment" => roots_of(x.get("leftHandSide").unwrap_or(&Value::Null), &mut direct),
-        "UnaryOperation" if matches!(s(x, "operator"), "delete" | "++" | "--") => {
-            roots_of(x.get("subExpression").unwrap_or(&Value::Null), &mut direct);
-        }
-        "FunctionCall" => {
-            if let Some(e) = x.get("expression")
-                && s(e, "nodeType") == "MemberAccess"
-                && matches!(s(e, "memberName"), "push" | "pop")
-            {
-                roots_of(e.get("expression").unwrap_or(&Value::Null), &mut direct);
+// `struct MultiOwnable.MultiOwnableStorage storage pointer` -> the struct's name.
+fn struct_of(ty: &str) -> String {
+    let ty = ty.strip_prefix("struct ").unwrap_or(ty);
+    ty.split(' ').next().unwrap_or(ty).to_string()
+}
+
+// The declarations made inside one function or modifier.
+#[derive(Default)]
+struct Locals {
+    ids: BTreeSet<i64>,
+    params: Vec<i64>,
+    storage_params: BTreeSet<usize>,
+    /// Local `storage` pointers, with what each points into.
+    pointers: BTreeMap<i64, Vec<Root>>,
+    /// Local `storage` pointers a function call returned: namespaced
+    /// storage (ERC-7201), known by the struct's type.
+    slots: BTreeMap<i64, String>,
+}
+
+impl Locals {
+    fn of(def: &Value) -> Self {
+        let mut out = Self::default();
+        for (j, p) in params(def).iter().enumerate() {
+            let id = node_id(p).unwrap_or(-1);
+            out.params.push(id);
+            if s(p, "storageLocation") == "storage" {
+                out.storage_params.insert(j);
             }
         }
-        _ => {}
-    });
-    // A pointer may point into another pointer; a few hops is plenty.
-    let mut out = BTreeSet::new();
-    let mut todo = direct;
-    for _ in 0..8 {
-        let mut next = Vec::new();
-        for id in todo {
-            match alias.get(&id) {
-                Some(to) => next.extend(to.iter().copied()),
-                None => {
-                    out.insert(id);
+        walk(def, &mut |x| match s(x, "nodeType") {
+            "VariableDeclaration" => out.ids.extend(node_id(x)),
+            "VariableDeclarationStatement" => {
+                let decls: Vec<&Value> = items(x, "declarations")
+                    .iter()
+                    .filter(|d| d.is_object())
+                    .collect();
+                if let ([d], Some(init)) = (decls.as_slice(), x.get("initialValue"))
+                    && s(d, "storageLocation") == "storage"
+                    && let Some(id) = node_id(d)
+                {
+                    let mut to = Vec::new();
+                    roots_of(init, &mut to);
+                    if !to.is_empty() {
+                        out.pointers.insert(id, to);
+                    } else if s(init, "nodeType") == "FunctionCall" {
+                        out.slots.insert(id, struct_of(type_string(d)));
+                    }
+                }
+            }
+            _ => {}
+        });
+        out
+    }
+}
+
+/// A state variable: declared by a contract, or a field of namespaced
+/// storage (`$._roles`).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum VarKey {
+    Var(usize, String),
+    Slot(String, String),
+}
+
+impl VarKey {
+    fn name(&self) -> &str {
+        match self {
+            Self::Var(_, n) | Self::Slot(_, n) => n,
+        }
+    }
+}
+
+#[derive(Default)]
+struct Effects {
+    vars: BTreeSet<VarKey>,
+    /// Written by the function itself, not by what it calls.
+    direct: BTreeSet<VarKey>,
+    /// Its `storage` parameters it writes through.
+    params: BTreeSet<usize>,
+    asm_store: bool,
+}
+
+#[derive(Clone, Copy)]
+struct Def<'a> {
+    node: &'a Value,
+    unit: usize,
+    /// The contract that defines it; none for a free function.
+    con: Option<usize>,
+}
+
+#[derive(Clone)]
+enum Callee<'a> {
+    /// Its code, and the expression passed for each of its parameters.
+    Def(Def<'a>, Vec<&'a Value>),
+    /// Internal code whose source was not found.
+    Unknown(String),
+    /// A builtin, an event, an error, or a call into another contract.
+    Other,
+}
+
+struct Con<'a> {
+    unit: usize,
+    node: &'a Value,
+    name: &'a str,
+    kind: &'a str,
+    is_abstract: bool,
+}
+
+impl<'a> Con<'a> {
+    fn members(&self, t: &'a str) -> impl Iterator<Item = &'a Value> + 'a {
+        items(self.node, "nodes")
+            .iter()
+            .filter(move |n| s(n, "nodeType") == t)
+    }
+}
+
+struct Lin {
+    order: Vec<usize>,
+    unresolved: Vec<String>,
+}
+
+type Ptr = usize;
+
+fn ptr(v: &Value) -> Ptr {
+    std::ptr::from_ref(v) as usize
+}
+
+// C3 merge, as the compiler does it.
+fn merge(mut seqs: Vec<Vec<usize>>) -> Vec<usize> {
+    let mut out = Vec::new();
+    loop {
+        seqs.retain(|q| !q.is_empty());
+        if seqs.is_empty() {
+            return out;
+        }
+        let head = seqs
+            .iter()
+            .map(|q| q[0])
+            .find(|h| !seqs.iter().any(|q| q[1..].contains(h)));
+        let Some(h) = head else {
+            // The compiler would have refused it; keep a stable order.
+            for x in seqs.into_iter().flatten() {
+                if !out.contains(&x) {
+                    out.push(x);
+                }
+            }
+            return out;
+        };
+        out.push(h);
+        for q in &mut seqs {
+            if q[0] == h {
+                q.remove(0);
+            }
+        }
+    }
+}
+
+struct Index<'a> {
+    units: &'a [Unit],
+    by_path: BTreeMap<&'a str, usize>,
+    newlines: Vec<Vec<usize>>,
+    cons: Vec<Con<'a>>,
+    local: Vec<BTreeMap<&'a str, usize>>,
+    imports: Vec<Vec<&'a Value>>,
+    usings: Vec<Vec<&'a Value>>,
+    /// Functions and modifiers by id, per file.
+    decls: Vec<BTreeMap<i64, &'a Value>>,
+    owner: BTreeMap<Ptr, usize>,
+    lins: RefCell<BTreeMap<usize, Rc<Lin>>>,
+    locals: RefCell<BTreeMap<Ptr, Rc<Locals>>>,
+}
+
+impl<'a> Index<'a> {
+    fn new(units: &'a [Unit]) -> Self {
+        let mut ix = Index {
+            units,
+            by_path: BTreeMap::new(),
+            newlines: Vec::new(),
+            cons: Vec::new(),
+            local: Vec::new(),
+            imports: Vec::new(),
+            usings: Vec::new(),
+            decls: Vec::new(),
+            owner: BTreeMap::new(),
+            lins: RefCell::new(BTreeMap::new()),
+            locals: RefCell::new(BTreeMap::new()),
+        };
+        for (u, unit) in units.iter().enumerate() {
+            ix.by_path.entry(unit.path.as_str()).or_insert(u);
+            ix.newlines.push(
+                unit.source
+                    .bytes()
+                    .enumerate()
+                    .filter(|(_, b)| *b == b'\n')
+                    .map(|(i, _)| i)
+                    .collect(),
+            );
+            let mut local = BTreeMap::new();
+            let mut imports = Vec::new();
+            let mut usings = Vec::new();
+            for n in items(&unit.ast, "nodes") {
+                match s(n, "nodeType") {
+                    "ContractDefinition" => {
+                        let c = ix.cons.len();
+                        local.insert(s(n, "name"), c);
+                        for m in items(n, "nodes") {
+                            ix.owner.insert(ptr(m), c);
+                        }
+                        ix.cons.push(Con {
+                            unit: u,
+                            node: n,
+                            name: s(n, "name"),
+                            kind: s(n, "contractKind"),
+                            is_abstract: n.get("abstract") == Some(&Value::Bool(true))
+                                || n.get("fullyImplemented") == Some(&Value::Bool(false)),
+                        });
+                    }
+                    "ImportDirective" => imports.push(n),
+                    "UsingForDirective" => usings.push(n),
+                    _ => {}
+                }
+            }
+            let mut decls = BTreeMap::new();
+            walk(&unit.ast, &mut |x| {
+                if matches!(
+                    s(x, "nodeType"),
+                    "FunctionDefinition" | "ModifierDefinition"
+                ) && let Some(id) = node_id(x)
+                {
+                    decls.insert(id, x);
+                }
+            });
+            ix.local.push(local);
+            ix.imports.push(imports);
+            ix.usings.push(usings);
+            ix.decls.push(decls);
+        }
+        ix
+    }
+
+    fn line(&self, unit: usize, node: &Value) -> usize {
+        let start: usize = s(node, "src")
+            .split(':')
+            .next()
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(0);
+        self.newlines[unit].partition_point(|p| *p < start) + 1
+    }
+
+    fn at(&self, unit: usize, node: &Value) -> String {
+        format!("{}:{}", self.units[unit].path, self.line(unit, node))
+    }
+
+    fn imported(&self, imp: &Value) -> Option<usize> {
+        self.by_path.get(s(imp, "absolutePath")).copied()
+    }
+
+    /// The contract or library a name means in a file: defined there, or
+    /// brought in by its imports. `Alias.Name` goes through `import "x" as Alias`.
+    fn resolve(&self, unit: usize, name: &str) -> Option<usize> {
+        if let Some((alias, rest)) = name.split_once('.') {
+            return self.imports[unit]
+                .iter()
+                .filter(|i| s(i, "unitAlias") == alias)
+                .find_map(|i| self.exposed(self.imported(i)?, rest, &mut BTreeSet::new()));
+        }
+        self.exposed(unit, name, &mut BTreeSet::new())
+    }
+
+    fn exposed(
+        &self,
+        unit: usize,
+        name: &str,
+        seen: &mut BTreeSet<(usize, String)>,
+    ) -> Option<usize> {
+        if !seen.insert((unit, name.to_string())) {
+            return None;
+        }
+        if let Some(c) = self.local[unit].get(name) {
+            return Some(*c);
+        }
+        for imp in &self.imports[unit] {
+            let Some(u) = self.imported(imp) else {
+                continue;
+            };
+            let aliases = items(imp, "symbolAliases");
+            if !aliases.is_empty() {
+                for a in aliases {
+                    let foreign = a.get("foreign").unwrap_or(&Value::Null);
+                    let local = a.get("local").and_then(Value::as_str);
+                    // Old trees give the foreign symbol as a bare id.
+                    let theirs = foreign.get("name").and_then(Value::as_str);
+                    let mine = local.or(theirs);
+                    let found = match (mine, theirs) {
+                        (Some(m), Some(t)) if m == name => self.exposed(u, t, seen),
+                        (Some(m), None) if m == name => self.exposed(u, name, seen),
+                        (None, None) => self.exposed(u, name, seen),
+                        _ => None,
+                    };
+                    if found.is_some() {
+                        return found;
+                    }
+                }
+            } else if s(imp, "unitAlias").is_empty()
+                && let Some(c) = self.exposed(u, name, seen)
+            {
+                return Some(c);
+            }
+        }
+        None
+    }
+
+    /// The linearization: the contract, then its bases, most derived first.
+    fn lin(&self, c: usize) -> Rc<Lin> {
+        if let Some(l) = self.lins.borrow().get(&c) {
+            return Rc::clone(l);
+        }
+        // An inheritance cycle does not compile; this only stops the recursion.
+        self.lins.borrow_mut().insert(
+            c,
+            Rc::new(Lin {
+                order: vec![c],
+                unresolved: vec![],
+            }),
+        );
+        let con = &self.cons[c];
+        let mut unresolved = Vec::new();
+        let mut bases = Vec::new();
+        for b in items(con.node, "baseContracts") {
+            let name = b
+                .pointer("/baseName/name")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            match self.resolve(con.unit, name) {
+                Some(bc) if bc != c => bases.push(bc),
+                _ => unresolved.push(name.to_string()),
+            }
+        }
+        // `contract C is A, B`: B is the more derived.
+        let mut seqs: Vec<Vec<usize>> = Vec::new();
+        for b in bases.iter().rev() {
+            let l = self.lin(*b);
+            unresolved.extend(l.unresolved.iter().cloned());
+            seqs.push(l.order.clone());
+        }
+        seqs.push(bases.iter().rev().copied().collect());
+        let mut order = vec![c];
+        order.extend(merge(seqs));
+        let mut seen = BTreeSet::new();
+        unresolved.retain(|n| seen.insert(n.clone()));
+        let l = Rc::new(Lin { order, unresolved });
+        self.lins.borrow_mut().insert(c, Rc::clone(&l));
+        l
+    }
+
+    fn locals(&self, def: &Value) -> Rc<Locals> {
+        if let Some(l) = self.locals.borrow().get(&ptr(def)) {
+            return Rc::clone(l);
+        }
+        let l = Rc::new(Locals::of(def));
+        self.locals.borrow_mut().insert(ptr(def), Rc::clone(&l));
+        l
+    }
+
+    fn def(&self, node: &'a Value, unit: usize) -> Def<'a> {
+        Def {
+            node,
+            unit,
+            con: self.owner.get(&ptr(node)).copied(),
+        }
+    }
+
+    fn is_library(&self, d: &Def) -> bool {
+        d.con.is_some_and(|c| self.cons[c].kind == "library")
+    }
+}
+
+enum Want<'b> {
+    Types(Vec<&'b str>),
+    Arity(usize),
+}
+
+// What is known about one target contract, with its linearization: virtual
+// calls dispatch differently for each target, so nothing is shared between them.
+struct Ctx<'i, 'a> {
+    ix: &'i Index<'a>,
+    lin: Rc<Lin>,
+    checked: RefCell<BTreeMap<(Ptr, Vec<usize>), bool>>,
+    unknown: RefCell<BTreeMap<Ptr, bool>>,
+    effects: RefCell<BTreeMap<Ptr, Rc<Effects>>>,
+    reads: RefCell<BTreeMap<Ptr, Rc<BTreeSet<VarKey>>>>,
+    calls: RefCell<BTreeMap<Ptr, CallList<'a>>>,
+}
+
+type CallList<'a> = Rc<Vec<(&'a Value, Callee<'a>)>>;
+
+impl<'i, 'a> Ctx<'i, 'a> {
+    fn new(ix: &'i Index<'a>, target: usize) -> Self {
+        Self {
+            ix,
+            lin: ix.lin(target),
+            checked: RefCell::new(BTreeMap::new()),
+            unknown: RefCell::new(BTreeMap::new()),
+            effects: RefCell::new(BTreeMap::new()),
+            reads: RefCell::new(BTreeMap::new()),
+            calls: RefCell::new(BTreeMap::new()),
+        }
+    }
+
+    fn pos(&self, c: usize) -> Option<usize> {
+        self.lin.order.iter().position(|x| *x == c)
+    }
+
+    // Where a call or a modifier made from `d` is looked up: the whole
+    // linearization, or only the library that `d` is part of.
+    fn space(&self, d: &Def) -> Vec<usize> {
+        match d.con {
+            Some(c) if self.pos(c).is_some() => self.lin.order.clone(),
+            Some(c) => vec![c],
+            None => vec![],
+        }
+    }
+
+    fn find_fn(&self, space: &[usize], name: &str, want: &Want) -> Option<Def<'a>> {
+        space.iter().find_map(|c| {
+            let con = &self.ix.cons[*c];
+            con.members("FunctionDefinition")
+                .find(|f| {
+                    s(f, "name") == name
+                        && implemented(f)
+                        && match want {
+                            Want::Types(t) => param_types(f) == *t,
+                            Want::Arity(n) => params(f).len() == *n,
+                        }
+                })
+                .map(|f| Def {
+                    node: f,
+                    unit: con.unit,
+                    con: Some(*c),
+                })
+        })
+    }
+
+    // The libraries attached with `using L for T` where `d` is written.
+    fn usings(&self, d: &Def) -> Vec<usize> {
+        let mut dirs: Vec<(usize, &'a Value)> = self.ix.usings[d.unit]
+            .iter()
+            .map(|u| (d.unit, *u))
+            .collect();
+        let mut cons: Vec<usize> = d.con.into_iter().collect();
+        if d.con.is_some_and(|c| self.pos(c).is_some()) {
+            // Before solc 0.7 a directive was inherited.
+            cons.extend(self.lin.order.iter().copied());
+        }
+        for c in cons {
+            let con = &self.ix.cons[c];
+            dirs.extend(con.members("UsingForDirective").map(|u| (con.unit, u)));
+        }
+        let mut out = Vec::new();
+        for (unit, dir) in dirs {
+            let mut names: Vec<&str> = Vec::new();
+            names.extend(dir.pointer("/libraryName/name").and_then(Value::as_str));
+            for f in items(dir, "functionList") {
+                if let Some((lib, _)) = f
+                    .pointer("/function/name")
+                    .and_then(Value::as_str)
+                    .and_then(|n| n.rsplit_once('.'))
+                {
+                    names.push(lib);
+                }
+            }
+            for n in names {
+                if let Some(c) = self.ix.resolve(unit, n)
+                    && !out.contains(&c)
+                {
+                    out.push(c);
                 }
             }
         }
-        if next.is_empty() {
-            break;
-        }
-        todo = next;
+        out
     }
-    out
-}
 
-// The functions and modifiers of this file that a function runs: the ones it
-// calls by name, the `super` ones, and its modifiers.
-fn callees_of(func: &Value) -> BTreeSet<i64> {
-    let mut out = BTreeSet::new();
-    for m in func
-        .get("modifiers")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        out.extend(m.get("modifierName").and_then(referenced));
+    fn static_decl(&self, d: &Def, e: &Value) -> Option<&'a Value> {
+        referenced(e)
+            .and_then(|id| self.ix.decls[d.unit].get(&id))
+            .copied()
+            .filter(|x| s(x, "nodeType") == "FunctionDefinition")
     }
-    walk(func.get("body").unwrap_or(&Value::Null), &mut |x| {
-        if s(x, "nodeType") != "FunctionCall" {
+
+    fn want(&self, d: &Def, e: &Value, arity: usize) -> Want<'a> {
+        match self.static_decl(d, e) {
+            Some(st) => Want::Types(param_types(st)),
+            None => Want::Arity(arity),
+        }
+    }
+
+    /// What a call made in `d` runs.
+    fn callee(&self, d: &Def<'a>, call: &'a Value) -> Callee<'a> {
+        if s(call, "nodeType") != "FunctionCall"
+            || is_conversion(call)
+            || s(call, "kind") == "structConstructorCall"
+        {
+            return Callee::Other;
+        }
+        let mut e = call.get("expression").unwrap_or(&Value::Null);
+        while s(e, "nodeType") == "FunctionCallOptions" {
+            e = e.get("expression").unwrap_or(&Value::Null);
+        }
+        let ty = type_id(e);
+        let args: Vec<&'a Value> = args_of(call).iter().collect();
+        match s(e, "nodeType") {
+            "Identifier" => {
+                let Some(refd) = referenced(e).filter(|r| *r >= 0) else {
+                    return Callee::Other;
+                };
+                if (!ty.is_empty() && !ty.starts_with("t_function_internal"))
+                    || self.ix.locals(d.node).ids.contains(&refd)
+                {
+                    return Callee::Other;
+                }
+                let name = s(e, "name");
+                if let Some(st) = self.static_decl(d, e) {
+                    let st = self.ix.def(st, d.unit);
+                    let fixed = s(st.node, "visibility") == "private"
+                        || self.ix.is_library(&st)
+                        || st.con.is_none_or(|c| self.pos(c).is_none());
+                    let found = if fixed {
+                        Some(st)
+                    } else {
+                        self.find_fn(&self.space(d), name, &Want::Types(param_types(st.node)))
+                    };
+                    return match found.or(implemented(st.node).then_some(st)) {
+                        Some(f) => Callee::Def(f, args),
+                        None => Callee::Unknown(name.to_string()),
+                    };
+                }
+                match self.find_fn(&self.space(d), name, &Want::Arity(args.len())) {
+                    Some(f) => Callee::Def(f, args),
+                    None => Callee::Unknown(name.to_string()),
+                }
+            }
+            "MemberAccess" => {
+                let base = e.get("expression").unwrap_or(&Value::Null);
+                let member = s(e, "memberName");
+                let bty = type_string(base);
+                if s(base, "name") == "super" || bty.starts_with("type(contract super ") {
+                    let Some(p) = d.con.and_then(|c| self.pos(c)) else {
+                        return Callee::Other;
+                    };
+                    let want = self.want(d, e, args.len());
+                    return match self.find_fn(&self.lin.order[p + 1..], member, &want) {
+                        Some(f) => Callee::Def(f, args),
+                        None => Callee::Unknown(member.to_string()),
+                    };
+                }
+                if bty.starts_with("type(library ") || bty.starts_with("type(contract ") {
+                    let name = match s(base, "nodeType") {
+                        "Identifier" => s(base, "name").to_string(),
+                        _ => arg_text(base, 0),
+                    };
+                    let Some(c) = self.ix.resolve(d.unit, &name) else {
+                        return if bty.starts_with("type(library ") {
+                            Callee::Unknown(member.to_string())
+                        } else {
+                            Callee::Other
+                        };
+                    };
+                    let want = self.want(d, e, args.len());
+                    return match self.find_fn(&[c], member, &want) {
+                        Some(f) => Callee::Def(f, args),
+                        None if self.ix.cons[c].kind == "library" => {
+                            Callee::Unknown(member.to_string())
+                        }
+                        None => Callee::Other,
+                    };
+                }
+                if ty.contains("$bound_to$") || ty.contains("$attached_to$") {
+                    let mut with: Vec<&'a Value> = vec![base];
+                    with.extend(args);
+                    let libs = self.usings(d);
+                    return match self.find_fn(&libs, member, &Want::Arity(with.len())) {
+                        Some(f) => Callee::Def(f, with),
+                        None => Callee::Unknown(member.to_string()),
+                    };
+                }
+                Callee::Other
+            }
+            _ => Callee::Other,
+        }
+    }
+
+    /// What a modifier invocation in `d` runs.
+    fn modifier(&self, d: &Def<'a>, inv: &'a Value) -> Callee<'a> {
+        if s(inv, "kind") == "baseConstructorSpecifier" {
+            return Callee::Other;
+        }
+        let name = inv
+            .pointer("/modifierName/name")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let args: Vec<&'a Value> = args_of(inv).iter().collect();
+        for c in self.space(d) {
+            let con = &self.ix.cons[c];
+            if let Some(m) = con
+                .members("ModifierDefinition")
+                .find(|m| s(m, "name") == name && m.get("body").is_some_and(Value::is_object))
+            {
+                return Callee::Def(
+                    Def {
+                        node: m,
+                        unit: con.unit,
+                        con: Some(c),
+                    },
+                    args,
+                );
+            }
+        }
+        // A base constructor called with its arguments.
+        if self.ix.resolve(d.unit, name).is_some() {
+            return Callee::Other;
+        }
+        Callee::Unknown(name.to_string())
+    }
+
+    fn modifiers(&self, d: &Def<'a>) -> Vec<(&'a Value, Callee<'a>)> {
+        items(d.node, "modifiers")
+            .iter()
+            .map(|m| (m, self.modifier(d, m)))
+            .collect()
+    }
+
+    fn calls(&self, d: &Def<'a>) -> CallList<'a> {
+        if let Some(c) = self.calls.borrow().get(&ptr(d.node)) {
+            return Rc::clone(c);
+        }
+        let mut found = Vec::new();
+        walk(d.node.get("body").unwrap_or(&Value::Null), &mut |x| {
+            if s(x, "nodeType") == "FunctionCall" {
+                found.push(x);
+            }
+        });
+        let list: CallList<'a> =
+            Rc::new(found.into_iter().map(|x| (x, self.callee(d, x))).collect());
+        self.calls
+            .borrow_mut()
+            .insert(ptr(d.node), Rc::clone(&list));
+        list
+    }
+
+    // A public function called from inside is an entry point with its own
+    // report, and it may be called with the caller already as the argument
+    // it checks (`transferFrom(msg.sender, ...)`).
+    fn followed(&self, d: &Def) -> bool {
+        matches!(s(d.node, "visibility"), "internal" | "private")
+            || s(d.node, "nodeType") == "ModifierDefinition"
+            || self.ix.is_library(d)
+    }
+
+    fn aliases(&self, d: &Def, taint: &[usize]) -> BTreeSet<i64> {
+        let loc = self.ix.locals(d.node);
+        let seeds = taint
+            .iter()
+            .filter_map(|j| loc.params.get(*j).copied())
+            .collect();
+        caller_aliases(d.node.get("body").unwrap_or(&Value::Null), &seeds)
+    }
+
+    fn taint(args: &[&Value], aliases: &BTreeSet<i64>) -> Vec<usize> {
+        (0..args.len())
+            .filter(|j| is_caller(args[*j], aliases))
+            .collect()
+    }
+
+    /// Whether `d` checks the caller, itself or through what it runs, when
+    /// the parameters at `taint` hold the caller.
+    fn has_check(&self, d: &Def<'a>, taint: &[usize]) -> bool {
+        let key = (ptr(d.node), taint.to_vec());
+        if let Some(known) = self.checked.borrow().get(&key) {
+            return *known;
+        }
+        // A recursive call is not a check of its own.
+        self.checked.borrow_mut().insert(key.clone(), false);
+        let aliases = self.aliases(d, taint);
+        let body = d.node.get("body").unwrap_or(&Value::Null);
+        let found = !own_checks(body, &aliases).is_empty()
+            || self
+                .modifiers(d)
+                .iter()
+                .any(|(m, c)| self.is_gate_call(m, c, &aliases))
+            || self
+                .calls(d)
+                .iter()
+                .any(|(_, c)| self.call_checks(c, &aliases));
+        self.checked.borrow_mut().insert(key, found);
+        found
+    }
+
+    // A call that checks the caller. A `_checkRole` or `_checkOwner` whose
+    // source was not found is one: the standard libraries check it there.
+    fn call_checks(&self, c: &Callee<'a>, aliases: &BTreeSet<i64>) -> bool {
+        match c {
+            Callee::Def(cd, args) => {
+                self.followed(cd) && self.has_check(cd, &Self::taint(args, aliases))
+            }
+            Callee::Unknown(n) => matches!(n.as_str(), "_checkRole" | "_checkOwner"),
+            Callee::Other => false,
+        }
+    }
+
+    /// A modifier restricts who may call when it checks the caller. Only
+    /// when code it runs could not be found does its name decide.
+    fn is_gate_call(&self, inv: &Value, c: &Callee<'a>, aliases: &BTreeSet<i64>) -> bool {
+        match c {
+            Callee::Def(m, args) => {
+                self.has_check(m, &Self::taint(args, aliases))
+                    || (self.reaches_unknown(m) && is_gate(s(m.node, "name")))
+            }
+            Callee::Unknown(_) => is_gate(&modifier_text(inv)),
+            Callee::Other => false,
+        }
+    }
+
+    fn reaches_unknown(&self, d: &Def<'a>) -> bool {
+        if let Some(known) = self.unknown.borrow().get(&ptr(d.node)) {
+            return *known;
+        }
+        self.unknown.borrow_mut().insert(ptr(d.node), false);
+        let found = self
+            .modifiers(d)
+            .iter()
+            .chain(self.calls(d).iter())
+            .any(|(_, c)| match c {
+                Callee::Unknown(_) => true,
+                Callee::Def(cd, _) => self.followed(cd) && self.reaches_unknown(cd),
+                Callee::Other => false,
+            });
+        self.unknown.borrow_mut().insert(ptr(d.node), found);
+        found
+    }
+
+    /// The lines of the caller checks a function runs in its own body: its
+    /// own, and its calls to code that checks.
+    fn check_lines(&self, d: &Def<'a>) -> Vec<usize> {
+        let aliases = self.aliases(d, &[]);
+        let body = d.node.get("body").unwrap_or(&Value::Null);
+        let mut out: Vec<usize> = own_checks(body, &aliases)
+            .iter()
+            .map(|(x, _)| self.ix.line(d.unit, x))
+            .chain(
+                self.calls(d)
+                    .iter()
+                    .filter(|(_, c)| self.call_checks(c, &aliases))
+                    .map(|(x, _)| self.ix.line(d.unit, x)),
+            )
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
+    // The state variable a name in `d` means: declared by the nearest
+    // contract from `d`'s own up the linearization.
+    fn state_var(&self, d: &Def, name: &str, writable: bool) -> Option<VarKey> {
+        let p = self.pos(d.con?)?;
+        self.lin.order[p..].iter().find_map(|c| {
+            self.ix.cons[*c]
+                .members("VariableDeclaration")
+                .find(|v| {
+                    s(v, "name") == name
+                        && (writable
+                            || (v.get("constant") != Some(&Value::Bool(true))
+                                && s(v, "mutability") != "immutable"))
+                })
+                .map(|_| VarKey::Var(*c, name.to_string()))
+        })
+    }
+
+    // What storage a root in `d` stands for: a state variable, or one of
+    // `d`'s own `storage` parameters.
+    fn place(
+        &self,
+        d: &Def,
+        loc: &Locals,
+        r: &Root,
+        hops: usize,
+        out: &mut Vec<Result<VarKey, usize>>,
+    ) {
+        if let (Some(slot), Some(m)) = (&r.slot, &r.member) {
+            out.push(Ok(VarKey::Slot(slot.clone(), m.clone())));
             return;
         }
-        let Some(e) = x.get("expression") else { return };
-        match s(e, "nodeType") {
-            "Identifier" => out.extend(referenced(e)),
-            "MemberAccess"
-                if e.pointer("/expression/name").and_then(Value::as_str) == Some("super") =>
-            {
-                out.extend(referenced(e));
+        match r.id {
+            Some(id) if loc.pointers.contains_key(&id) => {
+                if hops > 0 {
+                    for to in &loc.pointers[&id] {
+                        self.place(d, loc, to, hops - 1, out);
+                    }
+                }
+            }
+            Some(id) if loc.slots.contains_key(&id) => {
+                if let Some(m) = &r.member {
+                    out.push(Ok(VarKey::Slot(loc.slots[&id].clone(), m.clone())));
+                }
+            }
+            Some(id) if loc.ids.contains(&id) => {
+                if let Some(j) = loc.params.iter().position(|p| *p == id)
+                    && loc.storage_params.contains(&j)
+                {
+                    out.push(Err(j));
+                }
+            }
+            _ => out.extend(self.state_var(d, &r.name, true).map(Ok)),
+        }
+    }
+
+    fn effects(&self, d: &Def<'a>) -> Rc<Effects> {
+        if let Some(e) = self.effects.borrow().get(&ptr(d.node)) {
+            return Rc::clone(e);
+        }
+        self.effects
+            .borrow_mut()
+            .insert(ptr(d.node), Rc::new(Effects::default()));
+        let loc = self.ix.locals(d.node);
+        let mut out = Effects::default();
+        let mut roots = Vec::new();
+        walk(
+            d.node.get("body").unwrap_or(&Value::Null),
+            &mut |x| match s(x, "nodeType") {
+                "Assignment" => roots_of(x.get("leftHandSide").unwrap_or(&Value::Null), &mut roots),
+                "UnaryOperation" if matches!(s(x, "operator"), "delete" | "++" | "--") => {
+                    roots_of(x.get("subExpression").unwrap_or(&Value::Null), &mut roots);
+                }
+                "FunctionCall" => {
+                    if let Some(e) = x.get("expression")
+                        && s(e, "nodeType") == "MemberAccess"
+                        && matches!(s(e, "memberName"), "push" | "pop")
+                    {
+                        roots_of(e.get("expression").unwrap_or(&Value::Null), &mut roots);
+                    }
+                }
+                "InlineAssembly" => {
+                    let names = yul_calls(x);
+                    out.asm_store |= names.contains("sstore") || names.contains("tstore");
+                }
+                _ => {}
+            },
+        );
+        let mut places = Vec::new();
+        for r in &roots {
+            self.place(d, &loc, r, 8, &mut places);
+        }
+        let mods = self.modifiers(d);
+        let calls = self.calls(d);
+        for (_, c) in mods.iter().chain(calls.iter()) {
+            let Callee::Def(cd, args) = c else { continue };
+            let e = self.effects(cd);
+            out.vars.extend(e.vars.iter().cloned());
+            out.asm_store |= e.asm_store;
+            // A callee that writes through a `storage` parameter writes
+            // whatever was passed for it: `set.add(x)` writes `set`.
+            for j in &e.params {
+                let mut rs = Vec::new();
+                roots_of(args.get(*j).copied().unwrap_or(&Value::Null), &mut rs);
+                for r in &rs {
+                    self.place(d, &loc, r, 8, &mut places);
+                }
+            }
+        }
+        for p in places {
+            match p {
+                Ok(k) => {
+                    out.direct.insert(k.clone());
+                    out.vars.insert(k);
+                }
+                Err(j) => {
+                    out.params.insert(j);
+                }
+            }
+        }
+        let e = Rc::new(out);
+        self.effects.borrow_mut().insert(ptr(d.node), Rc::clone(&e));
+        e
+    }
+
+    // The state an expression of `d` reads, and everything read by code it calls.
+    fn reads_in(&self, d: &Def<'a>, expr: &'a Value, out: &mut BTreeSet<VarKey>) {
+        let loc = self.ix.locals(d.node);
+        walk(expr, &mut |x| match s(x, "nodeType") {
+            "Identifier" => {
+                if !referenced(x).is_some_and(|id| loc.ids.contains(&id))
+                    && let Some(k) = self.state_var(d, s(x, "name"), false)
+                {
+                    out.insert(k);
+                }
+            }
+            "MemberAccess" => {
+                if let Some((slot, m)) = slot_member(x) {
+                    out.insert(VarKey::Slot(slot, m));
+                } else if let Some(base) = x.get("expression")
+                    && let Some(ty) = referenced(base).and_then(|id| loc.slots.get(&id))
+                {
+                    out.insert(VarKey::Slot(ty.clone(), s(x, "memberName").to_string()));
+                }
+            }
+            "FunctionCall" => {
+                if let Callee::Def(cd, _) = self.callee(d, x) {
+                    out.extend(self.reads_all(&cd).iter().cloned());
+                }
             }
             _ => {}
+        });
+    }
+
+    fn reads_all(&self, d: &Def<'a>) -> Rc<BTreeSet<VarKey>> {
+        if let Some(r) = self.reads.borrow().get(&ptr(d.node)) {
+            return Rc::clone(r);
         }
+        self.reads
+            .borrow_mut()
+            .insert(ptr(d.node), Rc::new(BTreeSet::new()));
+        let mut out = BTreeSet::new();
+        self.reads_in(d, d.node.get("body").unwrap_or(&Value::Null), &mut out);
+        let r = Rc::new(out);
+        self.reads.borrow_mut().insert(ptr(d.node), Rc::clone(&r));
+        r
+    }
+
+    // The state the caller checks of `d` read, through what it runs.
+    fn check_reads(
+        &self,
+        d: &Def<'a>,
+        taint: &[usize],
+        seen: &mut BTreeSet<Ptr>,
+        out: &mut BTreeSet<VarKey>,
+    ) {
+        if !seen.insert(ptr(d.node)) {
+            return;
+        }
+        let aliases = self.aliases(d, taint);
+        let body = d.node.get("body").unwrap_or(&Value::Null);
+        for (_, cond) in own_checks(body, &aliases) {
+            if let Some(cond) = cond {
+                self.reads_in(d, cond, out);
+            }
+        }
+        for (inv, c) in self.modifiers(d).iter().chain(self.calls(d).iter()) {
+            if let Callee::Def(cd, args) = c {
+                let t = Self::taint(args, &aliases);
+                let checks = if s(inv, "nodeType") == "ModifierInvocation" {
+                    self.is_gate_call(inv, c, &aliases)
+                } else {
+                    self.followed(cd) && self.has_check(cd, &t)
+                };
+                if checks {
+                    self.check_reads(cd, &t, seen, out);
+                }
+            }
+        }
+    }
+}
+
+/// The contracts of the project, read from the syntax trees of its files
+/// and of every file they import. `is_project` tells the project's own
+/// non-test files: their contracts are reported, the rest is what they use.
+pub fn read(units: &[Unit], is_project: &dyn Fn(&str) -> bool) -> Vec<Contract> {
+    let ix = Index::new(units);
+    let project = |c: usize| is_project(&units[ix.cons[c].unit].path);
+    let concrete: Vec<usize> = (0..ix.cons.len())
+        .filter(|c| project(*c) && ix.cons[*c].kind == "contract" && !ix.cons[*c].is_abstract)
+        .collect();
+    let inherited: BTreeSet<usize> = concrete
+        .iter()
+        .flat_map(|c| ix.lin(*c).order[1..].to_vec())
+        .collect();
+    // An abstract contract that nothing of the project builds on is still
+    // what the project ships, for someone else to inherit.
+    let mut targets: Vec<usize> = (0..ix.cons.len())
+        .filter(|c| {
+            project(*c)
+                && ix.cons[*c].kind == "contract"
+                && (!ix.cons[*c].is_abstract || !inherited.contains(c))
+        })
+        .collect();
+    targets.sort_by_key(|c| (ix.cons[*c].unit, ix.cons[*c].name));
+    targets
+        .into_iter()
+        .map(|t| analyse(&ix, t, &project))
+        .collect()
+}
+
+fn analyse(ix: &Index, t: usize, project: &dyn Fn(usize) -> bool) -> Contract {
+    let cx = Ctx::new(ix, t);
+    let con = &ix.cons[t];
+    let order = cx.lin.order.clone();
+    // The most derived implementation of each signature is the one that runs.
+    let mut sigs = BTreeSet::new();
+    let mut entries: Vec<Def> = Vec::new();
+    for c in &order {
+        let k = &ix.cons[*c];
+        if k.kind == "library" {
+            continue;
+        }
+        for f in k.members("FunctionDefinition") {
+            let kind = kind_of(f);
+            if !matches!(kind, "function" | "fallback" | "receive")
+                || !matches!(s(f, "visibility"), "external" | "public")
+                || !implemented(f)
+            {
+                continue;
+            }
+            let name = if kind == "function" {
+                s(f, "name")
+            } else {
+                kind
+            };
+            let sig: Vec<String> = std::iter::once(name)
+                .chain(param_types(f))
+                .map(str::to_string)
+                .collect();
+            if sigs.insert(sig) && matches!(s(f, "stateMutability"), "nonpayable" | "payable") {
+                entries.push(Def {
+                    node: f,
+                    unit: k.unit,
+                    con: Some(*c),
+                });
+            }
+        }
+    }
+    let mut functions = Vec::new();
+    // Each gate the contract uses, with what its check reads.
+    let mut guard_reads: Vec<(String, BTreeSet<VarKey>)> = Vec::new();
+    for d in &entries {
+        let mut gates = Vec::new();
+        let mut others = Vec::new();
+        for (inv, c) in cx.modifiers(d) {
+            let text = modifier_text(inv);
+            if !cx.is_gate_call(inv, &c, &BTreeSet::new()) {
+                if !matches!(c, Callee::Other) {
+                    others.push(text);
+                }
+                continue;
+            }
+            gates.push(text);
+            if let Callee::Def(m, args) = &c {
+                let name = s(m.node, "name").to_string();
+                if !guard_reads.iter().any(|(g, _)| *g == name) {
+                    let mut reads = BTreeSet::new();
+                    let t = Ctx::taint(args, &BTreeSet::new());
+                    cx.check_reads(m, &t, &mut BTreeSet::new(), &mut reads);
+                    guard_reads.push((name, reads));
+                }
+            }
+        }
+        let kind = kind_of(d.node);
+        let c = d.con.unwrap_or(t);
+        functions.push(Function {
+            name: if kind == "function" {
+                s(d.node, "name")
+            } else {
+                kind
+            }
+            .to_string(),
+            file: ix.units[d.unit].path.clone(),
+            line: ix.line(d.unit, d.node),
+            contract: ix.cons[c].name.to_string(),
+            library: !project(c),
+            gates,
+            others,
+            checks: cx.check_lines(d),
+            asm_store: cx.effects(d).asm_store,
+        });
+    }
+    let writers_of = |keys: &BTreeSet<VarKey>| -> Vec<String> {
+        uniq(
+            entries
+                .iter()
+                .zip(&functions)
+                .filter(|(d, _)| cx.effects(d).vars.iter().any(|k| keys.contains(k)))
+                .map(|(_, f)| f.name.as_str()),
+        )
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+    };
+    let mut constructors = Vec::new();
+    let mut inner = Vec::new();
+    for c in &order {
+        let k = &ix.cons[*c];
+        for f in k.members("FunctionDefinition") {
+            let d = Def {
+                node: f,
+                unit: k.unit,
+                con: Some(*c),
+            };
+            match kind_of(f) {
+                "constructor" => constructors.push(d),
+                "function" if !entries.iter().any(|e| std::ptr::eq(e.node, f)) => inner.push(d),
+                _ => {}
+            }
+        }
+    }
+    // Namespaced storage (ERC-7201): the structs that code of the lineage
+    // reaches through a pointer some function returns.
+    // Each is shown with the most basic contract of its file that uses it.
+    let mut slots: BTreeMap<String, usize> = BTreeMap::new();
+    for c in &order {
+        for n in items(ix.cons[*c].node, "nodes") {
+            for st in ix.locals(n).slots.values() {
+                slots.insert(st.clone(), *c);
+            }
+            walk(n, &mut |x| {
+                if let Some((st, _)) = slot_member(x) {
+                    slots.insert(st, *c);
+                }
+            });
+        }
+    }
+    let mut state = Vec::new();
+    for c in order.iter().filter(|c| project(**c)) {
+        let k = &ix.cons[*c];
+        let mut vars: Vec<(String, VarKey, &Value)> = k
+            .members("VariableDeclaration")
+            .map(|v| {
+                (
+                    s(v, "name").to_string(),
+                    VarKey::Var(*c, s(v, "name").to_string()),
+                    v,
+                )
+            })
+            .collect();
+        let structs = k
+            .members("StructDefinition")
+            .map(|st| (format!("{}.{}", k.name, s(st, "name")), st))
+            .chain(
+                items(&ix.units[k.unit].ast, "nodes")
+                    .iter()
+                    .filter(|n| s(n, "nodeType") == "StructDefinition")
+                    .map(|st| (s(st, "name").to_string(), st)),
+            );
+        for (name, st) in structs {
+            if slots.get(&name) == Some(c) {
+                for m in items(st, "members") {
+                    vars.push((
+                        format!("{}.{}", s(st, "name"), s(m, "name")),
+                        VarKey::Slot(name.clone(), s(m, "name").to_string()),
+                        m,
+                    ));
+                }
+            }
+        }
+        for (name, key, v) in vars {
+            let keys = BTreeSet::from([key.clone()]);
+            let writers = writers_of(&keys);
+            let hooks = if writers.is_empty() {
+                uniq(
+                    inner
+                        .iter()
+                        .filter(|d| {
+                            project(d.con.unwrap_or(t)) && cx.effects(d).direct.contains(&key)
+                        })
+                        .map(|d| s(d.node, "name")),
+                )
+                .into_iter()
+                .map(str::to_string)
+                .collect()
+            } else {
+                vec![]
+            };
+            state.push(StateVar {
+                name,
+                file: ix.units[k.unit].path.clone(),
+                line: ix.line(k.unit, v),
+                contract: k.name.to_string(),
+                fixed: if v.get("constant") == Some(&Value::Bool(true)) {
+                    "constant"
+                } else if s(v, "mutability") == "immutable" {
+                    "immutable"
+                } else {
+                    ""
+                },
+                writers,
+                hooks,
+                at_deployment: v.get("value").is_some_and(Value::is_object)
+                    || constructors
+                        .iter()
+                        .any(|d| cx.effects(d).vars.contains(&key)),
+            });
+        }
+    }
+    // Gates that read the same state are decided by the same writers.
+    let mut guards: Vec<Guard> = Vec::new();
+    for (gate, reads) in guard_reads {
+        let vars: Vec<String> = uniq(reads.iter().map(VarKey::name))
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        match guards.iter_mut().find(|g| g.vars == vars) {
+            Some(g) => g.gate = format!("{}, {gate}", g.gate),
+            None => guards.push(Guard {
+                writers: writers_of(&reads),
+                vars,
+                gate,
+            }),
+        }
+    }
+    let upgrade_gate = order.iter().find_map(|c| {
+        let k = &ix.cons[*c];
+        let f = k
+            .members("FunctionDefinition")
+            .find(|f| s(f, "name") == "_authorizeUpgrade" && implemented(f))?;
+        let d = Def {
+            node: f,
+            unit: k.unit,
+            con: Some(*c),
+        };
+        let gates: Vec<String> = cx
+            .modifiers(&d)
+            .iter()
+            .filter(|(inv, c)| cx.is_gate_call(inv, c, &BTreeSet::new()))
+            .map(|(inv, _)| modifier_text(inv))
+            .collect();
+        let who = if !gates.is_empty() {
+            gates.join(" and ")
+        } else if cx.has_check(&d, &[]) {
+            "a check in its body".to_string()
+        } else {
+            "nobody in particular".to_string()
+        };
+        Some((who, ix.at(k.unit, f)))
     });
-    out
+    let mut calls = BTreeMap::new();
+    let mut low_level: Vec<(String, String)> = Vec::new();
+    for c in &order {
+        let k = &ix.cons[*c];
+        if matches!(k.kind, "library" | "interface") {
+            continue;
+        }
+        for n in items(k.node, "nodes").iter().filter(|n| {
+            matches!(
+                s(n, "nodeType"),
+                "FunctionDefinition" | "ModifierDefinition"
+            )
+        }) {
+            walk(n.get("body").unwrap_or(&Value::Null), &mut |x| {
+                note_call(ix, k.unit, x, &mut calls, &mut low_level);
+            });
+        }
+    }
+    let found: BTreeSet<&str> = functions.iter().map(|f| f.name.as_str()).collect();
+    let abi = ix.units[con.unit]
+        .abis
+        .get(con.name)
+        .cloned()
+        .unwrap_or(Value::Null);
+    let mut not_found: Vec<String> = entry_points(&abi)
+        .into_iter()
+        .filter(|n| !found.contains(n.as_str()))
+        .collect();
+    for f in abi.as_array().into_iter().flatten() {
+        let kind = s(f, "type");
+        if matches!(kind, "fallback" | "receive")
+            && !found.contains(kind)
+            && !not_found.iter().any(|n| n == kind)
+        {
+            not_found.push(kind.to_string());
+        }
+    }
+    Contract {
+        name: con.name.to_string(),
+        file: ix.units[con.unit].path.clone(),
+        bases: items(con.node, "baseContracts")
+            .iter()
+            .filter_map(|b| b.pointer("/baseName/name").and_then(Value::as_str))
+            .map(str::to_string)
+            .collect(),
+        lineage: order[1..]
+            .iter()
+            .map(|c| ix.cons[*c].name.to_string())
+            .collect(),
+        unresolved: cx.lin.unresolved.clone(),
+        state,
+        functions,
+        not_found,
+        calls,
+        upgrade_gate,
+        low_level,
+        guards,
+    }
 }
 
 // Records a call into another contract, or a low-level call, at node `x`.
 fn note_call(
+    ix: &Index,
+    unit: usize,
     x: &Value,
-    source: &str,
-    calls: &mut BTreeMap<String, usize>,
-    low_level: &mut Vec<(String, usize)>,
+    calls: &mut BTreeMap<String, String>,
+    low_level: &mut Vec<(String, String)>,
 ) {
+    if s(x, "nodeType") == "InlineAssembly" {
+        let names = yul_calls(x);
+        for kind in ["call", "delegatecall", "staticcall"] {
+            let entry = (format!("{kind} (assembly)"), ix.at(unit, x));
+            if names.contains(kind) && !low_level.contains(&entry) {
+                low_level.push(entry);
+            }
+        }
+        return;
+    }
     if s(x, "nodeType") != "FunctionCall" {
         return;
     }
@@ -686,262 +1930,25 @@ fn note_call(
         return;
     }
     let member = s(e, "memberName");
-    let on = e
-        .pointer("/expression/typeDescriptions/typeString")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    if let Some(target) = on.strip_prefix("contract ") {
+    let mut on = type_string(e.get("expression").unwrap_or(&Value::Null));
+    // `SafeERC20.safeTransfer(token, ...)` calls the token.
+    if on.starts_with("type(library ")
+        && let Some(first) = args_of(x).first()
+    {
+        on = type_string(first);
+    }
+    // `super.f()` is inherited code, not another contract.
+    if let Some(target) = on
+        .strip_prefix("contract ")
+        .filter(|t| !t.starts_with("super "))
+    {
         calls
             .entry(format!("{target}.{member}"))
-            .or_insert_with(|| line_of(x, source));
+            .or_insert_with(|| ix.at(unit, x));
     } else if matches!(member, "call" | "delegatecall" | "staticcall") && on.starts_with("address")
     {
-        low_level.push((member.to_string(), line_of(x, source)));
+        low_level.push((member.to_string(), ix.at(unit, x)));
     }
-}
-
-/// The contract a compiled artifact is named after, read from its syntax
-/// tree. None for an interface, a library, or an artifact built without one
-/// (`forge build --ast` writes it).
-pub fn read(artifact: &Value, name: &str, source: &str) -> Option<Contract> {
-    let ast = artifact.get("ast")?;
-    let def = ast
-        .get("nodes")?
-        .as_array()?
-        .iter()
-        .find(|n| s(n, "nodeType") == "ContractDefinition" && s(n, "name") == name)?;
-    if s(def, "contractKind") != "contract" || def.get("abstract") == Some(&Value::Bool(true)) {
-        return None;
-    }
-    let bases = def
-        .get("baseContracts")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|b| b.pointer("/baseName/name").and_then(Value::as_str))
-        .map(str::to_string)
-        .collect();
-    let file = File::new(ast, source);
-    // The modifiers written in this file. Two contracts of one file can each
-    // define `auth`, so an invocation is resolved by id when it has one.
-    let by_name: BTreeMap<&str, &Value> = file
-        .defs
-        .values()
-        .filter(|d| s(d, "nodeType") == "ModifierDefinition")
-        .map(|d| (s(d, "name"), *d))
-        .collect();
-    let local_modifier = |m: &Value| -> Option<&Value> {
-        match m.get("modifierName").and_then(referenced) {
-            Some(id) => file
-                .defs
-                .get(&id)
-                .copied()
-                .filter(|d| s(d, "nodeType") == "ModifierDefinition"),
-            None => by_name
-                .get(m.pointer("/modifierName/name").and_then(Value::as_str)?)
-                .copied(),
-        }
-    };
-    let gate = |m: &Value| match local_modifier(m) {
-        Some(d) => file.is_gate(d),
-        None => is_gate(&modifier_text(m)),
-    };
-    // What each function and modifier of this file writes and runs, by id.
-    let mut code: BTreeMap<i64, (BTreeSet<i64>, BTreeSet<i64>)> = BTreeMap::new();
-    walk(ast, &mut |x| {
-        if matches!(
-            s(x, "nodeType"),
-            "FunctionDefinition" | "ModifierDefinition"
-        ) && let Some(id) = node_id(x)
-        {
-            code.insert(
-                id,
-                (
-                    writes_of(x.get("body").unwrap_or(&Value::Null)),
-                    callees_of(x),
-                ),
-            );
-        }
-    });
-    // Everything a function writes, through whatever of this file it runs.
-    let reach = |start: i64| -> BTreeSet<i64> {
-        let mut seen = BTreeSet::new();
-        let mut written = BTreeSet::new();
-        let mut todo = vec![start];
-        while let Some(id) = todo.pop() {
-            if !seen.insert(id) {
-                continue;
-            }
-            if let Some((w, c)) = code.get(&id) {
-                written.extend(w.iter().copied());
-                todo.extend(c.iter().copied());
-            }
-        }
-        written
-    };
-    let mut functions = Vec::new();
-    // For every function of the contract: its name, whether it is an entry
-    // point, and what it writes.
-    let mut writers: Vec<(String, bool, BTreeSet<i64>, BTreeSet<i64>)> = Vec::new();
-    let mut calls = BTreeMap::new();
-    let mut low_level = Vec::new();
-    let mut upgrade_gate = None;
-    // Each gate of this file the contract uses, with what its check reads.
-    let mut guarded: Vec<(String, BTreeSet<i64>)> = Vec::new();
-    for n in def
-        .get("nodes")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        // A modifier's own calls into other contracts count too: the check
-        // "is the caller an admin of that token" is a call to the token.
-        if s(n, "nodeType") == "ModifierDefinition" {
-            walk(n.get("body").unwrap_or(&Value::Null), &mut |x| {
-                note_call(x, source, &mut calls, &mut low_level);
-            });
-        }
-        if s(n, "nodeType") != "FunctionDefinition" {
-            continue;
-        }
-        let mut gates = Vec::new();
-        let mut others = Vec::new();
-        for m in n
-            .get("modifiers")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            if !gate(m) {
-                others.push(modifier_text(m));
-                continue;
-            }
-            gates.push(modifier_text(m));
-            if let Some(d) = local_modifier(m)
-                && !guarded.iter().any(|(g, _)| g == s(d, "name"))
-            {
-                let mut reads = BTreeSet::new();
-                file.check_reads(d, &mut BTreeSet::new(), &mut reads);
-                guarded.push((s(d, "name").to_string(), reads));
-            }
-        }
-        if s(n, "name") == "_authorizeUpgrade" {
-            upgrade_gate = Some((
-                if gates.is_empty() {
-                    "nobody in particular".to_string()
-                } else {
-                    gates.join(" and ")
-                },
-                line_of(n, source),
-            ));
-        }
-        walk(n.get("body").unwrap_or(&Value::Null), &mut |x| {
-            note_call(x, source, &mut calls, &mut low_level);
-        });
-        let outside = matches!(s(n, "visibility"), "external" | "public");
-        let changes = matches!(s(n, "stateMutability"), "nonpayable" | "payable");
-        let kind = kind_of(n);
-        let entry = matches!(kind, "function" | "fallback" | "receive") && outside && changes;
-        let name = match kind {
-            "function" => s(n, "name"),
-            k => k,
-        };
-        if let Some(id) = node_id(n) {
-            let direct = code.get(&id).map(|c| c.0.clone()).unwrap_or_default();
-            writers.push((name.to_string(), entry, reach(id), direct));
-        }
-        if entry {
-            functions.push(Function {
-                name: name.to_string(),
-                line: line_of(n, source),
-                gates,
-                others,
-                checks: file.checks(n),
-            });
-        }
-    }
-    let mut state = Vec::new();
-    for v in def
-        .get("nodes")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|v| s(v, "nodeType") == "VariableDeclaration")
-    {
-        let Some(id) = node_id(v) else { continue };
-        let fixed = if v.get("constant") == Some(&Value::Bool(true)) {
-            "constant"
-        } else if s(v, "mutability") == "immutable" {
-            "immutable"
-        } else {
-            ""
-        };
-        let by_entry: Vec<String> = uniq(
-            writers
-                .iter()
-                .filter(|(_, entry, reached, _)| *entry && reached.contains(&id))
-                .map(|(name, ..)| name.as_str()),
-        )
-        .into_iter()
-        .map(str::to_string)
-        .collect();
-        // A function that writes it without being reached from an entry point
-        // of this contract runs when inherited code calls it.
-        let hooks: Vec<String> = writers
-            .iter()
-            .filter(|(name, entry, _, direct)| {
-                !*entry
-                    && name != "constructor"
-                    && direct.contains(&id)
-                    && !writers
-                        .iter()
-                        .any(|(_, e, reached, _)| *e && reached.contains(&id))
-            })
-            .map(|(name, ..)| name.clone())
-            .collect();
-        state.push(StateVar {
-            name: s(v, "name").to_string(),
-            line: line_of(v, source),
-            fixed,
-            writers: by_entry,
-            hooks,
-            in_constructor: writers
-                .iter()
-                .any(|(name, _, reached, _)| name == "constructor" && reached.contains(&id)),
-        });
-    }
-    let guards = guarded
-        .into_iter()
-        .map(|(g, reads)| {
-            let vars = def
-                .get("nodes")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter(|v| s(v, "nodeType") == "VariableDeclaration")
-                .filter(|v| node_id(v).is_some_and(|id| reads.contains(&id)))
-                .map(|v| s(v, "name").to_string())
-                .collect();
-            (g, vars)
-        })
-        .collect();
-    let own: BTreeSet<&str> = functions.iter().map(|f| f.name.as_str()).collect();
-    let inherited = entry_points(artifact)
-        .into_iter()
-        .filter(|n| !own.contains(n.as_str()))
-        .collect();
-    Some(Contract {
-        name: name.to_string(),
-        file: s(ast, "absolutePath").to_string(),
-        bases,
-        state,
-        functions,
-        inherited,
-        calls,
-        upgrade_gate,
-        low_level,
-        guards,
-    })
 }
 
 /// Something the code implies that a person should decide on: an assumption
@@ -993,31 +2000,79 @@ fn gate_part(gate: &str) -> String {
     }
 }
 
-impl Contract {
-    fn at(&self, line: usize) -> String {
-        format!("{}:{line}", self.file)
+impl Function {
+    fn at(&self) -> String {
+        format!("{}:{}", self.file, self.line)
     }
 
-    fn has_base(&self, part: &str) -> bool {
-        self.bases.iter().any(|b| b.contains(part))
+    fn is_initializer(&self) -> bool {
+        self.others.iter().any(|m| m.starts_with("initializer"))
     }
 
-    // Who gets through a function: its gates, or where its body checks.
-    fn who(&self, f: &Function) -> String {
-        if !f.gates.is_empty() {
-            f.gates.join(", ")
-        } else if !f.checks.is_empty() {
+    // Who gets through: its gates, or where its body checks.
+    fn who(&self) -> String {
+        if !self.gates.is_empty() {
+            self.gates.join(", ")
+        } else if !self.checks.is_empty() {
             format!(
                 "checks the caller at {}",
-                f.checks
+                self.checks
                     .iter()
-                    .map(|l| self.at(*l))
+                    .map(|l| format!("{}:{l}", self.file))
                     .collect::<Vec<_>>()
                     .join(", ")
             )
         } else {
             "anyone".to_string()
         }
+    }
+
+    // One line of the report.
+    fn line(&self) -> String {
+        let mut line = format!("  {}:{} {}", self.file, self.line, self.name);
+        line.push_str(&if self.gates.is_empty() {
+            " - anyone".to_string()
+        } else {
+            format!(" - {}", self.gates.join(", "))
+        });
+        if !self.checks.is_empty() {
+            let at: Vec<String> = self.checks.iter().map(|l| format!(":{l}")).collect();
+            line.push_str(&format!(", checks the caller at {}", at.join(", ")));
+        }
+        if self.asm_store {
+            line.push_str(", writes storage in assembly");
+        }
+        if !self.others.is_empty() {
+            line.push_str(&format!(" [{}]", self.others.join(", ")));
+        }
+        line
+    }
+}
+
+impl Contract {
+    // Unresolved bases count too: their name is all that is known of them.
+    fn has_base(&self, part: &str) -> bool {
+        self.lineage
+            .iter()
+            .chain(&self.unresolved)
+            .any(|b| b.contains(part))
+    }
+
+    // `Ownable`, `OwnableUpgradeable`, `Ownable2Step`; not `MultiOwnable`.
+    fn has_standard(&self, prefix: &str) -> bool {
+        self.lineage
+            .iter()
+            .chain(&self.unresolved)
+            .any(|b| b.starts_with(prefix))
+    }
+
+    fn own(&self) -> impl Iterator<Item = &Function> {
+        self.functions.iter().filter(|f| f.contract == self.name)
+    }
+
+    // Its own functions and those of the project's own bases.
+    fn of_project(&self) -> impl Iterator<Item = &Function> {
+        self.functions.iter().filter(|f| !f.library)
     }
 
     pub fn candidates(&self) -> Vec<Candidate> {
@@ -1041,18 +2096,17 @@ impl Contract {
                     "Nothing in the code limits what a caller that passes {gate} does with {}. Who holds it, and how that key is protected, is outside the code.",
                     names.join(", ")
                 ),
-                evidence: fs.iter().map(|f| self.at(f.line)).collect(),
+                evidence: fs.iter().map(|f| f.at()).collect(),
             });
         }
         let gated: Vec<&Function> = self
-            .functions
-            .iter()
+            .of_project()
             .filter(|f| !f.gates.is_empty() || !f.checks.is_empty())
             .collect();
         if !gated.is_empty() {
             let each: Vec<String> = gated
                 .iter()
-                .map(|f| format!("{} ({})", f.name, self.who(f)))
+                .map(|f| format!("{} ({})", f.name, f.who()))
                 .collect();
             out.push(Candidate {
                 invariant: true,
@@ -1064,21 +2118,17 @@ impl Contract {
                     "Call each from an address that holds nothing and expect a revert: {}.",
                     uniq(each.iter().map(String::as_str)).join("; ")
                 ),
-                evidence: gated.iter().map(|f| self.at(f.line)).collect(),
+                evidence: gated.iter().map(|f| f.at()).collect(),
             });
         }
-        // Who passes a gate of this file is itself state: whoever writes it
-        // decides who gets through.
-        for (gate, vars) in &self.guards {
-            let writers = uniq(
-                self.state
-                    .iter()
-                    .filter(|v| vars.contains(&v.name))
-                    .flat_map(|v| v.writers.iter().map(String::as_str)),
-            );
-            let (Some(first), false) = (vars.first(), writers.is_empty()) else {
+        // Who passes a gate is itself state: whoever writes it decides who
+        // gets through.
+        let mut decided: BTreeSet<&str> = BTreeSet::new();
+        for g in &self.guards {
+            let (Some(first), false) = (g.vars.first(), g.writers.is_empty()) else {
                 continue;
             };
+            let writers: Vec<&str> = g.writers.iter().map(String::as_str).collect();
             let fs: Vec<&Function> = self
                 .functions
                 .iter()
@@ -1086,26 +2136,30 @@ impl Contract {
                 .collect();
             let each: Vec<String> = fs
                 .iter()
-                .map(|f| format!("{} ({})", f.name, self.who(f)))
+                .map(|f| format!("{} ({})", f.name, f.who()))
                 .collect();
+            decided.extend(g.vars.iter().map(String::as_str));
             out.push(Candidate {
                 invariant: false,
                 id: format!("asm.{k}.{}", id_part(first)),
                 title: format!(
-                    "{c}: {} {} who passes {gate} ({})",
+                    "{c}: {} {} who passes {} ({})",
                     some(&writers),
                     if writers.len() == 1 { "decides" } else { "decide" },
-                    vars.join(", ")
+                    g.gate,
+                    g.vars.join(", ")
                 ),
                 detail: format!(
-                    "{gate} lets through whoever {} records, and these can change it: {}. Each is only as safe as who can call it.",
-                    vars.join(", "),
+                    "{} lets through whoever {} records, and these can change it: {}. Each is only as safe as who can call it.",
+                    g.gate,
+                    g.vars.join(", "),
                     uniq(each.iter().map(String::as_str)).join("; ")
                 ),
-                evidence: fs.iter().map(|f| self.at(f.line)).collect(),
+                evidence: fs.iter().map(|f| f.at()).collect(),
             });
         }
-        if self.has_base("AccessControl") {
+        // Only when the code did not show who writes the roles.
+        if self.has_standard("AccessControl") && !decided.contains("_roles") {
             out.push(Candidate {
                 invariant: false,
                 id: format!("asm.{k}.role-admin"),
@@ -1114,7 +2168,7 @@ impl Contract {
                 evidence: vec![self.file.clone()],
             });
         }
-        if self.has_base("Ownable") {
+        if self.has_standard("Ownable") && !decided.contains("_owner") {
             out.push(Candidate {
                 invariant: false,
                 id: format!("asm.{k}.owner-transfer"),
@@ -1126,56 +2180,43 @@ impl Contract {
         for f in self
             .functions
             .iter()
-            .filter(|f| f.gates.is_empty() && f.others.iter().any(|m| m.starts_with("initializer")))
+            .filter(|f| f.gates.is_empty() && f.is_initializer())
         {
             out.push(Candidate {
                 invariant: false,
                 id: format!("asm.{k}.{}", id_part(&f.name)),
                 title: format!("{c}: {} was called by the deployer before anyone else could", f.name),
                 detail: "It has no access check and runs once: whoever calls it first sets the roles. Check the deployment transaction of each proxy.".into(),
-                evidence: vec![self.at(f.line)],
+                evidence: vec![f.at()],
             });
         }
-        if let Some((gate, line)) = &self.upgrade_gate {
+        if let Some((gate, at)) = &self.upgrade_gate {
             out.push(Candidate {
                 invariant: false,
                 id: format!("asm.{k}.upgrade"),
                 title: format!("{c}: whoever passes {gate} can replace all of its logic"),
                 detail: "The contract is upgradeable: an upgrade can change every rule the other nodes rely on, so each of them rests on this.".into(),
-                evidence: vec![self.at(*line)],
+                evidence: vec![at.clone()],
             });
         }
+        // Its own functions keep the rule they always had: no gate. An
+        // inherited one is open only when it checks nothing either.
         let open: Vec<&Function> = self
             .functions
             .iter()
             .filter(|f| {
-                f.gates.is_empty() && !f.others.iter().any(|m| m.starts_with("initializer"))
+                f.gates.is_empty()
+                    && !f.is_initializer()
+                    && (f.contract == self.name || f.checks.is_empty())
             })
             .collect();
-        // Inherited functions that the standard libraries gate themselves, or
-        // that only let a caller give up its own role.
-        const GATED_UPSTREAM: [&str; 8] = [
-            "grantRole",
-            "revokeRole",
-            "renounceRole",
-            "upgradeTo",
-            "upgradeToAndCall",
-            "transferOwnership",
-            "renounceOwnership",
-            "acceptOwnership",
-        ];
-        let inherited_open: Vec<&str> = self
-            .inherited
-            .iter()
-            .map(String::as_str)
-            .filter(|n| !GATED_UPSTREAM.contains(n))
-            .collect();
-        if !open.is_empty() || !inherited_open.is_empty() {
+        if !open.is_empty() || !self.not_found.is_empty() {
             let names = uniq(
                 open.iter()
                     .map(|f| f.name.as_str())
-                    .chain(inherited_open.iter().copied()),
+                    .chain(self.not_found.iter().map(String::as_str)),
             );
+            let lines: Vec<String> = open.iter().filter(|f| !f.library).map(|f| f.at()).collect();
             out.push(Candidate {
                 invariant: true,
                 id: format!("inv.{k}.books"),
@@ -1184,18 +2225,18 @@ impl Contract {
                     "Callable without a role of this contract's own: {}. This is the surface an invariant test's handler has to cover.",
                     names.join(", ")
                 ),
-                evidence: if open.is_empty() {
+                evidence: if lines.is_empty() {
                     vec![self.file.clone()]
                 } else {
-                    open.iter().map(|f| self.at(f.line)).collect()
+                    lines
                 },
             });
         }
         // One assumption per contract it calls into, naming what it calls.
-        let mut by_target: BTreeMap<&str, Vec<(&str, usize)>> = BTreeMap::new();
-        for (call, line) in &self.calls {
+        let mut by_target: BTreeMap<&str, Vec<(&str, &str)>> = BTreeMap::new();
+        for (call, at) in &self.calls {
             let (target, member) = call.split_once('.').unwrap_or((call, ""));
-            by_target.entry(target).or_default().push((member, *line));
+            by_target.entry(target).or_default().push((member, at));
         }
         for (target, members) in &by_target {
             out.push(Candidate {
@@ -1206,16 +2247,20 @@ impl Contract {
                     uniq(members.iter().map(|(m, _)| *m)).join(", ")
                 ),
                 detail: "The contract calls into another one and takes what it does and returns on trust. Which contract is at that address is set at deployment or by an admin.".into(),
-                evidence: members.iter().map(|(_, l)| self.at(*l)).collect(),
+                evidence: members.iter().map(|(_, at)| (*at).to_string()).collect(),
             });
         }
-        for (kind, line) in &self.low_level {
+        let mut by_kind: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+        for (kind, at) in &self.low_level {
+            by_kind.entry(kind).or_default().push(at.clone());
+        }
+        for (kind, at) in by_kind {
             out.push(Candidate {
                 invariant: false,
-                id: format!("asm.{k}.low-level-{kind}"),
+                id: format!("asm.{k}.low-level-{}", id_part(kind)),
                 title: format!("{c}: the target of its {kind} is trusted"),
                 detail: "A low-level call runs whatever code is at the target address.".into(),
-                evidence: vec![self.at(*line)],
+                evidence: at,
             });
         }
         if self.has_base("ERC20") {
@@ -1244,36 +2289,65 @@ impl Contract {
         out
     }
 
+    /// The names of the functions of its own and of the project's bases,
+    /// then those it takes from libraries or could not resolve.
+    pub fn names(&self) -> (Vec<String>, Vec<String>) {
+        let own: Vec<&str> = uniq(self.of_project().map(|f| f.name.as_str()));
+        let rest: Vec<&str> = uniq(
+            self.functions
+                .iter()
+                .filter(|f| f.library)
+                .map(|f| f.name.as_str())
+                .chain(self.not_found.iter().map(String::as_str)),
+        )
+        .into_iter()
+        .filter(|n| !own.contains(n))
+        .collect();
+        (
+            own.into_iter().map(str::to_string).collect(),
+            rest.into_iter().map(str::to_string).collect(),
+        )
+    }
+
     /// The facts, for a person or an agent to read before proposing anything.
     pub fn report(&self) -> String {
         let mut out = vec![format!("{} ({})", self.name, self.file)];
         if !self.bases.is_empty() {
             out.push(format!("  inherits: {}", self.bases.join(", ")));
         }
-        for f in &self.functions {
-            let mut line = format!("  {}:{} {}", self.file, f.line, f.name);
-            line.push_str(&if f.gates.is_empty() {
-                " - anyone".to_string()
+        out.extend(self.own().map(Function::line));
+        out.extend(
+            self.of_project()
+                .filter(|f| f.contract != self.name)
+                .map(|f| format!("{} (from {})", f.line(), f.contract)),
+        );
+        let mut from_libs: Vec<&Function> = self.functions.iter().filter(|f| f.library).collect();
+        from_libs.sort_by(|a, b| a.name.cmp(&b.name));
+        let libs = uniq_owned(from_libs.into_iter().map(|f| {
+            if !f.gates.is_empty() {
+                format!("{} - {}", f.name, f.gates.join(", "))
+            } else if !f.checks.is_empty() {
+                format!("{} - checks the caller", f.name)
             } else {
-                format!(" - {}", f.gates.join(", "))
-            });
-            if !f.checks.is_empty() {
-                let at: Vec<String> = f.checks.iter().map(|l| format!(":{l}")).collect();
-                line.push_str(&format!(", checks the caller at {}", at.join(", ")));
+                f.name.clone()
             }
-            if !f.others.is_empty() {
-                line.push_str(&format!(" [{}]", f.others.join(", ")));
-            }
-            out.push(line);
+        }));
+        if !libs.is_empty() {
+            out.push(format!("  from libraries: {}", libs.join(", ")));
         }
-        if !self.inherited.is_empty() {
-            out.push(format!(
-                "  inherited, callable: {}",
-                self.inherited.join(", ")
-            ));
+        if !self.not_found.is_empty() {
+            out.push(if self.unresolved.is_empty() {
+                format!("  not resolved: {}", self.not_found.join(", "))
+            } else {
+                format!(
+                    "  not resolved (source of a base contract was not found: {}): {}",
+                    self.unresolved.join(", "),
+                    self.not_found.join(", ")
+                )
+            });
         }
         for v in &self.state {
-            let how = if !v.fixed.is_empty() {
+            let mut how = if !v.fixed.is_empty() {
                 v.fixed.to_string()
             } else if !v.writers.is_empty() {
                 format!("written by {}", v.writers.join(", "))
@@ -1282,27 +2356,46 @@ impl Contract {
                     "written inside {} (run by inherited code)",
                     v.hooks.join(", ")
                 )
-            } else if v.in_constructor {
-                "set in the constructor, never after".to_string()
+            } else if v.at_deployment {
+                "set at deployment, never after".to_string()
             } else {
                 "never written by this contract's own code".to_string()
             };
+            if v.at_deployment
+                && v.fixed.is_empty()
+                && (!v.writers.is_empty() || !v.hooks.is_empty())
+            {
+                how.push_str(", set at deployment");
+            }
+            let from = if v.contract == self.name {
+                String::new()
+            } else {
+                format!(" (from {})", v.contract)
+            };
             out.push(format!(
-                "  {}:{} state {} - {how}",
-                self.file, v.line, v.name
+                "  {}:{} state {} - {how}{from}",
+                v.file, v.line, v.name
             ));
         }
-        if let Some((gate, line)) = &self.upgrade_gate {
-            out.push(format!("  {}:{line} upgradeable by {gate}", self.file));
+        if let Some((gate, at)) = &self.upgrade_gate {
+            out.push(format!("  {at} upgradeable by {gate}"));
         }
-        for (call, line) in &self.calls {
-            out.push(format!("  {}:{line} calls {call}", self.file));
+        for (call, at) in &self.calls {
+            out.push(format!("  {at} calls {call}"));
         }
-        for (kind, line) in &self.low_level {
-            out.push(format!("  {}:{line} low-level {kind}", self.file));
+        for (kind, at) in &self.low_level {
+            out.push(format!("  {at} low-level {kind}"));
         }
         out.join("\n")
     }
+}
+
+fn uniq_owned(names: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    names
+        .into_iter()
+        .filter(|n| seen.insert(n.clone()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -1310,8 +2403,30 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn unit(path: &str, nodes: Vec<Value>, abis: Value, source: &str) -> Unit {
+        Unit {
+            path: path.to_string(),
+            ast: json!({ "absolutePath": path, "nodes": nodes }),
+            abis: abis
+                .as_object()
+                .into_iter()
+                .flatten()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            source: source.to_string(),
+        }
+    }
+
+    fn project(f: &str) -> bool {
+        f.starts_with("src/")
+    }
+
+    fn named<'a>(cs: &'a [Contract], name: &str) -> &'a Contract {
+        cs.iter().find(|c| c.name == name).expect(name)
+    }
+
     // The shape solc writes, cut down to what is read.
-    fn artifact() -> (Value, &'static str) {
+    fn token() -> Contract {
         let source = "contract Token {\n  function mint() {}\n  function pause() {}\n  function sweep() {}\n  function _authorizeUpgrade() {}\n}\n";
         let at = |needle: &str| format!("{}:1:0", source.find(needle).expect("in source"));
         let gate = |role: &str| {
@@ -1327,34 +2442,32 @@ mod tests {
             "src": at("function sweep"),
             "expression": { "nodeType": "MemberAccess", "memberName": "latestAnswer",
                 "expression": { "typeDescriptions": { "typeString": "contract IOracle" } } } }] });
-        let ast = json!({ "absolutePath": "src/Token.sol", "nodes": [
-            { "nodeType": "ContractDefinition", "name": "IOracle", "contractKind": "interface", "nodes": [] },
-            { "nodeType": "ContractDefinition", "name": "Token", "contractKind": "contract", "abstract": false,
+        let nodes = vec![
+            json!({ "nodeType": "ContractDefinition", "name": "IOracle", "contractKind": "interface", "nodes": [] }),
+            json!({ "nodeType": "ContractDefinition", "name": "Token", "contractKind": "contract", "abstract": false,
               "baseContracts": [{ "baseName": { "name": "ERC20Upgradeable" } }, { "baseName": { "name": "UUPSUpgradeable" } }],
               "nodes": [
                 func("mint", "public", json!([gate("MINTER_ROLE")]), json!({})),
                 func("pause", "external", json!([gate("PAUSER_ROLE"), { "modifierName": { "name": "nonReentrant" } }]), json!({})),
                 func("sweep", "external", json!([]), oracle_call),
                 func("_authorizeUpgrade", "internal", json!([gate("UPGRADER_ROLE")]), json!({})),
-              ] }
-        ]});
-        let abi = json!([
+              ] }),
+        ];
+        let abi = json!({ "Token": [
             { "type": "function", "name": "mint", "stateMutability": "nonpayable" },
             { "type": "function", "name": "pause", "stateMutability": "nonpayable" },
             { "type": "function", "name": "sweep", "stateMutability": "nonpayable" },
             { "type": "function", "name": "transfer", "stateMutability": "nonpayable" },
             { "type": "function", "name": "balanceOf", "stateMutability": "view" }
-        ]);
-        (
-            json!({ "ast": ast, "abi": abi, "bytecode": { "object": "0x60" } }),
-            source,
-        )
+        ]});
+        let cs = read(&[unit("src/Token.sol", nodes, abi, source)], &project);
+        assert_eq!(cs.len(), 1, "an interface is no target");
+        cs[0].clone()
     }
 
     #[test]
     fn reads_who_may_call_what_and_where() {
-        let (a, source) = artifact();
-        let c = read(&a, "Token", source).expect("contract");
+        let c = token();
         assert_eq!(c.file, "src/Token.sol");
         let got: Vec<(&str, usize, Vec<String>)> = c
             .functions
@@ -1370,10 +2483,33 @@ mod tests {
             ]
         );
         assert_eq!(c.functions[1].others, vec!["nonReentrant"]);
-        assert_eq!(c.inherited, vec!["transfer"]);
-        assert_eq!(c.upgrade_gate, Some(("onlyRole(UPGRADER_ROLE)".into(), 5)));
-        assert_eq!(c.calls.get("IOracle.latestAnswer"), Some(&4));
-        assert!(read(&a, "IOracle", source).is_none());
+        assert_eq!(
+            c.upgrade_gate,
+            Some(("onlyRole(UPGRADER_ROLE)".into(), "src/Token.sol:5".into()))
+        );
+        assert_eq!(
+            c.calls.get("IOracle.latestAnswer").map(String::as_str),
+            Some("src/Token.sol:4")
+        );
+    }
+
+    #[test]
+    fn an_unresolved_base_leaves_its_functions_to_the_abi_with_a_notice() {
+        let c = token();
+        assert_eq!(c.unresolved, vec!["ERC20Upgradeable", "UUPSUpgradeable"]);
+        assert_eq!(c.not_found, vec!["transfer"]);
+        let report = c.report();
+        assert!(
+            report.contains("  not resolved (source of a base contract was not found: ERC20Upgradeable, UUPSUpgradeable): transfer\n"),
+            "{report}"
+        );
+        assert_eq!(c.names().1, vec!["transfer"]);
+        let books = c
+            .candidates()
+            .into_iter()
+            .find(|k| k.id == "inv.token.books")
+            .expect("books");
+        assert!(books.detail.contains("sweep, transfer"), "{}", books.detail);
     }
 
     #[test]
@@ -1382,41 +2518,39 @@ mod tests {
         // No `referencedDeclaration` on the invocations: found by name.
         let modifier = |name: &str, body: Value| json!({ "nodeType": "ModifierDefinition", "id": name.len(), "name": name, "body": body });
         let uses = |name: &str| json!({ "modifierName": { "name": name }, "arguments": [] });
-        let ast = json!({ "absolutePath": "src/C.sol", "nodes": [
-            { "nodeType": "ContractDefinition", "name": "C", "contractKind": "contract", "nodes": [
-                // Named like a gate, but it only checks its argument.
-                modifier("onlyMintableToken", json!({ "x": { "nodeType": "Identifier", "name": "token" } })),
-                // Named like a gate, but it only calls another contract.
-                modifier("onlyListed", json!({ "x": { "nodeType": "FunctionCall",
-                    "expression": { "nodeType": "MemberAccess", "memberName": "isListed", "referencedDeclaration": 999,
-                        "expression": { "nodeType": "Identifier", "name": "registry" } } } })),
-                // Not named like one, but it checks msg.sender.
-                modifier("keeper", json!({ "x": { "nodeType": "FunctionCall", "src": "0:1:0",
-                    "expression": { "nodeType": "Identifier", "name": "require" },
-                    "arguments": [{ "nodeType": "MemberAccess", "memberName": "sender",
-                        "expression": { "nodeType": "Identifier", "name": "msg" } }] } })),
-                { "nodeType": "FunctionDefinition", "kind": "function", "name": "f", "visibility": "external",
-                  "stateMutability": "nonpayable", "src": "15:1:0", "body": {},
-                  "modifiers": [uses("onlyMintableToken"), uses("onlyListed"), uses("keeper"), uses("onlyOwner"),
-                    uses("onlyInitializing"), uses("restricted")] }
-            ] }
-        ]});
-        let a = json!({ "ast": ast, "abi": [], "bytecode": { "object": "0x60" } });
-        let c = read(&a, "C", source).expect("contract");
+        let nodes = vec![
+            json!({ "nodeType": "ContractDefinition", "name": "C", "contractKind": "contract", "nodes": [
+            // Named like a gate, but it only checks its argument.
+            modifier("onlyMintableToken", json!({ "x": { "nodeType": "Identifier", "name": "token" } })),
+            // Named like a gate, but it only calls another contract.
+            modifier("onlyListed", json!({ "x": { "nodeType": "FunctionCall",
+                "expression": { "nodeType": "MemberAccess", "memberName": "isListed", "referencedDeclaration": 999,
+                    "expression": { "nodeType": "Identifier", "name": "registry" } } } })),
+            // Not named like one, but it checks msg.sender.
+            modifier("keeper", json!({ "x": { "nodeType": "FunctionCall", "src": "0:1:0",
+                "expression": { "nodeType": "Identifier", "name": "require" },
+                "arguments": [{ "nodeType": "MemberAccess", "memberName": "sender",
+                    "expression": { "nodeType": "Identifier", "name": "msg" } }] } })),
+            { "nodeType": "FunctionDefinition", "kind": "function", "name": "f", "visibility": "external",
+              "stateMutability": "nonpayable", "src": "15:1:0", "body": {},
+              "modifiers": [uses("onlyMintableToken"), uses("onlyListed"), uses("keeper"), uses("onlyOwner"),
+                uses("onlyInitializing"), uses("restricted")] }
+        ] }),
+        ];
+        let cs = read(&[unit("src/C.sol", nodes, json!({}), source)], &project);
         assert_eq!(
-            c.functions[0].gates,
+            cs[0].functions[0].gates,
             vec!["keeper", "onlyOwner", "restricted"]
         );
         assert_eq!(
-            c.functions[0].others,
+            cs[0].functions[0].others,
             vec!["onlyMintableToken", "onlyListed", "onlyInitializing"]
         );
     }
 
     #[test]
     fn says_what_can_change_each_state_variable() {
-        let source = "contract C {}\n";
-        let ident = |id: i64| json!({ "nodeType": "Identifier", "referencedDeclaration": id });
+        let ident = |id: i64, name: &str| json!({ "nodeType": "Identifier", "name": name, "referencedDeclaration": id });
         let assign = |target: Value| json!({ "nodeType": "Assignment", "leftHandSide": target });
         let var = |id: i64, name: &str, extra: Value| {
             let mut v = json!({ "nodeType": "VariableDeclaration", "stateVariable": true,
@@ -1435,54 +2569,58 @@ mod tests {
         let through_pointer = json!({ "statements": [
             { "nodeType": "VariableDeclarationStatement",
               "declarations": [{ "nodeType": "VariableDeclaration", "id": 20, "storageLocation": "storage" }],
-              "initialValue": { "nodeType": "IndexAccess", "baseExpression": ident(2) } },
-            assign(json!({ "nodeType": "MemberAccess", "memberName": "amount", "expression": ident(20) }))
+              "initialValue": { "nodeType": "IndexAccess", "baseExpression": ident(2, "minted") } },
+            assign(json!({ "nodeType": "MemberAccess", "memberName": "amount", "expression": ident(20, "c") }))
         ]});
         let calls_account = json!({ "statements": [
-            { "nodeType": "FunctionCall", "expression": ident(12) }
+            { "nodeType": "FunctionCall", "expression": ident(12, "_account") }
         ]});
         let bump = json!({ "statements": [
-            { "nodeType": "UnaryOperation", "operator": "++", "subExpression": ident(5) }
+            { "nodeType": "UnaryOperation", "operator": "++", "subExpression": ident(5, "last") }
         ]});
-        let ast = json!({ "absolutePath": "src/C.sol", "nodes": [
-            { "nodeType": "ContractDefinition", "name": "C", "contractKind": "contract", "nodes": [
-                var(1, "limit", json!({})),
-                var(2, "minted", json!({})),
-                var(3, "ROLE", json!({ "constant": true })),
-                var(4, "owner", json!({})),
-                var(5, "last", json!({})),
-                var(6, "token", json!({ "mutability": "immutable" })),
-                var(7, "unused", json!({})),
-                func(10, "function", "setLimit", "external", json!({ "s": [assign(ident(1))] })),
-                func(11, "function", "mint", "external", calls_account),
-                func(12, "function", "_account", "internal", through_pointer),
-                func(13, "constructor", "", "public", json!({ "s": [assign(ident(4))] })),
-                func(14, "function", "_update", "internal", bump),
-            ] }
-        ]});
-        let a = json!({ "ast": ast, "abi": [], "bytecode": { "object": "0x60" } });
-        let c = read(&a, "C", source).expect("contract");
+        let nodes = vec![
+            json!({ "nodeType": "ContractDefinition", "name": "C", "contractKind": "contract", "nodes": [
+            var(1, "limit", json!({})),
+            var(2, "minted", json!({})),
+            var(3, "ROLE", json!({ "constant": true })),
+            var(4, "owner", json!({})),
+            var(5, "last", json!({})),
+            var(6, "token", json!({ "mutability": "immutable" })),
+            var(7, "unused", json!({})),
+            var(8, "fee", json!({ "value": { "nodeType": "Literal", "value": "5" } })),
+            func(10, "function", "setLimit", "external", json!({ "s": [assign(ident(1, "limit"))] })),
+            func(11, "function", "mint", "external", calls_account),
+            func(12, "function", "_account", "internal", through_pointer),
+            func(13, "constructor", "", "public", json!({ "s": [assign(ident(4, "owner")), assign(ident(1, "limit"))] })),
+            func(14, "function", "_update", "internal", bump),
+        ] }),
+        ];
+        let cs = read(
+            &[unit("src/C.sol", nodes, json!({}), "contract C {}\n")],
+            &project,
+        );
+        let c = &cs[0];
         let by_name = |n: &str| c.state.iter().find(|v| v.name == n).expect("variable");
         assert_eq!(by_name("limit").writers, vec!["setLimit"]);
         assert_eq!(by_name("minted").writers, vec!["mint"]);
         assert_eq!(by_name("ROLE").fixed, "constant");
         assert_eq!(by_name("token").fixed, "immutable");
-        assert!(by_name("owner").in_constructor && by_name("owner").writers.is_empty());
+        assert!(by_name("owner").at_deployment && by_name("owner").writers.is_empty());
         assert_eq!(by_name("last").hooks, vec!["_update"]);
         let report = c.report();
         assert!(
-            report.contains("state limit - written by setLimit"),
+            report.contains("state limit - written by setLimit, set at deployment\n"),
             "{report}"
         );
-        assert!(report.contains("state owner - set in the constructor, never after"));
+        assert!(report.contains("state owner - set at deployment, never after"));
+        assert!(report.contains("state fee - set at deployment, never after"));
         assert!(report.contains("state last - written inside _update (run by inherited code)"));
         assert!(report.contains("state unused - never written by this contract's own code"));
     }
 
     #[test]
     fn turns_the_facts_into_candidates_with_their_lines() {
-        let (a, source) = artifact();
-        let c = read(&a, "Token", source).expect("contract");
+        let c = token();
         let cands = c.candidates();
         let titles: Vec<&str> = cands.iter().map(|c| c.title.as_str()).collect();
         assert!(
@@ -1529,6 +2667,9 @@ mod tests {
     fn bin(op: &str, l: Value, r: Value) -> Value {
         json!({ "nodeType": "BinaryOperation", "operator": op, "leftExpression": l, "rightExpression": r })
     }
+    fn not(e: Value) -> Value {
+        json!({ "nodeType": "UnaryOperation", "operator": "!", "subExpression": e })
+    }
     fn lit(v: &str) -> Value {
         json!({ "nodeType": "Literal", "value": v })
     }
@@ -1536,8 +2677,15 @@ mod tests {
         json!({ "nodeType": "FunctionCall", "kind": "functionCall", "expression": f,
                 "arguments": args, "src": at(line) })
     }
+    fn stmt(e: Value) -> Value {
+        json!({ "nodeType": "ExpressionStatement", "expression": e })
+    }
     fn require(cond: Value, line: usize) -> Value {
         call(id("require", -18), vec![cond], line)
+    }
+    fn revert_if(cond: Value, line: usize) -> Value {
+        json!({ "nodeType": "IfStatement", "src": at(line), "condition": cond,
+                "trueBody": { "nodeType": "RevertStatement" } })
     }
     fn address(arg: Value) -> Value {
         json!({ "nodeType": "FunctionCall", "kind": "typeConversion", "arguments": [arg],
@@ -1556,14 +2704,42 @@ mod tests {
                 "visibility": vis, "stateMutability": "nonpayable", "modifiers": mods,
                 "src": at(line), "body": b })
     }
+    // A function with parameters, each `(id, name, storage)`.
+    fn with_params(mut f: Value, ps: &[(i64, &str, bool)]) -> Value {
+        f["parameters"] = json!({ "parameters": ps.iter().map(|(i, n, st)| json!({
+            "nodeType": "VariableDeclaration", "id": i, "name": n,
+            "storageLocation": if *st { "storage" } else { "default" } })).collect::<Vec<_>>() });
+        f
+    }
+    fn modifier(mid: i64, name: &str, ps: &[(i64, &str, bool)], b: Value) -> Value {
+        let mut m = with_params(json!({}), ps);
+        m["nodeType"] = json!("ModifierDefinition");
+        m["id"] = json!(mid);
+        m["name"] = json!(name);
+        m["body"] = b;
+        m
+    }
     fn uses(name: &str, refd: i64) -> Value {
         json!({ "modifierName": { "nodeType": "Identifier", "name": name, "referencedDeclaration": refd } })
     }
+    fn uses_with(name: &str, args: Vec<Value>) -> Value {
+        json!({ "modifierName": { "nodeType": "IdentifierPath", "name": name }, "arguments": args })
+    }
+    fn contract(name: &str, bases: &[&str], nodes: Vec<Value>) -> Value {
+        json!({ "nodeType": "ContractDefinition", "name": name, "contractKind": "contract",
+                "baseContracts": bases.iter().map(|b| json!({ "baseName": { "name": b } })).collect::<Vec<_>>(),
+                "nodes": nodes })
+    }
+    fn import(path: &str, symbols: &[(&str, Option<&str>)], unit_alias: &str) -> Value {
+        json!({ "nodeType": "ImportDirective", "absolutePath": path, "unitAlias": unit_alias,
+                "symbolAliases": symbols.iter().map(|(f, l)| json!({
+                    "foreign": { "nodeType": "Identifier", "name": f }, "local": l })).collect::<Vec<_>>() })
+    }
+    fn file(path: &str, nodes: Vec<Value>) -> Unit {
+        unit(path, nodes, json!({}), &"x\n".repeat(80))
+    }
     fn read_one(contracts: Vec<Value>, name: &str) -> Contract {
-        let source = "x\n".repeat(80);
-        let ast = json!({ "absolutePath": "src/vat.sol", "nodes": contracts });
-        let a = json!({ "ast": ast, "abi": [], "bytecode": { "object": "0x60" } });
-        read(&a, name, &source).expect("contract")
+        named(&read(&[file("src/vat.sol", contracts)], &project), name).clone()
     }
     fn assign(target: Value) -> Value {
         json!({ "nodeType": "Assignment", "operator": "=", "leftHandSide": target, "rightHandSide": lit("1") })
@@ -1594,7 +2770,7 @@ mod tests {
             func(10, "rely", "external", 10, auth.clone(), body(vec![assign(wards(id("usr", 93)))])),
             func(11, "deny", "external", 11, auth.clone(), body(vec![assign(wards(id("usr", 93)))])),
             func(12, "file", "external", 12, auth.clone(), body(vec![])),
-            func(13, "file", "external", 13, auth.clone(), body(vec![])),
+            with_params(func(13, "file", "external", 13, auth.clone(), body(vec![])), &[(95, "what", false)]),
             func(14, "hope", "external", 14, none.clone(),
                  body(vec![assign(index(index(id("can", 2), sender()), id("usr", 93)))])),
             func(15, "flux", "external", 15, none.clone(),
@@ -1615,12 +2791,20 @@ mod tests {
                                "expression": { "nodeType": "ElementaryTypeNameExpression", "typeName": { "name": "address", "stateMutability": "payable" } } })),
                            require(bin("==", id("u", 82), id("owner", 4)), 27)])),
             func(28, "local", "external", 28, none.clone(),
-                 body(vec![json!({ "nodeType": "ExpressionStatement", "expression": call(id("_auth", 60), vec![], 29) })])),
+                 body(vec![stmt(call(id("_auth", 60), vec![], 29))])),
             func(30, "viaPublic", "external", 30, none.clone(),
                  body(vec![call(id("burn", 19), vec![sender()], 31)])),
+            // The standard check, with its source not found.
             func(32, "std", "external", 32, none.clone(),
-                 body(vec![json!({ "nodeType": "ExpressionStatement", "src": at(33),
-                                   "expression": call(id("_checkOwner", 999), vec![], 33) })])),
+                 body(vec![stmt(call(id("_checkOwner", 999), vec![], 33))])),
+            func(34, "banned", "external", 34, none.clone(),
+                 body(vec![require(not(index(id("banned", 6), sender())), 35),
+                           revert_if(bin("==", sender(), id("bad", 7)), 36)])),
+            func(37, "early", "external", 37, none.clone(),
+                 body(vec![json!({ "nodeType": "IfStatement", "src": at(38),
+                                   "condition": bin("==", sender(), id("owner", 4)),
+                                   "trueBody": { "nodeType": "Return" } }),
+                           json!({ "nodeType": "RevertStatement" })])),
             func(39, "asm", "external", 39, none.clone(), body(vec![assembly])),
         ] })
     }
@@ -1645,6 +2829,9 @@ mod tests {
         assert_eq!(checks("local"), vec![29]);
         assert_eq!(checks("viaPublic"), Vec::<usize>::new());
         assert_eq!(checks("std"), vec![33]);
+        // A deny-list stops some callers and trusts nobody.
+        assert_eq!(checks("banned"), Vec::<usize>::new());
+        assert_eq!(checks("early"), vec![38]);
         assert_eq!(checks("asm"), vec![40]);
         let report = c.report();
         assert!(
@@ -1684,10 +2871,6 @@ mod tests {
             "Vat: whoever passes auth is trusted with rely, deny, file"
         );
         let access = by_id("inv.vat.access");
-        assert_eq!(
-            access.title,
-            "Vat: each restricted function reverts for a caller that should not get through"
-        );
         assert!(
             access
                 .detail
@@ -1707,34 +2890,101 @@ mod tests {
     }
 
     #[test]
-    fn a_local_modifier_is_a_gate_by_what_it_checks_and_resolved_by_id() {
-        let gov = |cid: &str, name: &str, mods: Value| {
-            json!({ "nodeType": "ContractDefinition", "name": cid, "contractKind": "contract", "nodes": [
-                func(1, name, "external", 1, mods, body(vec![])) ] })
+    fn a_modifier_is_a_gate_by_what_it_checks_and_found_through_the_bases() {
+        let call_stmt = |f: Value| stmt(call(f, vec![], 3));
+        let helpers = contract(
+            "Base",
+            &[],
+            vec![
+                // `modifier onlyGov() { _onlyGov(); _; }`
+                modifier(
+                    70,
+                    "onlyGov",
+                    &[],
+                    body(vec![call_stmt(id("_onlyGov", 71))]),
+                ),
+                func(
+                    71,
+                    "_onlyGov",
+                    "internal",
+                    2,
+                    json!([]),
+                    body(vec![require(bin("==", sender(), id("gov", 72)), 3)]),
+                ),
+                // Calls code whose source was not found: its name decides.
+                modifier(
+                    73,
+                    "onlyKeeper",
+                    &[],
+                    body(vec![call_stmt(id("_checkKeeper", 999))]),
+                ),
+                modifier(
+                    74,
+                    "whenReady",
+                    &[],
+                    body(vec![call_stmt(id("_ready", 998))]),
+                ),
+                // `if (msg.sender == admin) { _; } else { _fallback(); }`
+                modifier(
+                    76,
+                    "ifAdmin",
+                    &[],
+                    body(vec![json!({ "nodeType": "IfStatement",
+                "condition": bin("==", sender(), id("admin", 77)),
+                "trueBody": body(vec![json!({ "nodeType": "PlaceholderStatement" })]),
+                "falseBody": body(vec![call_stmt(id("_fallback", 997))]) })]),
+                ),
+            ],
+        );
+        let wards = contract(
+            "Wards",
+            &[],
+            vec![modifier(
+                75,
+                "auth",
+                &[],
+                body(vec![require(
+                    bin("==", index(id("wards", 76), sender()), lit("1")),
+                    4,
+                )]),
+            )],
+        );
+        let live = contract(
+            "Live",
+            &[],
+            vec![modifier(
+                77,
+                "auth",
+                &[],
+                body(vec![require(bin("==", id("live", 78), lit("1")), 5)]),
+            )],
+        );
+        let gates = |base: &str, mods: Value| {
+            let g = contract(
+                "G",
+                &[base],
+                vec![func(1, "f", "external", 1, mods, body(vec![]))],
+            );
+            read_one(vec![helpers.clone(), wards.clone(), live.clone(), g], "G").functions[0]
+                .gates
+                .clone()
         };
-        let modifier = |mid: i64, name: &str, b: Value| json!({ "nodeType": "ModifierDefinition", "id": mid, "name": name, "body": b });
-        let call_stmt = |f: Value| json!({ "nodeType": "ExpressionStatement", "expression": call(f, vec![], 3) });
-        let helpers = json!({ "nodeType": "ContractDefinition", "name": "Base", "contractKind": "contract", "nodes": [
-            // `modifier onlyGov() { _onlyGov(); _; }`
-            modifier(70, "onlyGov", body(vec![call_stmt(id("_onlyGov", 71))])),
-            func(71, "_onlyGov", "internal", 2, json!([]),
-                 body(vec![require(bin("==", sender(), id("gov", 72)), 3)])),
-            // Calls code from another file: its name decides.
-            modifier(73, "onlyKeeper", body(vec![call_stmt(id("_checkKeeper", 999))])),
-            modifier(74, "whenReady", body(vec![call_stmt(id("_ready", 998))])),
-            // Two contracts of one file, each with its own `auth`.
-            modifier(75, "auth", body(vec![require(bin("==", index(id("wards", 76), sender()), lit("1")), 4)])),
-            modifier(77, "auth", body(vec![require(bin("==", id("live", 78), lit("1")), 5)])),
-        ] });
-        let gates = |mods: Value| {
-            let c = read_one(vec![helpers.clone(), gov("G", "f", mods)], "G");
-            c.functions[0].gates.clone()
-        };
-        assert_eq!(gates(json!([uses("onlyGov", 70)])), vec!["onlyGov"]);
-        assert_eq!(gates(json!([uses("onlyKeeper", 73)])), vec!["onlyKeeper"]);
-        assert_eq!(gates(json!([uses("whenReady", 74)])), Vec::<String>::new());
-        assert_eq!(gates(json!([uses("auth", 75)])), vec!["auth"]);
-        assert_eq!(gates(json!([uses("auth", 77)])), Vec::<String>::new());
+        assert_eq!(gates("Base", json!([uses("onlyGov", 70)])), vec!["onlyGov"]);
+        assert_eq!(
+            gates("Base", json!([uses("onlyKeeper", 73)])),
+            vec!["onlyKeeper"]
+        );
+        assert_eq!(
+            gates("Base", json!([uses("whenReady", 74)])),
+            Vec::<String>::new()
+        );
+        assert_eq!(gates("Base", json!([uses("ifAdmin", 76)])), vec!["ifAdmin"]);
+        // Two contracts of one file, each with its own `auth`.
+        assert_eq!(gates("Wards", json!([uses("auth", 75)])), vec!["auth"]);
+        assert_eq!(
+            gates("Live", json!([uses("auth", 75)])),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
@@ -1765,24 +3015,537 @@ mod tests {
         ctor["isConstructor"] = json!(true);
         let mut old_fallback = func(7, "", "public", 7, json!([]), body(vec![]));
         old_fallback.as_object_mut().expect("object").remove("kind");
-        let c = read_one(
+        // `SafeERC20.safeTransfer(token, ...)` is a call to the token.
+        let lib_call = call(
+            json!({ "nodeType": "MemberAccess", "memberName": "safeTransfer",
+                    "expression": { "nodeType": "Identifier", "name": "SafeERC20",
+                                    "typeDescriptions": { "typeString": "type(library SafeERC20)" } } }),
             vec![
-                json!({ "nodeType": "ContractDefinition", "name": "C", "contractKind": "contract", "nodes": [
-            func(1, "sweep", "external", 1, json!([]), body(vec![
-                call(options(member("call", "address")), vec![], 8),
-                call(options(member("price", "contract IOracle")), vec![], 9),
-            ])),
-            fallback, receive, ctor, old_fallback,
-        ] }),
+                json!({ "nodeType": "Identifier", "name": "token", "typeDescriptions": { "typeString": "contract IERC20" } }),
             ],
-            "C",
+            10,
         );
-        assert_eq!(c.calls.get("IOracle.price"), Some(&9));
+        let cs = read(
+            &[file(
+                "src/vat.sol",
+                vec![
+                    contract(
+                        "C",
+                        &[],
+                        vec![
+                            func(
+                                1,
+                                "sweep",
+                                "external",
+                                1,
+                                json!([]),
+                                body(vec![
+                                    call(options(member("call", "address")), vec![], 8),
+                                    call(options(member("price", "contract IOracle")), vec![], 9),
+                                    lib_call,
+                                ]),
+                            ),
+                            fallback,
+                            receive,
+                            ctor,
+                        ],
+                    ),
+                    contract("D", &[], vec![old_fallback]),
+                ],
+            )],
+            &project,
+        );
+        let c = named(&cs, "C");
+        assert_eq!(
+            c.calls.get("IOracle.price").map(String::as_str),
+            Some("src/vat.sol:9")
+        );
+        assert_eq!(
+            c.calls.get("IERC20.safeTransfer").map(String::as_str),
+            Some("src/vat.sol:10")
+        );
         assert_eq!(
             c.low_level,
-            vec![("call".to_string(), 8), ("call".to_string(), 3)]
+            vec![
+                ("call".to_string(), "src/vat.sol:8".to_string()),
+                ("call".to_string(), "src/vat.sol:3".to_string())
+            ]
         );
         let names: Vec<&str> = c.functions.iter().map(|f| f.name.as_str()).collect();
-        assert_eq!(names, vec!["sweep", "fallback", "receive", "fallback"]);
+        assert_eq!(names, vec!["sweep", "fallback", "receive"]);
+        assert_eq!(named(&cs, "D").functions[0].name, "fallback");
+    }
+
+    #[test]
+    fn linearizes_a_diamond_as_the_compiler_does() {
+        let f = |fid: i64, line: usize| func(fid, "f", "external", line, json!([]), body(vec![]));
+        let cs = read(
+            &[file(
+                "src/D.sol",
+                vec![
+                    contract("A", &[], vec![f(1, 1)]),
+                    contract("B", &["A"], vec![f(2, 2)]),
+                    contract("C", &["A"], vec![f(3, 3)]),
+                    // `contract D is B, C`: C is the more derived.
+                    contract("D", &["B", "C"], vec![]),
+                ],
+            )],
+            &project,
+        );
+        let d = named(&cs, "D");
+        assert_eq!(d.lineage, vec!["C", "B", "A"]);
+        assert_eq!(
+            d.functions.len(),
+            1,
+            "the most derived override is the one that runs"
+        );
+        assert_eq!(
+            (d.functions[0].contract.as_str(), d.functions[0].line),
+            ("C", 3)
+        );
+        assert!(
+            d.report().contains("  src/D.sol:3 f - anyone (from C)"),
+            "{}",
+            d.report()
+        );
+        assert_eq!(
+            merge(vec![vec![2, 0], vec![1, 0], vec![2, 1]]),
+            vec![2, 1, 0]
+        );
+    }
+
+    #[test]
+    fn resolves_bases_through_import_aliases() {
+        let open = |fid: i64, name: &str| func(fid, name, "external", 2, json!([]), body(vec![]));
+        let units = [
+            file(
+                "src/T.sol",
+                vec![
+                    import(
+                        "lib/Base.sol",
+                        &[("Base", Some("Parent")), ("Deep", None)],
+                        "",
+                    ),
+                    import("lib/Other.sol", &[], "O"),
+                    contract("T", &["Parent"], vec![]),
+                    contract("U", &["O.Other"], vec![]),
+                    contract("V", &["Deep"], vec![]),
+                ],
+            ),
+            file(
+                "lib/Base.sol",
+                vec![
+                    import("lib/Deep.sol", &[], ""),
+                    contract("Base", &[], vec![open(1, "fromBase")]),
+                ],
+            ),
+            file(
+                "lib/Deep.sol",
+                vec![contract("Deep", &[], vec![open(2, "fromDeep")])],
+            ),
+            file(
+                "lib/Other.sol",
+                vec![contract("Other", &[], vec![open(3, "fromOther")])],
+            ),
+        ];
+        let cs = read(&units, &project);
+        let lin = |n: &str| named(&cs, n).lineage.clone();
+        assert_eq!(lin("T"), vec!["Base"]);
+        assert_eq!(lin("U"), vec!["Other"]);
+        assert_eq!(lin("V"), vec!["Deep"]);
+        assert_eq!(cs.len(), 3, "library contracts are no targets");
+        let t = named(&cs, "T");
+        assert!(t.functions[0].library && t.unresolved.is_empty());
+        assert!(
+            t.report().ends_with("  from libraries: fromBase"),
+            "{}",
+            t.report()
+        );
+        assert_eq!(t.names(), (vec![], vec!["fromBase".to_string()]));
+    }
+
+    // OpenZeppelin-like AccessControl and UUPS in library files.
+    fn access_control() -> Vec<Unit> {
+        let role_of = |refd: i64| id("role", refd);
+        let ac = contract(
+            "AccessControl",
+            &[],
+            vec![
+                json!({ "nodeType": "VariableDeclaration", "id": 100, "name": "_roles", "src": at(2) }),
+                // `modifier onlyRole(bytes32 role) { _checkRole(role); _; }`
+                modifier(
+                    101,
+                    "onlyRole",
+                    &[(102, "role", false)],
+                    body(vec![stmt(call(
+                        id("_checkRole", 103),
+                        vec![role_of(102)],
+                        3,
+                    ))]),
+                ),
+                // `_checkRole(role, _msgSender())`
+                with_params(
+                    func(
+                        103,
+                        "_checkRole",
+                        "internal",
+                        4,
+                        json!([]),
+                        body(vec![stmt(call(
+                            id("_checkRole", 105),
+                            vec![role_of(104), call(id("_msgSender", 990), vec![], 5)],
+                            5,
+                        ))]),
+                    ),
+                    &[(104, "role", false)],
+                ),
+                // `if (!hasRole(role, account)) revert`
+                with_params(
+                    func(
+                        105,
+                        "_checkRole",
+                        "internal",
+                        6,
+                        json!([]),
+                        body(vec![revert_if(
+                            not(call(
+                                id("hasRole", 108),
+                                vec![role_of(106), id("account", 107)],
+                                7,
+                            )),
+                            7,
+                        )]),
+                    ),
+                    &[(106, "role", false), (107, "account", false)],
+                ),
+                {
+                    let mut has = with_params(
+                        func(
+                            108,
+                            "hasRole",
+                            "public",
+                            8,
+                            json!([]),
+                            body(vec![
+                                json!({ "nodeType": "Return", "expression": index(index(id("_roles", 100), role_of(109)), id("account", 110)) }),
+                            ]),
+                        ),
+                        &[(109, "role", false), (110, "account", false)],
+                    );
+                    has["stateMutability"] = json!("view");
+                    has
+                },
+                with_params(
+                    func(
+                        111,
+                        "grantRole",
+                        "public",
+                        9,
+                        json!([uses_with(
+                            "onlyRole",
+                            vec![call(id("getRoleAdmin", 115), vec![role_of(112)], 9)]
+                        )]),
+                        body(vec![assign(index(
+                            index(id("_roles", 100), role_of(112)),
+                            id("account", 113),
+                        ))]),
+                    ),
+                    &[(112, "role", false), (113, "account", false)],
+                ),
+                // `_mint(account, v)`: a zero-address check is no caller check.
+                with_params(
+                    func(
+                        116,
+                        "_mint",
+                        "internal",
+                        10,
+                        json!([]),
+                        body(vec![
+                            revert_if(bin("==", id("account", 117), address(lit("0"))), 11),
+                            assign(index(id("_balances", 118), id("account", 117))),
+                        ]),
+                    ),
+                    &[(117, "account", false)],
+                ),
+                json!({ "nodeType": "VariableDeclaration", "id": 118, "name": "_balances", "src": at(12) }),
+                // Found, so nothing falls back to the modifier's name.
+                func(
+                    990,
+                    "_msgSender",
+                    "internal",
+                    13,
+                    json!([]),
+                    body(vec![
+                        json!({ "nodeType": "Return", "expression": sender() }),
+                    ]),
+                ),
+            ],
+        );
+        let up = contract(
+            "UUPSUpgradeable",
+            &[],
+            vec![
+                with_params(
+                    func(
+                        201,
+                        "_authorizeUpgrade",
+                        "internal",
+                        2,
+                        json!([]),
+                        json!(null),
+                    ),
+                    &[(202, "x", false)],
+                ),
+                // `upgradeToAndCall(x) { _authorizeUpgrade(x); ... }`
+                with_params(
+                    func(
+                        203,
+                        "upgradeToAndCall",
+                        "public",
+                        3,
+                        json!([]),
+                        body(vec![stmt(call(
+                            id("_authorizeUpgrade", 201),
+                            vec![id("x", 204)],
+                            4,
+                        ))]),
+                    ),
+                    &[(204, "x", false)],
+                ),
+            ],
+        );
+        let mut authorize = with_params(
+            func(
+                5,
+                "_authorizeUpgrade",
+                "internal",
+                20,
+                json!([uses_with("onlyRole", vec![id("UPGRADER_ROLE", 6)])]),
+                body(vec![]),
+            ),
+            &[(7, "x", false)],
+        );
+        authorize["overrides"] = json!({});
+        let token = contract(
+            "Token",
+            &["AccessControl", "UUPSUpgradeable"],
+            vec![
+                func(
+                    1,
+                    "mint",
+                    "external",
+                    10,
+                    json!([uses_with("onlyRole", vec![id("MINTER_ROLE", 2)])]),
+                    body(vec![]),
+                ),
+                func(
+                    3,
+                    "claim",
+                    "external",
+                    12,
+                    json!([]),
+                    body(vec![stmt(call(id("_mint", 1116), vec![sender()], 13))]),
+                ),
+                authorize,
+            ],
+        );
+        vec![
+            file(
+                "src/Token.sol",
+                vec![
+                    import("lib/AccessControl.sol", &[("AccessControl", None)], ""),
+                    import("lib/UUPSUpgradeable.sol", &[("UUPSUpgradeable", None)], ""),
+                    token,
+                ],
+            ),
+            file("lib/AccessControl.sol", vec![ac]),
+            file("lib/UUPSUpgradeable.sol", vec![up]),
+        ]
+    }
+
+    #[test]
+    fn follows_the_caller_into_parameters_across_files() {
+        let cs = read(&access_control(), &project);
+        let t = named(&cs, "Token");
+        let f = |n: &str| t.functions.iter().find(|f| f.name == n).expect(n);
+        assert_eq!(f("mint").gates, vec!["onlyRole(MINTER_ROLE)"]);
+        assert_eq!(f("grantRole").gates, vec!["onlyRole(getRoleAdmin(role))"]);
+        assert!(f("grantRole").library);
+        // `_mint(msg.sender, 1)` only compares the caller with zero.
+        assert!(f("claim").gates.is_empty() && f("claim").checks.is_empty());
+        let report = t.report();
+        assert!(
+            report.contains("  from libraries: grantRole - onlyRole(getRoleAdmin(role)), upgradeToAndCall - checks the caller\n"),
+            "{report}"
+        );
+        let cands = t.candidates();
+        let roles = cands
+            .iter()
+            .find(|c| c.id == "asm.token.roles")
+            .expect("roles");
+        assert_eq!(
+            roles.title,
+            "Token: grantRole decides who passes onlyRole (_roles)"
+        );
+        assert!(cands.iter().all(|c| c.id != "asm.token.role-admin"));
+        let books = cands
+            .iter()
+            .find(|c| c.id == "inv.token.books")
+            .expect("books");
+        assert!(books.detail.contains(": claim."), "{}", books.detail);
+    }
+
+    #[test]
+    fn dispatches_an_inherited_call_to_the_most_derived_override() {
+        let cs = read(&access_control(), &project);
+        let t = named(&cs, "Token");
+        let up = t
+            .functions
+            .iter()
+            .find(|f| f.name == "upgradeToAndCall")
+            .expect("upgrade");
+        assert_eq!(
+            (up.file.as_str(), up.checks.clone()),
+            ("lib/UUPSUpgradeable.sol", vec![4])
+        );
+        assert_eq!(
+            t.upgrade_gate,
+            Some(("onlyRole(UPGRADER_ROLE)".into(), "src/Token.sol:20".into()))
+        );
+    }
+
+    #[test]
+    fn finds_state_written_through_inherited_code_and_storage_parameters() {
+        let members = || id("members", 1);
+        let attached = json!({ "nodeType": "MemberAccess", "memberName": "add", "expression": members(),
+            "typeDescriptions": { "typeIdentifier": "t_function_internal_nonpayable$_t_struct$_Set_$1_storage_ptr_$_t_address_$returns$__$attached_to$_t_struct$_Set" } });
+        let base = contract(
+            "Base",
+            &[],
+            vec![
+                json!({ "nodeType": "UsingForDirective", "libraryName": { "name": "Lib" } }),
+                json!({ "nodeType": "VariableDeclaration", "id": 1, "name": "members", "src": at(2) }),
+                json!({ "nodeType": "VariableDeclaration", "id": 2, "name": "count", "src": at(3) }),
+                func(
+                    3,
+                    "join",
+                    "external",
+                    4,
+                    json!([]),
+                    body(vec![stmt(call(attached, vec![sender()], 5))]),
+                ),
+                func(
+                    4,
+                    "_bump",
+                    "internal",
+                    6,
+                    json!([]),
+                    body(vec![
+                        json!({ "nodeType": "UnaryOperation", "operator": "++", "subExpression": id("count", 2) }),
+                    ]),
+                ),
+            ],
+        );
+        let lib = json!({ "nodeType": "ContractDefinition", "name": "Lib", "contractKind": "library", "nodes": [
+            with_params(func(10, "add", "internal", 2, json!([]), body(vec![stmt(call(
+                json!({ "nodeType": "MemberAccess", "memberName": "push",
+                        "expression": { "nodeType": "MemberAccess", "memberName": "values", "expression": id("set", 11) } }),
+                vec![id("v", 12)], 3))])),
+                &[(11, "set", true), (12, "v", false)]),
+        ] });
+        let t = contract(
+            "T",
+            &["Base"],
+            vec![func(
+                1,
+                "poke",
+                "external",
+                8,
+                json!([]),
+                body(vec![stmt(call(id("_bump", 4), vec![], 9))]),
+            )],
+        );
+        let cs = read(
+            &[
+                file("src/T.sol", vec![import("src/Base.sol", &[], ""), t]),
+                file("src/Base.sol", vec![import("lib/Lib.sol", &[], ""), base]),
+                file("lib/Lib.sol", vec![lib]),
+            ],
+            &project,
+        );
+        let t = named(&cs, "T");
+        let var = |n: &str| t.state.iter().find(|v| v.name == n).expect(n);
+        assert_eq!(var("members").writers, vec!["join"]);
+        assert_eq!(var("count").writers, vec!["poke"]);
+        let report = t.report();
+        assert!(
+            report.contains("  src/Base.sol:4 join - anyone (from Base)\n"),
+            "{report}"
+        );
+        assert!(
+            report.contains("  src/Base.sol:2 state members - written by join (from Base)"),
+            "{report}"
+        );
+        assert_eq!(t.names().0, vec!["poke", "join"]);
+    }
+
+    #[test]
+    fn reads_namespaced_storage_and_flags_assembly_writes() {
+        let getter = json!({ "nodeType": "FunctionCall", "expression": id("_getStorage", 3),
+            "typeDescriptions": { "typeString": "struct S storage pointer" } });
+        let field = |m: &str| json!({ "nodeType": "MemberAccess", "memberName": m, "expression": getter.clone() });
+        let sstore = json!({ "nodeType": "InlineAssembly", "src": at(9), "AST": { "nodeType": "YulBlock",
+            "statements": [{ "nodeType": "YulFunctionCall", "functionName": { "name": "sstore" } },
+                           { "nodeType": "YulFunctionCall", "functionName": { "name": "delegatecall" } }] } });
+        let c = contract(
+            "W",
+            &[],
+            vec![
+                modifier(
+                    1,
+                    "onlyOwner",
+                    &[],
+                    body(vec![require(index(field("isOwner"), sender()), 2)]),
+                ),
+                func(3, "_getStorage", "internal", 3, json!([]), body(vec![])),
+                func(
+                    4,
+                    "addOwner",
+                    "external",
+                    4,
+                    json!([uses("onlyOwner", 1)]),
+                    body(vec![assign(index(field("isOwner"), id("o", 5)))]),
+                ),
+                func(
+                    6,
+                    "upgrade",
+                    "external",
+                    8,
+                    json!([uses("onlyOwner", 1)]),
+                    body(vec![sstore]),
+                ),
+            ],
+        );
+        let s_struct = json!({ "nodeType": "StructDefinition", "name": "S", "members": [
+            { "nodeType": "VariableDeclaration", "name": "isOwner", "src": at(1) }] });
+        let cs = read(&[file("src/W.sol", vec![s_struct, c])], &project);
+        let w = &cs[0];
+        assert_eq!(w.state[0].name, "S.isOwner");
+        assert_eq!(w.state[0].writers, vec!["addOwner"]);
+        let report = w.report();
+        assert!(
+            report.contains("src/W.sol:8 upgrade - onlyOwner, writes storage in assembly\n"),
+            "{report}"
+        );
+        assert!(
+            report.contains("src/W.sol:9 low-level delegatecall (assembly)"),
+            "{report}"
+        );
+        let ids: Vec<String> = w.candidates().into_iter().map(|c| c.id).collect();
+        assert!(ids.contains(&"asm.w.isowner".to_string()), "{ids:?}");
+        assert!(
+            ids.contains(&"asm.w.low-level-delegatecall-assembly".to_string()),
+            "{ids:?}"
+        );
     }
 }

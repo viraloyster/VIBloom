@@ -17,7 +17,7 @@ use crate::proposals::{Book, Decision, Draft, accept, fresh_id, propose, with_no
 use crate::scan::{Found, add_found, find_invariants};
 use crate::setup::{Plan, Stack, helpers, is_test_code, plan, tests_dir, unmentioned};
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
@@ -421,7 +421,12 @@ pub fn table(vs: &[NodeView]) -> String {
     out.join("\n")
 }
 
+// The JSON a tool printed last: on one line after its logs, or, as newer
+// forge prints `config --json`, the whole output pretty-printed.
 fn last_json(text: &str) -> Option<Value> {
+    if let Ok(v @ Value::Object(_)) = serde_json::from_str(text.trim()) {
+        return Some(v);
+    }
     let line = text.lines().map(str::trim).rfind(|l| l.starts_with('{'))?;
     serde_json::from_str(line).ok()
 }
@@ -468,32 +473,117 @@ fn forge_invariants(listed: &Value) -> Option<Vec<Found>> {
     Some(out)
 }
 
-// The compiled contracts of the project's own sources, each with its
-// artifact and the file it was compiled from.
-fn artifacts(root: &Path, src: &str, out_dir: &str) -> Vec<(String, String, Value)> {
-    let mut sources = Vec::new();
-    files_under(root, src, &mut sources);
+// Only what the survey reads: the bytecode and the rest are skipped unparsed.
+#[derive(serde::Deserialize)]
+struct Artifact {
+    #[serde(default)]
+    ast: Option<Value>,
+    #[serde(default)]
+    abi: Option<Value>,
+}
+
+fn read_artifact(path: &Path) -> Option<Artifact> {
+    serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
+}
+
+// Every folder under the build output, by its name: forge writes
+// `out/<file name>/<Contract>.json`, deeper when two files share a name.
+fn artifact_dirs(dir: &Path, out: &mut BTreeMap<String, Vec<PathBuf>>) {
+    let Ok(read) = fs::read_dir(dir) else { return };
+    let mut paths: Vec<PathBuf> = read.filter_map(|e| Some(e.ok()?.path())).collect();
+    paths.sort();
+    for p in paths.into_iter().filter(|p| p.is_dir()) {
+        if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+            out.entry(name.to_string()).or_default().push(p.clone());
+        }
+        artifact_dirs(&p, out);
+    }
+}
+
+// The syntax trees of the project's own sources and of every file they
+// import, each read once. A file forge wrote no artifact for (only free
+// functions or structs) is left out: what it defines is then unresolved.
+fn units(root: &Path, sources: &[String], out_dir: &str) -> Vec<crate::survey::Unit> {
+    let mut dirs = BTreeMap::new();
+    artifact_dirs(&root.join(out_dir), &mut dirs);
+    let own: BTreeSet<&str> = sources.iter().map(String::as_str).collect();
+    let mut queue: Vec<String> = sources.to_vec();
+    let mut seen: BTreeSet<String> = queue.iter().cloned().collect();
     let mut out = Vec::new();
-    for file in sources.iter().filter(|f| f.ends_with(".sol")) {
-        let base = file.rsplit('/').next().unwrap_or(file);
-        let Ok(read) = fs::read_dir(root.join(out_dir).join(base)) else {
-            continue;
-        };
-        let mut paths: Vec<PathBuf> = read.filter_map(|e| Some(e.ok()?.path())).collect();
-        paths.sort();
-        for path in paths {
-            let Some(artifact) = fs::read_to_string(&path)
-                .ok()
-                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-            else {
+    let mut i = 0;
+    while i < queue.len() {
+        let file = queue[i].clone();
+        i += 1;
+        let base = file.rsplit('/').next().unwrap_or(&file);
+        let mut unit: Option<crate::survey::Unit> = None;
+        for dir in dirs.get(base).into_iter().flatten() {
+            let Ok(read) = fs::read_dir(dir) else {
                 continue;
             };
-            let name = path
-                .file_stem()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            out.push((file.clone(), name, artifact));
+            let mut paths: Vec<PathBuf> = read
+                .filter_map(|e| Some(e.ok()?.path()))
+                .filter(|p| p.extension().is_some_and(|x| x == "json"))
+                .collect();
+            paths.sort();
+            for path in paths {
+                // Several compiler versions: `Token.0.8.20.json`.
+                let name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .and_then(|n| n.split('.').next())
+                    .unwrap_or_default()
+                    .to_string();
+                if let Some(u) = &mut unit {
+                    // Only the project's own contracts need their ABI.
+                    if own.contains(file.as_str())
+                        && !u.abis.contains_key(&name)
+                        && let Some(abi) = read_artifact(&path).and_then(|a| a.abi)
+                    {
+                        u.abis.insert(name, abi);
+                    }
+                    continue;
+                }
+                let Some(Artifact {
+                    ast: Some(ast),
+                    abi,
+                }) = read_artifact(&path)
+                else {
+                    continue;
+                };
+                if ast.get("absolutePath").and_then(Value::as_str) != Some(file.as_str()) {
+                    // The whole folder is another file of the same name.
+                    break;
+                }
+                let mut abis = BTreeMap::new();
+                abis.extend(abi.map(|a| (name, a)));
+                let source = fs::read_to_string(root.join(&file)).unwrap_or_default();
+                unit = Some(crate::survey::Unit {
+                    path: file.clone(),
+                    ast,
+                    abis,
+                    source,
+                });
+            }
+            if unit.is_some() {
+                break;
+            }
         }
+        let Some(unit) = unit else { continue };
+        for n in unit
+            .ast
+            .get("nodes")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if n.get("nodeType").and_then(Value::as_str) == Some("ImportDirective")
+                && let Some(p) = n.get("absolutePath").and_then(Value::as_str)
+                && seen.insert(p.to_string())
+            {
+                queue.push(p.to_string());
+            }
+        }
+        out.push(unit);
     }
     out
 }
@@ -545,18 +635,11 @@ fn compiled(
         map.timeout,
     )?;
     let dirs = foundry_dirs(root);
-    let mut contracts = Vec::new();
-    for (file, name, artifact) in artifacts(root, &dirs.src, &dirs.out) {
-        if is_test_code(&file, &map.tests, &dirs.script) {
-            continue;
-        }
-        let source = fs::read_to_string(root.join(&file)).unwrap_or_default();
-        if let Some(c) = crate::survey::read(&artifact, &name, &source)
-            && c.file == file
-        {
-            contracts.push(c);
-        }
-    }
+    let mut sources = Vec::new();
+    files_under(root, &dirs.src, &mut sources);
+    sources.retain(|f| f.ends_with(".sol") && !is_test_code(f, &map.tests, &dirs.script));
+    let own: BTreeSet<String> = sources.iter().cloned().collect();
+    let contracts = crate::survey::read(&units(root, &sources, &dirs.out), &|f| own.contains(f));
     if contracts.is_empty() {
         let lines: Vec<&str> = built.stderr.trim().lines().collect();
         return Err(format!(
@@ -689,12 +772,7 @@ pub fn gaps(root: &Path) -> Fallible<String> {
     let mut unnamed = Vec::new();
     let mut lines = Vec::new();
     for c in &contracts {
-        let mut own: Vec<String> = Vec::new();
-        for f in &c.functions {
-            if !own.contains(&f.name) {
-                own.push(f.name.clone());
-            }
-        }
+        let (own, from_libraries) = c.names();
         // A contract no test names is not deployed by any test: whatever
         // names it shares with another contract, nothing of its own runs.
         if !unmentioned(std::slice::from_ref(&c.name), &text).is_empty() {
@@ -702,7 +780,7 @@ pub fn gaps(root: &Path) -> Fallible<String> {
             continue;
         }
         let missing = unmentioned(&own, &text);
-        let inherited = unmentioned(&c.inherited, &text);
+        let inherited = unmentioned(&from_libraries, &text);
         let mut parts = Vec::new();
         if !missing.is_empty() {
             parts.push(missing.join(", "));
@@ -1917,6 +1995,18 @@ fn proposals(root: &Path, rest: &[&str], on: &[String], io: &mut Io) -> Fallible
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_json_on_its_last_line_or_pretty_printed() {
+        let logs = "Compiling...\n{\"src\":\"contracts\"}\n";
+        assert_eq!(last_json(logs), Some(json!({ "src": "contracts" })));
+        let pretty = "{\n  \"src\": \"contracts\",\n  \"out\": \"artifacts/foundry\"\n}\n";
+        assert_eq!(
+            last_json(pretty).and_then(|v| v.get("out").cloned()),
+            Some(json!("artifacts/foundry"))
+        );
+        assert_eq!(last_json("no json here"), None);
+    }
 
     #[test]
     fn iso_now_has_the_javascript_shape() {

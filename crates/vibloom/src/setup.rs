@@ -242,20 +242,11 @@ pub fn tests_dir(planned: &str, listed: &[String]) -> Option<String> {
     (!common.is_empty()).then(|| dir(&common.join("/")))
 }
 
-/// The state-changing functions of a compiled contract, from its artifact:
-/// what a call can use to move the contract's state.
-pub fn entry_points(artifact: &Value) -> Vec<String> {
-    // An interface or an abstract contract has no code of its own.
-    let code = artifact
-        .pointer("/bytecode/object")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    if code.trim_start_matches("0x").is_empty() {
-        return vec![];
-    }
-    let mut out: Vec<String> = artifact
-        .get("abi")
-        .and_then(Value::as_array)
+/// The state-changing functions of a compiled contract, from its ABI: what a
+/// call can use to move the contract's state.
+pub fn entry_points(abi: &Value) -> Vec<String> {
+    let mut out: Vec<String> = abi
+        .as_array()
         .into_iter()
         .flatten()
         .filter(|f| f.get("type").and_then(Value::as_str) == Some("function"))
@@ -330,23 +321,20 @@ mod tests {
 
     #[test]
     fn lists_the_entry_points_no_test_mentions() {
-        let vault = json!({ "bytecode": { "object": "0x6080" }, "abi": [
+        let vault = json!([
             { "type": "constructor", "stateMutability": "nonpayable" },
             { "type": "function", "name": "deposit", "stateMutability": "nonpayable" },
             { "type": "function", "name": "sweep", "stateMutability": "payable" },
             { "type": "function", "name": "totalAssets", "stateMutability": "view" },
             { "type": "function", "name": "deposit", "stateMutability": "nonpayable" }
-        ]});
+        ]);
         let names = entry_points(&vault);
         assert_eq!(names, vec!["deposit", "sweep"]);
         assert_eq!(
             unmentioned(&names, "vault.deposit(assets); // sweeping is later"),
             vec!["sweep"]
         );
-        let interface = json!({ "bytecode": { "object": "0x" }, "abi": [
-            { "type": "function", "name": "transfer", "stateMutability": "nonpayable" }
-        ]});
-        assert_eq!(entry_points(&interface), Vec::<String>::new());
+        assert_eq!(entry_points(&Value::Null), Vec::<String>::new());
     }
 
     #[test]

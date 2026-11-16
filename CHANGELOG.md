@@ -2,6 +2,45 @@
 
 Changes to the `vibloom` binary. The web app is not versioned.
 
+## 0.6.0
+
+### Changed
+
+- `vibloom survey` reads each contract with everything it inherits, across
+  files: imported files are loaded, bases are resolved by name through the
+  imports and linearized as the compiler does, and internal calls dispatch to
+  the most derived override. Inherited functions carry their own gates and
+  caller checks: from the project's own files one line each with
+  `(from Base)`, from library files on one `from libraries:` line. The list
+  of inherited function names that were assumed to be gated upstream is gone.
+- A modifier from another file is a gate by its code, following the caller
+  into the parameters it is passed (`onlyRole` -> `_checkRole`); its name only
+  decides when its code was not found.
+- A check that only turns some callers away (`require(!blacklisted[msg.sender])`)
+  is no longer a caller check. An early `return` for the caller followed by a
+  revert, and a modifier that runs the function only for some callers, are.
+- State lines say `set at deployment` when a constructor or an initial value
+  sets the variable; namespaced storage of the project is shown as
+  `Struct.field`. Writes through a library's `storage` parameter are seen.
+- Calls and low-level calls come from every contract inherited, each with its
+  own `file:line`; library calls on a contract (`SafeERC20.safeTransfer(token,
+...)`) count as calls to it, and assembly `call`, `delegatecall` and
+  `staticcall` are reported. A function whose code writes storage in assembly
+  is flagged.
+- The "who decides who passes" candidate works across files, so the
+  name-based `role-admin` and `owner-transfer` candidates only appear when the
+  code did not show who writes the roles or the owner. Low-level calls of one
+  kind make one candidate.
+- Functions of the ABI that the source did not explain (a base whose source
+  was not found) are listed under `not resolved`, with the missing bases.
+- `vibloom gaps` lists inherited functions of the project's own bases with the
+  contract's own; `inherited:` now means library code.
+
+### Fixed
+
+- The configured `src` and `out` folders are read when `forge config --json`
+  prints its JSON over several lines.
+
 ## 0.5.1
 
 ### Fixed

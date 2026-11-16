@@ -123,8 +123,9 @@ Handler functions whose every call reverted in the latest run:
 The first two come from the compiled contracts and the text of the test files:
 a name that appears there may still not be exercised, but one that does not
 appear cannot be. A contract no test names is listed on its own, since no test
-deploys it. Each contract's functions are listed, then the ones it takes from a base
-after `inherited:`. The last comes from the fuzzer's own counts, and
+deploys it. Each contract's functions are listed, its own and those of the
+project's own base contracts, then the ones it takes from library code
+(OpenZeppelin, Solady) after `inherited:`. The last comes from the fuzzer's own counts, and
 also shows under the invariant in `vibloom context`. Both are reports, not
 failures: a function may be left out on purpose, and then an assumption node
 is the place to say so.
@@ -145,6 +146,24 @@ from a blank page. The steps, in order:
    candidates and invariant candidates. Test code is left out: `*.t.sol`,
    `*.s.sol`, the tests and script folders and any folder named `test`,
    `tests`, `mock` or `mocks`.
+
+   A contract is read with everything it inherits, in other files too: the
+   files it imports are loaded, base contracts are found by name through the
+   imports (aliases included) and put in the order the compiler uses, and an
+   internal call runs the most derived override. Functions inherited from the
+   project's own files get a line each, with their own `file:line` and
+   `(from Base)`; those from library files share one line:
+
+   ```
+   LatamStable (src/LatamStable.sol)
+     src/LatamStable.sol:47 mint - onlyRole(MINTER_ROLE)
+     from libraries: approve, burn, burnFrom, grantRole - onlyRole(getRoleAdmin(role)), permit, renounceRole - checks the caller, revokeRole - onlyRole(getRoleAdmin(role)), transfer, transferFrom, upgradeToAndCall - checks the caller
+   ```
+
+   When the source of a base was not found, the functions the compiler's ABI
+   lists and the source did not explain are shown under `not resolved`, with
+   the bases that are missing.
+
 3. **Propose.** `vibloom survey --propose` files the assumption candidates as
    proposals, each with the `file:line` it comes from and a suggested node id.
    One already pending, or already in the map, is not filed twice. Invariant
@@ -171,12 +190,30 @@ from a blank page. The steps, in order:
 
 How the survey reads a function's gate:
 
-- A modifier or a role check on the function is its gate.
+- A modifier on the function is its gate when its code checks the caller,
+  itself or through what it calls, in any file. A caller passed as an argument
+  stays the caller inside the function that receives it, so OpenZeppelin's
+  `onlyRole(role)` -> `_checkRole(role, _msgSender())` is a gate by its code.
+  Only a modifier whose code was not found is judged by its name (`only...`,
+  `auth`, names with `role`, `owner`, `admin`).
 - A function with no gate that checks the caller in its body is reported as
   `anyone, checks the caller at :LINE`. A caller check is a `require` or
   `assert`, or an `if` that reverts, whose condition uses the caller
   (`msg.sender`, `tx.origin`, `_msgSender()` or a local alias of it) outside a
-  `<` or `>` comparison and not only against the zero address.
+  `<` or `>` comparison and not only against the zero address. An `if` that
+  returns early followed by a revert counts, and so does a modifier that runs
+  the function only for some callers (`if (msg.sender == admin) { _; }`). A
+  check that only turns some callers away (`require(!blacklisted[msg.sender])`)
+  trusts nobody and is not one. A call to code that checks the caller is
+  reported at the line of the call (`upgradeToAndCall` calls the
+  `_authorizeUpgrade` that the contract overrides).
+- State variables are the project's own, with namespaced (ERC-7201) storage
+  read as `Struct.field`. A variable is written by an entry point when code
+  it runs writes it, also through a library that takes it as a `storage`
+  parameter (`set.add(x)`); a constructor or an initial value is
+  `set at deployment`. Inline assembly with `sstore` or `tstore` is flagged
+  `writes storage in assembly`, and its `call`, `delegatecall` and
+  `staticcall` are reported as low-level calls `(assembly)`.
 - `fallback` and `receive` count as entry points.
 - Calls with `{value: ...}` options are seen.
 - For a gate whose check reads the contract's own state, the candidate says
