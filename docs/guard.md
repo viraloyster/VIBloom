@@ -38,9 +38,10 @@ a local program and the agent runs on whatever plan it already uses.
 - `--agent claude` adds the hooks to `.claude/settings.json` and the tools to
   `.mcp.json`, keeping what those files already hold, and guards both files
   (and `.claude/settings.local.json`) so the agent cannot switch the guard off.
-- `--agent codex` adds a short section to `AGENTS.md` and prints the one
-  command that registers the tools. Codex has no hooks that can stop an edit
-  while it works, so there the commit check and CI are what hold.
+- `--agent codex` adds a short section to `AGENTS.md`, guards that file so a
+  builder cannot commit a rewrite of the guard's instructions, and prints the
+  one command that registers the tools. Codex has no hooks that can stop an
+  edit while it works, so there the commit check and CI are what hold.
 
 On a project that already has a map, `VIBLOOM_ROLE=verifier vibloom setup
 claude` (or `codex`) does the same, and `vibloom install-hook` installs the
@@ -59,7 +60,7 @@ Add what the tests cannot say by hand, as the verifier:
 
 ```bash
 export VIBLOOM_ROLE=verifier
-vibloom add assumption "only add() changes total" --on inv.total-matches-added --hypothetical
+vibloom add assumption "only add() changes total" --on inv.total-matches-added
 vibloom add intention "accounting is exact" --on asm.only-add-changes-total
 vibloom add invariant "shares never exceed assets" --file test/Vault.t.sol --contract VaultTest --test invariant_solvency
 ```
@@ -68,7 +69,11 @@ vibloom add invariant "shares never exceed assets" --file test/Vault.t.sol --con
 the source and test folders when none is given. `--evidence` (repeatable)
 records where the node comes from. `--detail` adds a longer text, `--id` picks
 the node's id, and `--unprotected` leaves an invariant's test editable by the
-builder. A node added by hand is adopted unless `--hypothetical` is given. Or
+builder. One rule sets the stance everywhere, for `add`, for a node written
+in the map without one and for an accepted proposal: an assumption is
+`hypothetical` until someone adopts it, and invariants and intentions are
+`adopted`. `--adopted` adopts an assumption as it is added, and
+`--hypothetical` works for any kind. `add` says which stance the node got. Or
 edit the map directly.
 
 Two more commands change a node that is already there, as the verifier:
@@ -79,11 +84,37 @@ vibloom remove asm.only-add-changes-total
 ```
 
 `edit` takes `--title`, `--detail`, `--stance`, `--on` and `--not-on`,
-`--watch` and `--unwatch`, `--evidence` and `--drop-evidence` (at least one
-option is required; an empty `--detail` clears it); the result must still be a
-valid map. `remove` is refused while other nodes rest on the node;
+`--watch` and `--unwatch`, `--evidence` and `--drop-evidence`, `--accept`
+with `--reason` and `--unaccept` (at least one option is required; an empty
+`--detail` clears it); the result must still be a valid map. `remove` is refused while other nodes rest on the node;
 point them elsewhere first, or switch it off with `edit --stance off`. Its
 recorded runs stay in the log.
+
+### Accepted risks
+
+An assumption switched `off` is one the project knows does not hold, and
+everything resting on it is unsupported or at risk. When that weakness is
+known and acceptable, the verifier says so on the node that rests on it:
+
+```bash
+vibloom edit int.no-overdraw --accept asm.token-is-standard --reason "only USDC is listed; it takes no fee"
+vibloom edit int.no-overdraw --unaccept asm.token-is-standard
+```
+
+In the map that is `"accepts": [{ "id": "asm.token-is-standard", "reason":
+"..." }]`. The id must be one of the node's `depends_on` and the reason is
+required; `--accept` is refused for a dependency that is not off. While the
+dependency is off it no longer makes the node troubled, and the node shows it
+in its state, `adopted (accepts 1 risk)`. It is never hidden: `status` ends
+with an `Accepted risks:` section listing node, dependency and reason,
+`status --json` carries them under `accepted_risks`, and `context` gives the
+reason wherever it shows the node in full (over MCP too).
+
+An acceptance covers an `off` dependency and nothing else. If the dependency
+is switched back on, the acceptance has no effect, `status` says it can be
+removed, and whatever the dependency's state is (broken, pending, untested,
+at risk) counts again as it would without it. Only the verifier sets it: it
+lives in the map, and the MCP `propose` tool refuses it.
 
 ## For smart contracts
 
@@ -177,6 +208,10 @@ from a blank page. The steps, in order:
    lists and the source did not explain are shown under `not resolved`, with
    the bases that are missing.
 
+   `vibloom survey Vat Dog` prints only those contracts, their report and
+   their candidates; a name that is not in the survey is an error that lists
+   the names there are.
+
 3. **Propose.** `vibloom survey --propose` files the assumption candidates as
    proposals, each with the `file:line` it comes from and a suggested node id.
    A proposal with the same title as one already pending, or as a node in the
@@ -194,7 +229,14 @@ from a blank page. The steps, in order:
    Each `--on` (repeatable) links the accepted nodes to a node they rest on.
 
 5. **Research.** `vibloom research`, or the `research` tool over MCP, prints
-   the brief an agent works from: the notes, the survey and how to work. The
+   the brief an agent works from, kept short: the notes; the survey as one
+   line per contract (its file, how many entry points are gated, open, or
+   open but checking the caller, how many state variables, whether an upgrade
+   gate was found, how many other contracts it calls); each candidate's title
+   once, with the contracts it applies to, without the lines; and how to
+   work. Before proposing anything about a contract the agent asks for its
+   detail with the `survey` tool over MCP, which takes the names in
+   `contracts` and gives what `vibloom survey <Contract>` prints. The
    agent reads the project's docs, audits and the standards it implements; it
    reads the chain only with read-only `cast` commands (`cast code`, `call`,
    `storage`, `implementation`, `admin`, `logs`) using `ETH_RPC_URL`, at a fixed
@@ -353,15 +395,22 @@ pre-tool hook (see below) denies the commands that would send a transaction.
 }
 ```
 
-- **assumption**: something taken as given. `hypothetical` (the default in the
-  map, and for anything an agent proposes), `adopted` or `off`. Invariants and
-  intentions are `adopted` unless the map says otherwise.
+- **assumption**: something taken as given. `hypothetical` until someone
+  adopts it (in the map, with `vibloom add` and for an accepted proposal),
+  `adopted` or `off`. Invariants and intentions are `adopted` unless the map
+  says otherwise.
 - **invariant**: a property that must always hold, tied to a test. Protected by
   default.
 - **intention**: what a change or a piece of the system is meant to achieve.
 - `evidence` lists where the node comes from (see Evidence above).
-- `watch` lists files, or directories ending in `/`, whose change puts the
-  node's evidence up for review. A node's test file is always watched.
+- `accepts` lists the dependencies that are off and that the node accepts as
+  risks, each with its reason (see Accepted risks above).
+- `watch` lists files, or directories ending in `/`, that the node is about.
+  For a node with a test, a change to one puts the node pending review until
+  the tests run again; its test file is always watched. A node without a
+  test has no run to compare with, so a change never changes its state:
+  `vibloom context <file>` and the hook after an edit name it as not checked
+  by any test, for a person to re-read.
 - `depends_on` links form a DAG; the map is rejected if they form a cycle or
   name an unknown node, or if a path leaves the repository.
 
@@ -406,6 +455,7 @@ a mocha reporter such as `mocha-junit-reporter` set in `hardhat.config`.)
 | skipped        | the latest run skipped its test                                                |
 | MISSING        | its test ran once, but the latest run of the whole suite did not include it    |
 | VACUOUS        | its invariant passed, but every call the fuzzer made reverted, or it made none |
+| TEST CHANGED   | its protected test, or a guarded file the test leans on, differs from HEAD     |
 | off            | switched off by a person; a choice, not a problem                              |
 
 Every state in the table but holds and off needs attention: `status` and
@@ -422,6 +472,19 @@ watched file at the start of each run. A file added to a watched directory, or
 not recorded by the run, counts as changed. In a git repository a watched
 directory holds what git tracks or would track there, so build output and
 caches the project ignores never count.
+
+TEST CHANGED is read from git, so it covers a change made by any route, not
+only those the hooks see: a protected node's test file, the guarded handlers
+and base contracts its test imports (the same files `init` and `scan` guard),
+and the test configuration in `protect` (`foundry.toml` and the like, which
+bear on every test; the agents' own files such as `AGENTS.md` do not count),
+modified, deleted or taken out of git in the working tree or the index. The
+reason names the files. It clears only when the change is committed, and the
+commit check refuses a builder's commit of guarded files, so only the verifier
+can clear it; the commit check counts what the verifier stages as committed.
+A protected test that was never committed is not changed: the verifier added
+it and has not committed it yet. Outside a git repository, or before the
+first commit, nothing is compared. One `git status` call covers every node.
 
 The whole suite is the map's `runner` with no extra arguments. A filtered run
 (`vibloom run -- --mt X`) records what it ran and says nothing about the rest.
@@ -468,12 +531,12 @@ does.
 vibloom init [--agent claude|codex]   # create the map, install the commit check, connect an agent
 vibloom setup claude|codex   # connect an agent to an existing map (verifier)
 vibloom install-hook    # install the commit check in another clone
-vibloom add <kind> "<title>" [--file F --test N] [--watch P] [--on ID] [--detail D] [--id ID] [--hypothetical] [--unprotected]   # add a node (verifier); see Start
-vibloom edit <id> [--title T] [--detail D] [--stance S] [--on ID] [--not-on ID] [--watch P] [--unwatch P] [--evidence E] [--drop-evidence E]   # change a node (verifier)
+vibloom add <kind> "<title>" [--file F --test N] [--watch P] [--on ID] [--detail D] [--id ID] [--hypothetical | --adopted] [--unprotected]   # add a node (verifier); see Start
+vibloom edit <id> [--title T] [--detail D] [--stance S] [--on ID] [--not-on ID] [--watch P] [--unwatch P] [--evidence E] [--drop-evidence E] [--accept ID --reason R] [--unaccept ID]   # change a node (verifier)
 vibloom remove <id>     # take a node out; refused while others rest on it (verifier)
 vibloom scan            # add invariant tests the map does not list yet, and guard the handlers they import (verifier)
-vibloom survey [--propose]   # Foundry: who may call what, upgrades, external calls; --propose files assumptions
-vibloom research        # the brief an agent works from to find and propose nodes
+vibloom survey [<Contract>...] [--propose]   # Foundry: who may call what, upgrades, external calls; --propose files assumptions
+vibloom research        # the short brief an agent works from: notes, survey summary, candidate titles, how to work
 vibloom status [--json] # derived state of every node, troubled first; exit 1 if any needs attention
 vibloom run -- --mt X   # run the tests (what follows -- goes to the runner), record, show what changed
 vibloom check [--base ref]   # run, then exit 1 if any node needs attention: for CI
@@ -532,7 +595,8 @@ claude mcp add vibloom -- vibloom mcp
 | `status`    | the derived state of every node                                                                |
 | `context`   | what to know before touching a file                                                            |
 | `run`       | run the tests and record the run; only forge's test filters are accepted                       |
-| `research`  | the brief to start from: notes, survey, how to propose with evidence                           |
+| `research`  | the brief to start from: notes, survey summary, how to propose with evidence                   |
+| `survey`    | Foundry: the full survey of the contracts named in `contracts`                                 |
 | `gaps`      | Foundry: contracts and functions no test names, handlers that always reverted                  |
 | `verify`    | check the log's hash chain                                                                     |
 | `propose`   | propose a node with its `evidence` (required) and an optional `id`; kept apart as hypothetical |
@@ -541,7 +605,8 @@ claude mcp add vibloom -- vibloom mcp
 There is no tool to accept a proposal, set a state or edit the record. A
 proposal waits in `.vibloom/proposals.jsonl` until the verifier runs
 `VIBLOOM_ROLE=verifier vibloom proposals accept <id>`, which checks it against the map as it is and
-adds it (an assumption enters as hypothetical), or `reject <id>`. Models
+adds it (an assumption enters as hypothetical, an invariant or intention as
+adopted, and the output says which), or `reject <id>`. Models
 propose; people and code decide.
 
 ## Where the rules are enforced
@@ -645,7 +710,8 @@ things:
   other filters); with another runner, the whole suite. If anything is broken, unsupported or pending, the agent is sent
   back with the list and the rule "fix the code, not the invariant". After an
   edit to a watched file, the agent is told which nodes are now pending
-  review, once per file between runs.
+  review, and which watching nodes no test checks, for a person to re-read,
+  once per file between runs.
 - **Before the agent stops**: if any node needs attention, the agent is sent
   back once. Claude Code marks the second attempt, which the guard lets
   through so the session cannot loop; the state stays visible in `vibloom
@@ -711,8 +777,9 @@ run again; after `bad()` is removed and the suite runs, all four nodes hold.
 ## Limits
 
 - The Bash check is a heuristic on the command text, not a sandbox: a script
-  that writes to a protected file indirectly is not caught. The log's hash chain
-  and `git diff` still show what changed.
+  that writes to a protected file indirectly is not caught while it runs. In a
+  git repository the node then shows TEST CHANGED until the verifier commits
+  the change, and the log's hash chain and `git diff` show what changed.
 - The role comes from an environment variable; it separates honest agents, it
   does not authenticate them. Code owners and branch protection are the
   boundary that does.

@@ -3,12 +3,12 @@
 //! nodes connected to them, the reason for anything in trouble elsewhere, and
 //! a count of the rest. On a large map that is a small part of it.
 
-use crate::derive::{NodeView, label, troubled};
+use crate::derive::{NodeView, label, shown, troubled};
 use crate::map::covers;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 fn line(v: &NodeView) -> String {
-    format!("- {} [{}] {}", v.id, label(v), v.title)
+    format!("- {} [{}] {}", v.id, shown(v), v.title)
 }
 
 // A troubled node away from the file at hand: its line and the reason.
@@ -60,6 +60,16 @@ fn full(v: &NodeView, by_id: &HashMap<&str, &NodeView>) -> String {
             .map(|d| format!("{d} [{}]", by_id.get(d.as_str()).map_or("?", |x| label(x))))
             .collect();
         out.push(format!("  rests on: {}", deps.join(", ")));
+    }
+    for a in &v.accepts {
+        out.push(if a.in_effect {
+            format!("  accepts {} being off: {}", a.id, a.reason)
+        } else {
+            format!(
+                "  accepted {} being off, but it is on again: the acceptance can be removed",
+                a.id
+            )
+        });
     }
     if !v.because.is_empty() {
         out.push(format!("  because of: {}", v.because.join(", ")));
@@ -179,10 +189,26 @@ pub fn context(views: &[NodeView], path: Option<&str>) -> String {
                     ),
                 );
             }
+            // No run stands behind these, so a change to the file never moves
+            // their state: only a person reading them again can.
+            let by_hand: Vec<&str> = views
+                .iter()
+                .filter(|v| v.test_file.is_none() && v.watch.iter().any(|w| covers(w, p)))
+                .map(|v| v.id.as_str())
+                .collect();
+            if !by_hand.is_empty() {
+                out.push(format!(
+                    "Watching {p} with no test to check {}: {}. A change here never changes {} state; a person should re-read {} after one.",
+                    if by_hand.len() == 1 { "it" } else { "them" },
+                    by_hand.join(", "),
+                    if by_hand.len() == 1 { "its" } else { "their" },
+                    if by_hand.len() == 1 { "it" } else { "them" },
+                ));
+            }
         }
     }
-    let shown = |v: &NodeView| about.contains(v.id.as_str()) || connected.contains(v.id.as_str());
-    let elsewhere: Vec<&NodeView> = views.iter().filter(|v| !shown(v)).collect();
+    let listed = |v: &NodeView| about.contains(v.id.as_str()) || connected.contains(v.id.as_str());
+    let elsewhere: Vec<&NodeView> = views.iter().filter(|v| !listed(v)).collect();
     let bad: Vec<&&NodeView> = elsewhere.iter().filter(|v| troubled(v)).collect();
     if !bad.is_empty() {
         out.push(String::new());
@@ -197,9 +223,9 @@ pub fn context(views: &[NodeView], path: Option<&str>) -> String {
         out.extend(bad.iter().map(|v| why(v)));
     }
     // The rest is only counted: `vibloom status` lists it when it is wanted.
-    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for v in elsewhere.iter().filter(|v| !troubled(v)) {
-        *counts.entry(label(v)).or_default() += 1;
+        *counts.entry(shown(v)).or_default() += 1;
     }
     if !counts.is_empty() {
         let parts: Vec<String> = counts.iter().map(|(l, n)| format!("{n} {l}")).collect();
@@ -248,6 +274,7 @@ mod tests {
             watch: vec![],
             test_file: None,
             sources: vec![],
+            accepts: vec![],
         }
     }
 
@@ -309,6 +336,32 @@ mod tests {
         assert!(context(&sound, None).contains("All sound: 4 adopted, 2 holds"));
         assert!(
             context(&sound, Some("README.md")).contains("Nothing in the map watches README.md.")
+        );
+    }
+
+    #[test]
+    fn names_watchers_no_test_checks_and_shows_accepted_risks() {
+        use crate::derive::AcceptedRisk;
+        let mut vs = map();
+        vs[2].watch = vec!["src/Vault.sol".into()];
+        vs[3].accepts = vec![AcceptedRisk {
+            id: "asm.far".into(),
+            reason: "the cap bounds the loss".into(),
+            in_effect: true,
+        }];
+        vs[3].sources = vec!["src/Vault.sol:9".into()];
+        let text = context(&vs, Some("src/Vault.sol"));
+        assert!(
+            text.contains("Watching src/Vault.sol with no test to check them: inv.supply, asm.oracle. A change here never changes their state; a person should re-read them after one."),
+            "{text}"
+        );
+        assert!(
+            text.contains("- int.promise [adopted (accepts 1 risk)] title of int.promise"),
+            "{text}"
+        );
+        assert!(
+            text.contains("  accepts asm.far being off: the cap bounds the loss"),
+            "{text}"
         );
     }
 }

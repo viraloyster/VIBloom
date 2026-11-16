@@ -72,6 +72,14 @@ pub struct TestRef {
     pub name: String,
 }
 
+/// A dependency switched off on purpose that the node rests on anyway, with
+/// the verifier's reason.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Accept {
+    pub id: String,
+    pub reason: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RootNode {
     pub id: String,
@@ -89,6 +97,8 @@ pub struct RootNode {
     /// Where the node comes from: a line of code, a document, a read of the
     /// chain. Free text, for whoever reviews it.
     pub evidence: Vec<String>,
+    /// Dependencies that are off and do not make this node unsupported.
+    pub accepts: Vec<Accept>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -277,6 +287,7 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
                 "depends_on",
                 "protected",
                 "evidence",
+                "accepts",
             ],
             id,
             &mut errors,
@@ -375,6 +386,7 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
         if evidence.is_none() {
             errors.push(format!("{id}: evidence must list texts"));
         }
+        let accepts = parse_accepts(id, n.get("accepts"), &mut errors);
         nodes.push(RootNode {
             id: id.into(),
             kind,
@@ -386,6 +398,7 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
             depends_on: depends_on.unwrap_or_default(),
             protected,
             evidence: evidence.unwrap_or_default(),
+            accepts,
         });
     }
 
@@ -396,6 +409,14 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
             }
             if d == &n.id {
                 errors.push(format!("{}: depends on itself", n.id));
+            }
+        }
+        for a in &n.accepts {
+            if !n.depends_on.contains(&a.id) {
+                errors.push(format!(
+                    "{}: accepts {}, which is not one of its depends_on",
+                    n.id, a.id
+                ));
             }
         }
     }
@@ -414,6 +435,46 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
         }),
         _ => Err(errors),
     }
+}
+
+fn parse_accepts(id: &str, v: Option<&Value>, errors: &mut Vec<String>) -> Vec<Accept> {
+    let Some(v) = v else { return vec![] };
+    let Some(list) = v.as_array() else {
+        errors.push(format!(
+            "{id}: accepts must list {{\"id\", \"reason\"}} objects"
+        ));
+        return vec![];
+    };
+    let mut out: Vec<Accept> = Vec::new();
+    for (i, a) in list.iter().enumerate() {
+        let at = format!("{id}.accepts[{i}]");
+        let Some(o) = a.as_object() else {
+            errors.push(format!("{at} must be an object with id and reason"));
+            continue;
+        };
+        unknown_keys(o, &["id", "reason"], &at, errors);
+        let dep = o.get("id").and_then(Value::as_str).unwrap_or_default();
+        let reason = o.get("reason").and_then(Value::as_str).unwrap_or_default();
+        if dep.is_empty() {
+            errors.push(format!("{at}.id must name a dependency"));
+            continue;
+        }
+        // A risk taken on without a reason is a risk nobody decided on; on
+        // one line, since status lists each in a row.
+        if reason.trim().is_empty() {
+            errors.push(format!("{at}: a reason is required"));
+        } else if reason.chars().any(char::is_control) {
+            errors.push(format!("{at}: the reason must be one line"));
+        }
+        if out.iter().any(|x| x.id == dep) {
+            errors.push(format!("{id}: accepts {dep} twice"));
+        }
+        out.push(Accept {
+            id: dep.to_string(),
+            reason: reason.trim().to_string(),
+        });
+    }
+    out
 }
 
 fn find_cycle(nodes: &[RootNode]) -> Option<Vec<String>> {
@@ -477,6 +538,8 @@ struct NodeOut<'a> {
     protected: bool,
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     evidence: &'a [String],
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    accepts: &'a [Accept],
 }
 
 #[derive(Serialize)]
@@ -515,6 +578,7 @@ pub fn serialize_map(map: &RootsMap) -> String {
                 depends_on: &n.depends_on,
                 protected: n.protected,
                 evidence: &n.evidence,
+                accepts: &n.accepts,
             })
             .collect(),
     };
@@ -641,6 +705,61 @@ mod tests {
         .expect("valid");
         let again: Value = serde_json::from_str(&serialize_map(&first)).expect("json");
         assert_eq!(parse_map(&again).expect("valid"), first);
+    }
+
+    #[test]
+    fn checks_accepted_risks() {
+        let base = |accepts: Value| {
+            parse_map(&json!({
+                "version": 1,
+                "nodes": [
+                    { "id": "asm.off", "kind": "assumption", "title": "off", "stance": "off" },
+                    { "id": "asm.other", "kind": "assumption", "title": "other" },
+                    { "id": "int.x", "kind": "intention", "title": "x",
+                      "depends_on": ["asm.off"], "accepts": accepts }
+                ]
+            }))
+        };
+        let m = base(json!([{ "id": "asm.off", "reason": "known, capped by the limit" }]))
+            .expect("valid");
+        assert_eq!(
+            m.nodes[2].accepts,
+            vec![Accept {
+                id: "asm.off".into(),
+                reason: "known, capped by the limit".into()
+            }]
+        );
+        let again: Value = serde_json::from_str(&serialize_map(&m)).expect("json");
+        assert_eq!(parse_map(&again).expect("valid"), m);
+        for (accepts, want) in [
+            (
+                json!([{ "id": "asm.off", "reason": " " }]),
+                "int.x.accepts[0]: a reason is required",
+            ),
+            (
+                json!([{ "id": "asm.off" }]),
+                "int.x.accepts[0]: a reason is required",
+            ),
+            (
+                json!([{ "id": "asm.other", "reason": "r" }]),
+                "int.x: accepts asm.other, which is not one of its depends_on",
+            ),
+            (
+                json!([{ "id": "asm.off", "reason": "r", "until": "x" }]),
+                "int.x.accepts[0]: unknown key \"until\" (known: id, reason)",
+            ),
+            (
+                json!([{ "id": "asm.off", "reason": "a\n- forged" }]),
+                "int.x.accepts[0]: the reason must be one line",
+            ),
+            (
+                json!([{ "id": "asm.off", "reason": "a" }, { "id": "asm.off", "reason": "b" }]),
+                "int.x: accepts asm.off twice",
+            ),
+        ] {
+            let e = base(accepts).expect_err("invalid");
+            assert!(e.iter().any(|x| x == want), "{want}: {e:?}");
+        }
     }
 
     #[test]

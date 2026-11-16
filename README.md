@@ -32,7 +32,9 @@ premise marks everything resting on it.
   watched files at that run.
 - Derived states: holds, BROKEN, pending review (a watched file changed),
   UNSUPPORTED, AT RISK, untested, skipped, MISSING, VACUOUS (every fuzzed call
-  reverted), off. Only a test that ran
+  reverted), TEST CHANGED (a protected test or what it leans on differs from
+  the last commit), off. A node can accept a dependency that is off, with a
+  reason, and the risk stays listed. Only a test that ran
   and passed against the current files counts as holding; every other state
   of a tested node fails the check.
 - A commit check (`vibloom precommit`), a CI check (`vibloom check`) that also

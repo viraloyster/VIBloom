@@ -2,6 +2,42 @@
 
 Changes to the `vibloom` binary. The web app is not versioned.
 
+## 0.7.0
+
+### Added
+
+- Accepted risks. `vibloom edit <id> --accept <dep> --reason "..."` (and
+  `--unaccept`) lets a node rest on a dependency that is switched off on
+  purpose: the node is no longer at risk or unsupported because of it, its
+  state reads `adopted (accepts 1 risk)`, and `status` ends with an
+  `Accepted risks:` section with each reason (`accepted_risks` in
+  `status --json`; the reason in `context`). It covers only a dependency that
+  is off; once that is on again it has no effect and `status` says it can be
+  removed. Only the verifier sets it; MCP `propose` refuses it.
+- TEST CHANGED: in a git repository, a protected test, a guarded handler it
+  imports or the test configuration in `protect` that differs from `HEAD`
+  makes the node troubled in `status`, `check`, `precommit`, the stop hook and
+  MCP, whatever route the change took. It clears when the change is
+  committed, which only the verifier may do.
+- `vibloom survey <Contract>...` prints only those contracts, and the MCP
+  `survey` tool does the same for the names in `contracts`.
+
+### Changed
+
+- `vibloom research` (and the MCP tool) is short: the notes, one line per
+  contract with its counts, each candidate's title once with the contracts it
+  applies to, and how to work, which asks the agent to get a contract's
+  detail with `survey` before proposing anything about it. On MakerDAO's dss
+  it went from 34.7 KB to 7.8 KB.
+- One stance rule: an assumption is `hypothetical` until someone adopts it,
+  and invariants and intentions are `adopted`, whether added with
+  `vibloom add` (which used to adopt assumptions), written in the map or
+  accepted from a proposal. `add --adopted` adopts an assumption as it is
+  added; `add` and `proposals accept` say which stance the node got.
+- `init --agent codex` and `setup codex` guard `AGENTS.md`.
+- After an edit, and in `context <file>`, nodes that watch the file but have
+  no test are named as not checked by any test, for a person to re-read.
+
 ## 0.6.2
 
 ### Fixed

@@ -1,7 +1,7 @@
 //! The check before a commit. It works with any agent, any editor and no AI at
 //! all: whoever commits goes through it.
 
-use crate::derive::{NodeView, label, troubled};
+use crate::derive::{Evidence, NodeView, label, troubled};
 use crate::hooks::{Role, guarded_for_commit};
 use crate::map::RootsMap;
 
@@ -28,7 +28,11 @@ pub fn precommit(
             let run = v.run.map_or_else(|| "?".to_string(), |r| r.to_string());
             format!("; changed since run {run}: {}", v.changed.join(", "))
         } else if let Some(r) = &v.reason {
-            format!("; failure: {r}")
+            if v.evidence == Evidence::TestChanged {
+                format!("; {r}")
+            } else {
+                format!("; failure: {r}")
+            }
         } else if !v.because.is_empty() {
             format!("; because of {}", v.because.join(", "))
         } else {
@@ -42,7 +46,6 @@ pub fn precommit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::derive::Evidence;
     use crate::hooks::tests::view;
     use crate::map::parse_map;
     use serde_json::json;
@@ -124,6 +127,12 @@ mod tests {
         assert_eq!(
             precommit(&map(), &[view(Evidence::Untested)], &[], Role::Builder, &[]),
             vec!["inv.sum [untested] sum"]
+        );
+        let mut changed = view(Evidence::TestChanged);
+        changed.reason = Some("not committed: test/C.t.sol".into());
+        assert_eq!(
+            precommit(&map(), &[changed], &[], Role::Verifier, &[]),
+            vec!["inv.sum [TEST CHANGED] sum; not committed: test/C.t.sol"]
         );
         assert_eq!(
             precommit(

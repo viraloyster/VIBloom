@@ -568,13 +568,50 @@ fn sets_up_another_stack_and_adds_nodes_by_hand() {
         no_test.err
     );
     let added = vibloom(&dir, &[&add[..], &test[..]].concat(), "", true);
-    assert_eq!(added.out, "Added inv.a-balance-never-goes-negative.");
+    assert_eq!(
+        added.out,
+        "Added inv.a-balance-never-goes-negative (adopted)."
+    );
     let on = ["--on", "inv.a-balance-never-goes-negative"];
     let intent = ["add", "intention", "withdraw caps at the balance"];
     assert_eq!(
         vibloom(&dir, &[&intent[..], &on[..]].concat(), "", true).out,
-        "Added int.withdraw-caps-at-the-balance."
+        "Added int.withdraw-caps-at-the-balance (adopted)."
     );
+    // One rule: an assumption is hypothetical until someone adopts it.
+    let asm = ["add", "assumption", "the oracle is fresh"];
+    assert_eq!(
+        vibloom(&dir, &asm, "", true).out,
+        "Added asm.the-oracle-is-fresh (hypothetical)."
+    );
+    assert_eq!(
+        vibloom(
+            &dir,
+            &[&asm[..], &["--id", "asm.adopted", "--adopted"][..]].concat(),
+            "",
+            true
+        )
+        .out,
+        "Added asm.adopted (adopted)."
+    );
+    assert_eq!(
+        vibloom(
+            &dir,
+            &[&intent[..], &["--id", "int.maybe", "--hypothetical"][..]].concat(),
+            "",
+            true
+        )
+        .out,
+        "Added int.maybe (hypothetical)."
+    );
+    let both = vibloom(
+        &dir,
+        &[&asm[..], &["--adopted", "--hypothetical"][..]].concat(),
+        "",
+        true,
+    );
+    assert_eq!(both.code, 1);
+    assert!(both.err.contains("not both"), "{}", both.err);
     let unknown = vibloom(
         &dir,
         &["add", "assumption", "x", "--on", "inv.nope"],
@@ -752,10 +789,17 @@ fn connects_claude_code_and_codex_and_guards_their_settings() {
     assert!(agents.contains("`vibloom context <file>`"));
 
     // The builder cannot switch the guard off by editing the agent's settings.
+    assert!(
+        read(".vibloom/roots.json")["protect"]
+            .as_array()
+            .is_some_and(|p| p.contains(&json!("AGENTS.md"))),
+        "AGENTS.md is guarded"
+    );
     for f in [
         ".claude/settings.json",
         ".claude/settings.local.json",
         ".mcp.json",
+        "AGENTS.md",
     ] {
         let input = json!({ "cwd": dir, "tool_name": "Edit",
             "tool_input": { "file_path": dir.join(f) } })
@@ -1288,7 +1332,7 @@ fn decides_a_proposal_once_and_says_when_its_id_was_taken() {
     assert_eq!(accepted.code, 0, "{}", accepted.err);
     assert_eq!(
         accepted.out,
-        "Accepted p1 as asm.total-only-grows (asm.grows is already in use)."
+        "Accepted p1 as asm.total-only-grows (hypothetical; asm.grows is already in use)."
     );
 }
 
@@ -1313,4 +1357,284 @@ fn survey_does_not_file_again_what_the_verifier_rejected() {
         again.out
     );
     assert_eq!(cli(&dir, &["proposals"]).out, "No pending proposals.");
+}
+
+fn mcp_call(dir: &Path, bin: bool, name: &str, args: Value) -> (String, bool) {
+    let msg = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": { "name": name, "arguments": args } });
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_vibloom"));
+    cmd.arg("mcp")
+        .current_dir(dir)
+        .env_remove("VIBLOOM_ROLE")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped());
+    if bin {
+        let path = format!(
+            "{}:{}",
+            dir.join("bin").display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        cmd.env("PATH", path);
+    }
+    let mut child = cmd.spawn().expect("spawn");
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(format!("{msg}\n").as_bytes())
+        .expect("write");
+    let o = child.wait_with_output().expect("wait");
+    let reply: Value =
+        serde_json::from_str(String::from_utf8_lossy(&o.stdout).trim()).expect("json");
+    (
+        reply["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        reply["result"]["isError"] == json!(true),
+    )
+}
+
+#[test]
+fn a_risk_accepted_by_the_verifier_stays_visible_and_lets_the_check_pass() {
+    let dir = project();
+    with_runner(&dir);
+    fs::write(dir.join("src/C.sol"), "contract C { }").expect("write");
+    edit_map(&dir, |m| {
+        let nodes = m["nodes"].as_array_mut().expect("nodes");
+        nodes.push(json!({ "id": "asm.token-is-standard", "kind": "assumption",
+            "title": "the token takes no fee on transfer", "stance": "off" }));
+        nodes.push(
+            json!({ "id": "int.exact", "kind": "intention", "title": "accounting is exact",
+            "depends_on": ["inv.sum", "asm.token-is-standard"], "evidence": ["src/C.sol:1"] }),
+        );
+    });
+    assert_eq!(cli(&dir, &["run"]).code, 0);
+    assert_eq!(cli(&dir, &["status"]).code, 1);
+
+    let accept = [
+        "edit",
+        "int.exact",
+        "--accept",
+        "asm.token-is-standard",
+        "--reason",
+        "only USDC is listed, and it takes no fee",
+    ];
+    assert!(cli(&dir, &accept).err.contains("only the verifier"));
+    let no_reason = vibloom(&dir, &accept[..4], "", true);
+    assert!(
+        no_reason.err.contains("--accept needs --reason"),
+        "{}",
+        no_reason.err
+    );
+    let on = vibloom(
+        &dir,
+        &["edit", "int.exact", "--accept", "inv.sum", "--reason", "x"],
+        "",
+        true,
+    );
+    assert!(on.err.contains("inv.sum is not off"), "{}", on.err);
+    assert_eq!(vibloom(&dir, &accept, "", true).code, 0);
+
+    let status = cli(&dir, &["status"]);
+    assert_eq!(status.code, 0, "{}", status.out);
+    assert!(
+        status.out.contains("adopted (accepts 1 risk)  int.exact"),
+        "{}",
+        status.out
+    );
+    assert!(
+        status.out.ends_with(
+            "Accepted risks:\n- int.exact accepts asm.token-is-standard being off: only USDC is listed, and it takes no fee"
+        ),
+        "{}",
+        status.out
+    );
+    let json: Value = serde_json::from_str(&cli(&dir, &["status", "--json"]).out).expect("json");
+    assert_eq!(
+        json["accepted_risks"],
+        json!([{ "node": "int.exact", "dependency": "asm.token-is-standard",
+                 "reason": "only USDC is listed, and it takes no fee", "in_effect": true }])
+    );
+    let ctx = cli(&dir, &["context", "src/C.sol"]).out;
+    assert!(
+        ctx.contains("accepts asm.token-is-standard being off: only USDC is listed"),
+        "{ctx}"
+    );
+    let (mcp, _) = mcp_call(&dir, false, "status", json!({}));
+    assert!(mcp.contains("Accepted risks:"), "{mcp}");
+    let (refused, is_error) = mcp_call(
+        &dir,
+        false,
+        "propose",
+        json!({ "kind": "intention", "title": "y", "evidence": ["a"], "depends_on": ["asm.token-is-standard"],
+                "accepts": [{ "id": "asm.token-is-standard", "reason": "r" }] }),
+    );
+    assert!(
+        is_error && refused.contains("accepts cannot be proposed"),
+        "{refused}"
+    );
+
+    // Acceptance covers only a dependency that is off.
+    edit_map(&dir, |m| m["nodes"][1]["stance"] = json!("adopted"));
+    let inert = cli(&dir, &["status"]);
+    assert_eq!(inert.code, 0, "{}", inert.out);
+    assert!(
+        inert
+            .out
+            .contains("it is on again: remove it with `vibloom edit int.exact --unaccept asm.token-is-standard`"),
+        "{}",
+        inert.out
+    );
+    assert_eq!(
+        vibloom(
+            &dir,
+            &["edit", "int.exact", "--unaccept", "asm.token-is-standard"],
+            "",
+            true
+        )
+        .code,
+        0
+    );
+    assert!(
+        !read_map(&dir)["nodes"][2]
+            .as_object()
+            .expect("node")
+            .contains_key("accepts")
+    );
+}
+
+#[test]
+fn a_protected_test_changed_since_the_last_commit_does_not_hold() {
+    let dir = project();
+    with_runner(&dir);
+    fs::write(dir.join("src/C.sol"), "contract C { }").expect("write");
+    fs::create_dir_all(dir.join("test/handlers")).expect("dir");
+    fs::write(dir.join("test/handlers/H.sol"), "contract H {}").expect("write");
+    fs::write(dir.join("test/Other.sol"), "contract O {}").expect("write");
+    fs::write(
+        dir.join("test/C.t.sol"),
+        "import \"./handlers/H.sol\";\ncontract CT { function invariant_sum() public {} }",
+    )
+    .expect("write");
+    fs::write(dir.join("foundry.toml"), "[profile.default]\n").expect("write");
+    fs::write(dir.join("AGENTS.md"), "# agents\n").expect("write");
+    edit_map(&dir, |m| {
+        m["protect"] = json!([
+            "foundry.toml",
+            "test/handlers/H.sol",
+            "test/Other.sol",
+            "AGENTS.md"
+        ]);
+    });
+    // No repository yet: nothing to compare with, so nothing is flagged.
+    assert_eq!(cli(&dir, &["check"]).code, 0);
+    git(&dir, &["init", "-q"]);
+    // Nor before the first commit.
+    git(&dir, &["add", "-A"]);
+    assert_eq!(cli(&dir, &["status"]).code, 0);
+    git(&dir, &["commit", "-qm", "start"]);
+    assert_eq!(cli(&dir, &["check"]).code, 0);
+
+    // Files no test leans on, or the agent's instructions, do not count.
+    fs::write(dir.join("test/Other.sol"), "contract O { }").expect("write");
+    fs::write(dir.join("AGENTS.md"), "# changed\n").expect("write");
+    assert_eq!(
+        cli(&dir, &["check"]).code,
+        0,
+        "{}",
+        cli(&dir, &["status"]).out
+    );
+
+    // Weakened behind the guard's back, then run again.
+    fs::write(dir.join("test/handlers/H.sol"), "contract H { }").expect("write");
+    let check = cli(&dir, &["check"]);
+    assert_eq!(check.code, 1);
+    assert!(check.out.contains("TEST CHANGED  inv.sum"), "{}", check.out);
+    let stop = hook(&dir, "stop", json!({ "cwd": dir }));
+    let reason = stop["reason"].as_str().unwrap_or_default();
+    assert!(
+        reason.contains("inv.sum [TEST CHANGED] invariant_sum; not committed: test/handlers/H.sol"),
+        "{stop}"
+    );
+    let (mcp, _) = mcp_call(&dir, false, "run", json!({}));
+    assert!(mcp.contains("[TEST CHANGED]"), "{mcp}");
+    fs::write(dir.join("src/C.sol"), "contract C { } ").expect("write");
+    git(&dir, &["add", "src/C.sol"]);
+    let builder = cli(&dir, &["precommit"]);
+    assert_eq!(builder.code, 1);
+    assert!(builder.err.contains("[TEST CHANGED]"), "{}", builder.err);
+
+    // A deletion, or taking the file out of git, counts too.
+    git(&dir, &["checkout", "--", "test/handlers/H.sol"]);
+    git(&dir, &["rm", "-q", "--cached", "foundry.toml"]);
+    assert!(cli(&dir, &["status"]).out.contains("TEST CHANGED"));
+    git(&dir, &["add", "foundry.toml"]);
+    assert_eq!(cli(&dir, &["run"]).code, 0);
+    assert_eq!(cli(&dir, &["status"]).code, 0);
+
+    // The verifier's change clears once it is committed: staged is enough for
+    // the commit check that runs just before.
+    fs::write(
+        dir.join("test/C.t.sol"),
+        "import \"./handlers/H.sol\";\ncontract CT { function invariant_sum() public { } }",
+    )
+    .expect("write");
+    cli(&dir, &["run"]);
+    assert_eq!(cli(&dir, &["status"]).code, 1);
+    git(&dir, &["add", "-A"]);
+    assert_eq!(cli(&dir, &["precommit"]).code, 1);
+    let verifier = vibloom(&dir, &["precommit"], "", true);
+    assert_eq!(verifier.code, 0, "{}", verifier.err);
+    git(&dir, &["commit", "-qm", "tighten"]);
+    assert_eq!(cli(&dir, &["status"]).code, 0);
+
+    // A protected test the verifier added and has not committed is not changed.
+    fs::write(
+        dir.join("test/New.t.sol"),
+        "contract NT { function invariant_new() public {} }",
+    )
+    .expect("write");
+    edit_map(&dir, |m| {
+        m["nodes"].as_array_mut().expect("nodes").push(json!({
+            "id": "inv.new", "kind": "invariant", "title": "new",
+            "test": { "file": "test/New.t.sol", "name": "invariant_new" } }));
+    });
+    let status = cli(&dir, &["status"]).out;
+    assert!(!status.contains("TEST CHANGED"), "{status}");
+}
+
+#[cfg(unix)]
+#[test]
+fn survey_names_contracts_and_research_stays_short() {
+    let dir = dapptools();
+    assert_eq!(with_forge(&dir, &["init"]).code, 0);
+    let one = with_forge(&dir, &["survey", "Vat"]);
+    assert_eq!(one.code, 0, "{}", one.err);
+    assert!(one.out.contains("Vat (src/vat.sol)"), "{}", one.out);
+    let none = with_forge(&dir, &["survey", "Vat", "Nope"]);
+    assert_eq!(none.code, 1);
+    assert_eq!(
+        none.err,
+        "No contract Nope in the survey. The contracts are: Vat."
+    );
+    let brief = with_forge(&dir, &["research"]);
+    assert_eq!(brief.code, 0, "{}", brief.err);
+    assert!(
+        brief.out.contains("- Vat (src/vat.sol): 2 entry points (2 open), 0 state variables, no upgrade gate, calls 0 contracts"),
+        "{}",
+        brief.out
+    );
+    assert!(!brief.out.contains("src/vat.sol:"), "{}", brief.out);
+    assert!(brief.out.contains("the `survey` tool"), "{}", brief.out);
+    let (detail, is_error) = mcp_call(&dir, true, "survey", json!({ "contracts": ["Vat"] }));
+    assert!(!is_error, "{detail}");
+    assert_eq!(detail, one.out);
+    let (empty, is_error) = mcp_call(&dir, true, "survey", json!({ "contracts": [] }));
+    assert!(
+        is_error && empty.contains("at least one contract"),
+        "{empty}"
+    );
+    let (missing, is_error) = mcp_call(&dir, true, "survey", json!({}));
+    assert!(is_error, "{missing}");
 }

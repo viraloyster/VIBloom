@@ -2444,6 +2444,64 @@ impl Contract {
         )
     }
 
+    /// One line of counts, for a brief that has to stay short.
+    pub fn summary(&self) -> String {
+        let gated = self
+            .functions
+            .iter()
+            .filter(|f| !f.gates.is_empty())
+            .count();
+        let checked = self
+            .functions
+            .iter()
+            .filter(|f| f.gates.is_empty() && !f.checks.is_empty())
+            .count();
+        let open = self.functions.len() - gated - checked;
+        let targets: BTreeSet<&str> = self
+            .calls
+            .keys()
+            .map(|k| k.split_once('.').map_or(k.as_str(), |(t, _)| t))
+            .collect();
+        // Zero counts are left out: the brief is read on every start.
+        let split: Vec<String> = [
+            (gated, "gated"),
+            (open, "open"),
+            (checked, "open with a caller check"),
+        ]
+        .iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, what)| format!("{n} {what}"))
+        .collect();
+        let mut line = format!(
+            "- {} ({}): {} entry points",
+            self.name,
+            self.file,
+            self.functions.len()
+        );
+        if !split.is_empty() {
+            line.push_str(&format!(" ({})", split.join(", ")));
+        }
+        if !self.not_found.is_empty() {
+            line.push_str(&format!(", {} not resolved", self.not_found.len()));
+        }
+        line.push_str(&format!(
+            ", {} state variables, {}, calls {} {}",
+            self.state.len(),
+            if self.upgrade_gate.is_some() {
+                "upgradeable"
+            } else {
+                "no upgrade gate"
+            },
+            targets.len(),
+            if targets.len() == 1 {
+                "contract"
+            } else {
+                "contracts"
+            }
+        ));
+        line
+    }
+
     /// The facts, for a person or an agent to read before proposing anything.
     pub fn report(&self) -> String {
         let mut out = vec![format!("{} ({})", self.name, self.file)];
@@ -2639,6 +2697,14 @@ mod tests {
         assert_eq!(
             c.calls.get("IOracle.latestAnswer").map(String::as_str),
             Some("src/Token.sol:4")
+        );
+    }
+
+    #[test]
+    fn sums_a_contract_up_in_one_line() {
+        assert_eq!(
+            token().summary(),
+            "- Token (src/Token.sol): 3 entry points (2 gated, 1 open), 1 not resolved, 0 state variables, upgradeable, calls 1 contract"
         );
     }
 

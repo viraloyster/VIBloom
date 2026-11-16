@@ -24,7 +24,24 @@ pub enum Evidence {
     /// made none): nothing was exercised, so the pass says nothing.
     Vacuous,
     Stale,
+    /// Its protected test, or a guarded file the test leans on, differs from
+    /// the last commit: a pass against it may come from a weakened test.
+    #[serde(rename = "test_changed")]
+    TestChanged,
     None,
+}
+
+/// Guarded files with uncommitted changes, by the id of the tested node that
+/// leans on them.
+pub type Uncommitted = HashMap<String, Vec<String>>;
+
+/// A dependency the node accepts while it is off. `in_effect` is false once
+/// the dependency is switched back on: then the acceptance can go.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct AcceptedRisk {
+    pub id: String,
+    pub reason: String,
+    pub in_effect: bool,
 }
 
 /// What follows from the nodes it depends on.
@@ -65,6 +82,8 @@ pub struct NodeView {
     /// Where the node comes from, as its author recorded it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub accepts: Vec<AcceptedRisk>,
 }
 
 pub(crate) fn matches(n: &RootNode, o: &Outcome) -> bool {
@@ -119,7 +138,12 @@ struct Own {
     fuzz: Option<Fuzz>,
 }
 
-pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<NodeView> {
+pub fn derive(
+    map: &RootsMap,
+    entries: &[RunEntry],
+    current: &Files,
+    uncommitted: &Uncommitted,
+) -> Vec<NodeView> {
     let mut own: HashMap<&str, Own> = HashMap::new();
     // The latest run of the whole suite: the map's runner with nothing added.
     let full = entries
@@ -222,6 +246,21 @@ pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<Node
         );
     }
 
+    // Whatever the runs say, a test that may have been weakened since the
+    // last commit proves nothing until the verifier commits it.
+    for n in &map.nodes {
+        if let Some(files) = uncommitted.get(&n.id).filter(|f| !f.is_empty())
+            && let Some(o) = own.get_mut(n.id.as_str())
+        {
+            o.evidence = Evidence::TestChanged;
+            o.changed = vec![];
+            o.reason = Some(format!(
+                "not committed: {}; a commit by the verifier clears it",
+                files.join(", ")
+            ));
+        }
+    }
+
     let by_id: HashMap<&str, &RootNode> = map.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
     let mut memo: HashMap<String, (Support, Vec<String>)> = HashMap::new();
     // Weakest link wins: off or broken anywhere below makes a node unsupported;
@@ -237,16 +276,17 @@ pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<Node
         }
         let mut support = Support::Ok;
         let mut because = Vec::new();
-        for d in by_id
-            .get(id)
-            .map(|n| n.depends_on.as_slice())
-            .unwrap_or_default()
-        {
+        let node = by_id.get(id);
+        for d in node.map(|n| n.depends_on.as_slice()).unwrap_or_default() {
             let ev = own.get(d.as_str()).map(|o| o.evidence);
             let below = resolve(d, by_id, own, memo).0;
             let off = by_id
                 .get(d.as_str())
                 .is_some_and(|n| n.stance == Stance::Off);
+            // An accepted risk covers a dependency that is off, nothing else.
+            if off && node.is_some_and(|n| n.accepts.iter().any(|a| &a.id == d)) {
+                continue;
+            }
             if off || ev == Some(Evidence::Broken) || below == Support::Unsupported {
                 support = Support::Unsupported;
                 because.push(d.clone());
@@ -258,6 +298,7 @@ pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<Node
                         | Evidence::Skipped
                         | Evidence::Missing
                         | Evidence::Vacuous
+                        | Evidence::TestChanged
                 )
             ) || below == Support::Pending
             {
@@ -294,6 +335,17 @@ pub fn derive(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<Node
                 watch: watched_by(n),
                 test_file: n.test.as_ref().map(|t| t.file.clone()),
                 sources: n.evidence.clone(),
+                accepts: n
+                    .accepts
+                    .iter()
+                    .map(|a| AcceptedRisk {
+                        id: a.id.clone(),
+                        reason: a.reason.clone(),
+                        in_effect: by_id
+                            .get(a.id.as_str())
+                            .is_some_and(|d| d.stance == Stance::Off),
+                    })
+                    .collect(),
             }
         })
         .collect()
@@ -312,6 +364,7 @@ pub fn troubled(v: &NodeView) -> bool {
                 | Evidence::Skipped
                 | Evidence::Missing
                 | Evidence::Vacuous
+                | Evidence::TestChanged
         ) || v.support != Support::Ok)
 }
 
@@ -320,6 +373,7 @@ pub fn label(v: &NodeView) -> &'static str {
         return "off";
     }
     match (v.evidence, v.support) {
+        (Evidence::TestChanged, _) => "TEST CHANGED",
         (Evidence::Broken, _) => "BROKEN",
         (Evidence::Missing, _) => "MISSING",
         (Evidence::Vacuous, _) => "VACUOUS",
@@ -330,6 +384,17 @@ pub fn label(v: &NodeView) -> &'static str {
         (Evidence::Untested, _) => "untested",
         (Evidence::Skipped, _) => "skipped",
         (Evidence::None, _) => v.stance.as_str(),
+    }
+}
+
+/// The label as listings show it: with the risks the node accepts, so an
+/// accepted weakness is never shown as plain sound.
+pub fn shown(v: &NodeView) -> String {
+    let n = v.accepts.iter().filter(|a| a.in_effect).count();
+    match n {
+        0 => label(v).to_string(),
+        1 => format!("{} (accepts 1 risk)", label(v)),
+        n => format!("{} (accepts {n} risks)", label(v)),
     }
 }
 
@@ -392,13 +457,17 @@ mod tests {
         )
     }
 
+    fn clean(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<NodeView> {
+        derive(map, entries, current, &Uncommitted::new())
+    }
+
     fn by_id(vs: Vec<NodeView>) -> HashMap<String, NodeView> {
         vs.into_iter().map(|v| (v.id.clone(), v)).collect()
     }
 
     #[test]
     fn starts_untested_with_off_as_a_choice() {
-        let v = by_id(derive(&map(), &[], &files()));
+        let v = by_id(clean(&map(), &[], &files()));
         assert_eq!(label(&v["inv.sum"]), "untested");
         // Nothing says the invariant holds yet, so neither it nor what rests
         // on it is sound.
@@ -411,7 +480,7 @@ mod tests {
 
     #[test]
     fn propagates_a_broken_invariant_to_intentions() {
-        let v = by_id(derive(
+        let v = by_id(clean(
             &map(),
             &[entry(None, Status::Fail, Status::Pass, files())],
             &files(),
@@ -429,7 +498,7 @@ mod tests {
         let e = entry(None, Status::Pass, Status::Pass, files());
         let mut edited = files();
         edited.insert("src/C.sol".into(), Some("edited".into()));
-        let v = by_id(derive(&map(), std::slice::from_ref(&e), &edited));
+        let v = by_id(clean(&map(), std::slice::from_ref(&e), &edited));
         assert_eq!(v["inv.sum"].evidence, Evidence::Stale);
         assert_eq!(v["inv.sum"].changed, vec!["src/C.sol"]);
         assert_eq!(v["asm.only-add"].support, Support::Pending);
@@ -438,14 +507,14 @@ mod tests {
         let mut added = files();
         added.insert("src/New.sol".into(), Some("n".into()));
         assert_eq!(
-            by_id(derive(&map(), std::slice::from_ref(&e), &added))["inv.sum"].changed,
+            by_id(clean(&map(), std::slice::from_ref(&e), &added))["inv.sum"].changed,
             vec!["src/New.sol"]
         );
 
         let mut removed = files();
         removed.remove("src/Lib.sol");
         assert_eq!(
-            by_id(derive(&map(), &[e], &removed))["inv.sum"].changed,
+            by_id(clean(&map(), &[e], &removed))["inv.sum"].changed,
             vec!["src/Lib.sol"]
         );
     }
@@ -456,11 +525,11 @@ mod tests {
         let mut fixed = files();
         fixed.insert("src/C.sol".into(), Some("fixed".into()));
         assert_eq!(
-            by_id(derive(&map(), std::slice::from_ref(&a), &fixed))["inv.sum"].evidence,
+            by_id(clean(&map(), std::slice::from_ref(&a), &fixed))["inv.sum"].evidence,
             Evidence::Broken
         );
         let b = entry(Some(&a), Status::Pass, Status::Pass, fixed.clone());
-        let v = by_id(derive(&map(), &[a, b], &fixed));
+        let v = by_id(clean(&map(), &[a, b], &fixed));
         assert_eq!(v["inv.sum"].evidence, Evidence::Holds);
         assert_eq!(v["inv.sum"].run, Some(2));
         assert_eq!(v["int.exact"].support, Support::Ok);
@@ -469,7 +538,7 @@ mod tests {
     #[test]
     fn a_skipped_test_is_not_evidence() {
         let e = entry(None, Status::Skip, Status::Pass, files());
-        let v = by_id(derive(&map(), &[e], &files()));
+        let v = by_id(clean(&map(), &[e], &files()));
         assert_eq!(label(&v["inv.sum"]), "skipped");
         assert!(troubled(&v["inv.sum"]));
         assert_eq!(v["asm.only-add"].support, Support::Pending);
@@ -502,7 +571,7 @@ mod tests {
             vec![outcome("invariant_bound", Status::Pass)],
             &["forge", "test", "--json", "--mt", "invariant_bound"],
         );
-        let v = by_id(derive(&map(), &[a.clone(), filtered.clone()], &files()));
+        let v = by_id(clean(&map(), &[a.clone(), filtered.clone()], &files()));
         assert_eq!(v["inv.sum"].evidence, Evidence::Holds);
         // The whole suite ran and the test was not in it: it is gone.
         let gone = whole(
@@ -510,7 +579,7 @@ mod tests {
             vec![outcome("invariant_bound", Status::Pass)],
             &runner,
         );
-        let v = by_id(derive(&map(), &[a, filtered, gone], &files()));
+        let v = by_id(clean(&map(), &[a, filtered, gone], &files()));
         assert_eq!(label(&v["inv.sum"]), "MISSING");
         assert!(troubled(&v["inv.sum"]));
         assert_eq!(
@@ -536,7 +605,7 @@ mod tests {
             reverts: 31,
             dead: vec![],
         });
-        let v = by_id(derive(&map(), &[e], &files()));
+        let v = by_id(clean(&map(), &[e], &files()));
         assert_eq!(label(&v["inv.sum"]), "VACUOUS");
         assert!(troubled(&v["inv.sum"]));
         assert_eq!(
@@ -554,8 +623,60 @@ mod tests {
         let mut e = entry(None, Status::Pass, Status::Pass, files());
         e.outcomes[0].contract = "Other".into();
         assert_eq!(
-            by_id(derive(&map(), &[e], &files()))["inv.sum"].evidence,
+            by_id(clean(&map(), &[e], &files()))["inv.sum"].evidence,
             Evidence::Untested
         );
+    }
+
+    #[test]
+    fn an_accepted_risk_covers_only_a_dependency_that_is_off() {
+        let with = |stance: &str, sum: Status| {
+            let m = parse_map(&json!({
+                "version": 1,
+                "nodes": [
+                    { "id": "inv.sum", "kind": "invariant", "title": "sum",
+                      "test": { "file": "test/C.t.sol", "contract": "CT", "name": "invariant_sum" },
+                      "stance": stance },
+                    { "id": "asm.ok", "kind": "assumption", "title": "ok", "stance": "adopted" },
+                    { "id": "int.x", "kind": "intention", "title": "x",
+                      "depends_on": ["inv.sum", "asm.ok"],
+                      "accepts": [{ "id": "inv.sum", "reason": "known and capped" }] }
+                ]
+            }))
+            .expect("valid");
+            by_id(clean(
+                &m,
+                &[entry(None, sum, Status::Pass, files())],
+                &files(),
+            ))
+        };
+        let v = with("off", Status::Fail);
+        assert!(!troubled(&v["int.x"]), "{:?}", v["int.x"]);
+        assert_eq!(shown(&v["int.x"]), "adopted (accepts 1 risk)");
+        assert!(v["int.x"].accepts[0].in_effect);
+        // Switched back on, the acceptance is inert and what the test says counts.
+        let v = with("adopted", Status::Fail);
+        assert_eq!(label(&v["int.x"]), "AT RISK");
+        assert_eq!(shown(&v["int.x"]), "AT RISK");
+        assert!(!v["int.x"].accepts[0].in_effect);
+        let v = with("adopted", Status::Pass);
+        assert!(!troubled(&v["int.x"]));
+        assert_eq!(shown(&v["int.x"]), "adopted");
+    }
+
+    #[test]
+    fn a_protected_test_changed_since_the_last_commit_proves_nothing() {
+        let e = entry(None, Status::Pass, Status::Pass, files());
+        let changed =
+            Uncommitted::from([("inv.sum".to_string(), vec!["test/C.t.sol".to_string()])]);
+        let v = by_id(derive(&map(), &[e], &files(), &changed));
+        assert_eq!(label(&v["inv.sum"]), "TEST CHANGED");
+        assert!(troubled(&v["inv.sum"]));
+        assert_eq!(
+            v["inv.sum"].reason.as_deref(),
+            Some("not committed: test/C.t.sol; a commit by the verifier clears it")
+        );
+        assert_eq!(v["asm.only-add"].support, Support::Pending);
+        assert_eq!(label(&v["inv.bound"]), "holds");
     }
 }

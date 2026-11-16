@@ -307,7 +307,11 @@ pub fn summary(views: &[NodeView]) -> String {
         .map(|v| {
             let mut parts = vec![format!("{} [{}] {}", v.id, label(v), v.title)];
             if let Some(r) = &v.reason {
-                parts.push(format!("failure: {r}"));
+                parts.push(if v.evidence == crate::derive::Evidence::TestChanged {
+                    r.clone()
+                } else {
+                    format!("failure: {r}")
+                });
             }
             if !v.because.is_empty() {
                 parts.push(format!("because of {}", v.because.join(", ")));
@@ -396,10 +400,12 @@ pub fn post_tool(
             ));
         }
         if !by_hand.is_empty() {
+            let one = by_hand.len() == 1;
             notes.push(format!(
-                "VIBloom: {r} is also watched by {}, which no test checks: make sure the change keeps {} true.",
+                "VIBloom: {r} is also watched by {}, which no test checks, so {} state never changes with the file: a person should re-read {} against this change.",
                 by_hand.join(", "),
-                if by_hand.len() == 1 { "it" } else { "them" }
+                if one { "its" } else { "their" },
+                if one { "it" } else { "them" }
             ));
         }
         if !notes.is_empty() {
@@ -510,6 +516,7 @@ pub(crate) mod tests {
             watch: vec!["src/C.sol".into(), "test/C.t.sol".into()],
             test_file: Some("test/C.t.sol".into()),
             sources: vec![],
+            accepts: vec![],
         }
     }
 
@@ -766,7 +773,7 @@ pub(crate) mod tests {
             "{text}"
         );
         assert!(
-            text.contains("also watched by asm.only-add, which no test checks"),
+            text.contains("also watched by asm.only-add, which no test checks, so its state never changes with the file: a person should re-read it"),
             "{text}"
         );
         assert!(!text.contains("inv.sum, asm.only-add"), "{text}");

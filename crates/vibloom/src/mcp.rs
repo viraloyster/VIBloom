@@ -32,8 +32,12 @@ fn tools() -> Value {
           "inputSchema": { "type": "object", "properties": { "filters": {
               "type": "array", "items": { "type": "string" },
               "description": "Flag and value pairs, for example [\"--match-path\", \"test/A.t.sol\"]." } } } },
-        { "name": "research", "description": "Start here when asked to find a project's assumptions and invariants: the person's notes, what the code says, and how to propose with evidence.",
+        { "name": "research", "description": "Start here when asked to find a project's assumptions and invariants: the person's notes, a summary of what the code says, and how to propose with evidence.",
           "inputSchema": { "type": "object", "properties": {} } },
+        { "name": "survey", "description": "Foundry projects: the full survey of the named contracts (who may call each function, state, upgrades, calls) and the candidates each leads to, with the lines they come from. Ask for a contract's detail before proposing anything about it.",
+          "inputSchema": { "type": "object", "required": ["contracts"], "properties": { "contracts": {
+              "type": "array", "items": { "type": "string" }, "minItems": 1,
+              "description": "Contract names, as the research summary lists them." } } } },
         { "name": "gaps", "description": "Foundry projects: state-changing functions no test names, and handler functions whose every call reverted.",
           "inputSchema": { "type": "object", "properties": {} } },
         { "name": "verify", "description": "Check the run log's hash chain.",
@@ -142,6 +146,15 @@ fn call(cwd: &Path, name: &str, args: &Value) -> Result<String, String> {
         }
         "gaps" => crate::cli::gaps(&root),
         "research" => crate::cli::research(&root),
+        "survey" => {
+            let names = strings(args, "contracts")?;
+            if names.is_empty() {
+                return Err(
+                    "contracts must name at least one contract; `research` lists them".into(),
+                );
+            }
+            crate::cli::survey(&root, false, &names)
+        }
         "verify" => {
             let log = load_log(&root);
             if log.problems.is_empty() {
@@ -180,6 +193,14 @@ fn call(cwd: &Path, name: &str, args: &Value) -> Result<String, String> {
             let map = load_map(&root)?;
             if !args.is_object() {
                 return Err("the arguments must be an object with kind, title and evidence".into());
+            }
+            // Living with a known weakness is the verifier's decision, made
+            // in the map; no proposal can carry it in.
+            if args.get("accepts").is_some() {
+                return Err(
+                    "accepts cannot be proposed: only the verifier accepts a risk, with `vibloom edit <id> --accept <dep> --reason ...`"
+                        .into(),
+                );
             }
             let test = match args.get("test") {
                 None | Some(Value::Null) => None,
@@ -340,6 +361,7 @@ mod tests {
                 "context",
                 "run",
                 "research",
+                "survey",
                 "gaps",
                 "verify",
                 "propose",

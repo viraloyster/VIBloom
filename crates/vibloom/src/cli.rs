@@ -2,7 +2,7 @@
 //! runs processes or talks to git.
 
 use crate::context::context;
-use crate::derive::{Files, NodeView, derive, label, troubled};
+use crate::derive::{Files, NodeView, Uncommitted, derive, label, shown, troubled};
 use crate::forge::{Outcome, RunnerOutputError, parse_forge};
 use crate::gate::precommit;
 use crate::hash::sha256_hex;
@@ -10,8 +10,8 @@ use crate::hooks::{HookInput, HookOutput, Role, post_tool, pre_tool, stop, test_
 use crate::junit::parse_junit;
 use crate::log::{ReadLog, RunBody, RunEntry, extends_log, next_entry, read_log, to_line};
 use crate::map::{
-    Kind, LOG_PATH, MAP_PATH, PROPOSALS_PATH, RootNode, RootsMap, Stance, TestRef, parse_map,
-    serialize_map, test_name, watched_by,
+    Accept, Kind, LOG_PATH, MAP_PATH, PROPOSALS_PATH, RootNode, RootsMap, Stance, TestRef, covers,
+    parse_map, serialize_map, test_name, watched_by,
 };
 use crate::proposals::{Book, Decision, Draft, accept, fresh_id, propose, with_node};
 use crate::scan::{Found, add_found, find_invariants};
@@ -235,12 +235,104 @@ pub fn hash_watched(root: &Path, map: &RootsMap) -> Files {
 }
 
 pub fn views(root: &Path) -> Fallible<Vec<NodeView>> {
+    views_at(root, false)
+}
+
+// `staged` counts what the index holds as committed: the commit check runs
+// just before the commit that will hold it.
+fn views_at(root: &Path, staged: bool) -> Fallible<Vec<NodeView>> {
     let map = load_map(root)?;
     Ok(derive(
         &map,
         &load_log(root).entries,
         &hash_watched(root, &map),
+        &uncommitted(root, &map, staged),
     ))
+}
+
+/// The agents' own files: guarded so the guard cannot be switched off, but
+/// no test leans on them.
+const AGENT_FILES: [&str; 4] = [
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    ".mcp.json",
+    "AGENTS.md",
+];
+
+// Files of the project that differ from HEAD in the index or the working
+// tree, with one call to git. A file not in HEAD (added, never committed) is
+// left out: the verifier added it and has not committed yet.
+fn changed_from_head(root: &Path, staged: bool) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    let Ok(prefix) = git(root, &["rev-parse", "--show-prefix"]) else {
+        return out;
+    };
+    let prefix = prefix.trim();
+    let Ok(text) = git(
+        root,
+        &[
+            "status",
+            "--porcelain",
+            "-z",
+            "--untracked-files=no",
+            "--no-renames",
+            "--",
+            ".",
+        ],
+    ) else {
+        return out;
+    };
+    for rec in text.split('\0') {
+        let (Some(x), Some(y), Some(path)) = (rec.chars().next(), rec.chars().nth(1), rec.get(3..))
+        else {
+            continue;
+        };
+        if x == 'A' || x == '?' || (staged && y == ' ') {
+            continue;
+        }
+        // Porcelain paths start at the repository's top, not at the project.
+        if let Some(rel) = path.strip_prefix(prefix) {
+            out.insert(rel.to_string());
+        }
+    }
+    out
+}
+
+/// For each protected test, the guarded files it leans on that are not
+/// committed: the test itself, the handlers it imports that the map guards,
+/// and the test configuration (`foundry.toml` and the like), which bears on
+/// every test.
+pub fn uncommitted(root: &Path, map: &RootsMap, staged: bool) -> Uncommitted {
+    let mut out = Uncommitted::new();
+    let changed = changed_from_head(root, staged);
+    if changed.is_empty() {
+        return out;
+    }
+    let read = |f: &str| fs::read_to_string(root.join(f)).ok();
+    let shared: Vec<&String> = map
+        .protect
+        .iter()
+        .filter(|p| !covers(&map.tests, p) && !AGENT_FILES.contains(&p.as_str()))
+        .collect();
+    for n in map.nodes.iter().filter(|n| n.protected) {
+        let Some(t) = &n.test else { continue };
+        let mut leans = vec![t.file.clone()];
+        leans.extend(
+            helpers(std::slice::from_ref(&t.file), &map.tests, &read)
+                .into_iter()
+                .filter(|h| map.protect.iter().any(|p| covers(p, h))),
+        );
+        leans.extend(shared.iter().map(|p| (*p).clone()));
+        let files: Vec<String> = changed
+            .iter()
+            .filter(|f| leans.iter().any(|l| covers(l, f)))
+            .cloned()
+            .collect();
+        if !files.is_empty() {
+            out.insert(n.id.clone(), files);
+        }
+    }
+    out
 }
 
 struct Finished {
@@ -406,7 +498,12 @@ pub fn run(root: &Path, extra: &[String]) -> Fallible<RunReport> {
         Ok((entry, log.entries))
     })?;
     entries.push(entry.clone());
-    let views = derive(&map, &entries, &hash_watched(root, &map));
+    let views = derive(
+        &map,
+        &entries,
+        &hash_watched(root, &map),
+        &uncommitted(root, &map, false),
+    );
     Ok(RunReport { entry, views })
 }
 
@@ -445,7 +542,7 @@ pub fn table(vs: &[NodeView]) -> String {
     if vs.is_empty() {
         return "The map has no nodes yet. Run `vibloom scan` or edit .vibloom/roots.json.".into();
     }
-    let w = vs.iter().map(|v| label(v).len()).max().unwrap_or(0);
+    let w = vs.iter().map(|v| shown(v).len()).max().unwrap_or(0);
     let iw = vs.iter().map(|v| v.id.len()).max().unwrap_or(0);
     // What needs attention first; on a long map it must not be looked for.
     let mut rows: Vec<&NodeView> = vs.iter().collect();
@@ -458,9 +555,34 @@ pub fn table(vs: &[NodeView]) -> String {
     )];
     out.extend(
         rows.iter()
-            .map(|v| format!("{:w$}  {:iw$}  {}", label(v), v.id, v.title)),
+            .map(|v| format!("{:w$}  {:iw$}  {}", shown(v), v.id, v.title)),
     );
+    let risks = accepted_risks(vs);
+    if !risks.is_empty() {
+        out.push(String::new());
+        out.push("Accepted risks:".into());
+        out.extend(risks);
+    }
     out.join("\n")
+}
+
+// Each risk a node accepts, with its reason, so an accepted weakness is never
+// out of sight; one no longer in effect is pointed out for removal.
+fn accepted_risks(vs: &[NodeView]) -> Vec<String> {
+    vs.iter()
+        .flat_map(|v| {
+            v.accepts.iter().map(|a| {
+                if a.in_effect {
+                    format!("- {} accepts {} being off: {}", v.id, a.id, a.reason)
+                } else {
+                    format!(
+                        "- {} accepts {} being off, but it is on again: remove it with `vibloom edit {} --unaccept {}`",
+                        v.id, a.id, v.id, a.id
+                    )
+                }
+            })
+        })
+        .collect()
 }
 
 // The JSON a tool printed last: on one line after its logs, or, as newer
@@ -730,9 +852,29 @@ fn compiled(
 /// What the code itself says, for a Foundry project: who may call what, what
 /// can be upgraded or paused, what it calls. With `propose`, the assumptions
 /// that follow are filed as proposals, each with the lines it comes from.
-pub fn survey(root: &Path, file_proposals: bool) -> Fallible<String> {
+/// Only the contracts named in `only`, when it names any.
+pub fn survey(root: &Path, file_proposals: bool, only: &[String]) -> Fallible<String> {
     let map = load_map(root)?;
-    let (contracts, _) = compiled(root, &map, "survey")?;
+    let (mut contracts, _) = compiled(root, &map, "survey")?;
+    if !only.is_empty() {
+        let unknown: Vec<&String> = only
+            .iter()
+            .filter(|n| !contracts.iter().any(|c| &c.name == *n))
+            .collect();
+        if !unknown.is_empty() {
+            let names: BTreeSet<&str> = contracts.iter().map(|c| c.name.as_str()).collect();
+            return Err(format!(
+                "No contract {} in the survey. The contracts are: {}.",
+                unknown
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                names.into_iter().collect::<Vec<_>>().join(", ")
+            ));
+        }
+        contracts.retain(|c| only.contains(&c.name));
+    }
     let mut out = vec!["What the code says (file:line function - who may call it):".to_string()];
     out.extend(contracts.iter().map(crate::survey::Contract::report));
     let cands: Vec<_> = contracts.iter().flat_map(|c| c.candidates()).collect();
@@ -813,6 +955,7 @@ pub fn survey(root: &Path, file_proposals: bool) -> Fallible<String> {
 /// and what must always hold: the facts from the code, the person's notes,
 /// and how to propose, with evidence.
 pub fn research(root: &Path) -> Fallible<String> {
+    let map = load_map(root)?;
     let mut out = vec![
         "Research brief. Goal: find what this project assumes and what must always hold, and propose each with where it comes from. You propose; the verifier decides.".to_string(),
         String::new(),
@@ -827,14 +970,14 @@ pub fn research(root: &Path) -> Fallible<String> {
         )),
     }
     out.push(String::new());
-    match survey(root, false) {
-        Ok(s) => out.push(s),
+    match compiled(root, &map, "research") {
+        Ok((contracts, _)) => out.push(survey_summary(&contracts)),
         Err(e) => out.push(format!("The code could not be surveyed: {e}")),
     }
     out.push(String::new());
     out.push(
         "How to work:
-1. Read the notes and the survey above, then the code the survey points at.
+1. Read the notes and the summary above. Before proposing anything about a contract, ask for its detail with the `survey` tool (`contracts`: its name): who may call each function, its state, its calls, and the lines each candidate comes from. Then read the code it points at.
 2. Look for what the code does not say: the project's docs and README, audits and write-ups of it and of protocols like it, the standards it implements (EIPs), and known failures of the same design.
 3. For deployed contracts, read the chain, never write to it. With ETH_RPC_URL set: `cast code`, `cast call`, `cast storage`, `cast implementation`, `cast admin`, `cast logs`, at a fixed block (`--block`). Record the block.
 4. For each thing found, call the `propose` tool once:
@@ -846,6 +989,57 @@ pub fn research(root: &Path) -> Fallible<String> {
             .into(),
     );
     Ok(out.join("\n"))
+}
+
+// The survey in a few lines for an agent: one per contract, then each
+// candidate's title once, with the contracts it applies to.
+fn survey_summary(contracts: &[crate::survey::Contract]) -> String {
+    let mut out = vec![
+        "The survey, one line per contract (entry points: gated by a modifier, open, open but checking the caller in their body):".to_string(),
+    ];
+    out.extend(contracts.iter().map(crate::survey::Contract::summary));
+    let mut groups: Vec<(bool, String, Vec<&str>)> = Vec::new();
+    for c in contracts {
+        for cand in c.candidates() {
+            let prefix = format!("{}: ", c.name);
+            let title = cand
+                .title
+                .strip_prefix(&prefix)
+                .unwrap_or(&cand.title)
+                .to_string();
+            match groups
+                .iter_mut()
+                .find(|(inv, t, _)| *inv == cand.invariant && *t == title)
+            {
+                Some((_, _, names)) => {
+                    if !names.contains(&c.name.as_str()) {
+                        names.push(&c.name);
+                    }
+                }
+                None => groups.push((cand.invariant, title, vec![&c.name])),
+            }
+        }
+    }
+    for (invariant, heading) in [
+        (false, "Assumption candidates (title: contracts):"),
+        (
+            true,
+            "Invariant candidates, each needing a test before it can enter the map (title: contracts):",
+        ),
+    ] {
+        out.push(String::new());
+        out.push(heading.into());
+        let lines: Vec<String> = groups
+            .iter()
+            .filter(|(inv, _, _)| *inv == invariant)
+            .map(|(_, t, names)| format!("- {t}: {}", names.join(", ")))
+            .collect();
+        if lines.is_empty() {
+            out.push("(none found)".into());
+        }
+        out.extend(lines);
+    }
+    out.join("\n")
 }
 
 /// What the tests leave out, for a Foundry project: state-changing functions
@@ -1175,16 +1369,23 @@ pub const USAGE: &str = "vibloom: assumptions, invariants and intentions for a c
   vibloom install-hook       install the commit check in another clone
   vibloom add <kind> \"<title>\" [--file F --test N [--contract C]] [--watch P] [--on ID]
                              add an assumption, invariant or intention (verifier)
-                             also: [--detail D] [--evidence E] [--id ID] [--hypothetical]
+                             also: [--detail D] [--evidence E] [--id ID]
+                             [--hypothetical | --adopted]; an assumption starts
+                             hypothetical, an invariant or intention adopted
   vibloom edit <id> [--title T] [--detail D] [--stance S] [--on ID] [--not-on ID]
                     [--watch P] [--unwatch P] [--evidence E] [--drop-evidence E]
-                             change a node (verifier)
+                    [--accept ID --reason R] [--unaccept ID]
+                             change a node (verifier); --accept lets it rest on a
+                             dependency that is off, for the reason given
   vibloom remove <id>        take a node out of the map (verifier)
   vibloom scan               add invariant tests the map does not list yet (verifier)
-  vibloom survey [--propose] Foundry: what the code says (who may call what, upgrades,
-                             external calls) and the assumptions and invariants that follow;
-                             --propose files the assumptions as proposals
-  vibloom research           the brief an agent works from to find and propose nodes
+  vibloom survey [<Contract>...] [--propose]
+                             Foundry: what the code says (who may call what, upgrades,
+                             external calls) and the assumptions and invariants that follow,
+                             for every contract or only those named; --propose files the
+                             assumptions as proposals
+  vibloom research           the brief an agent works from to find and propose nodes: the
+                             notes, a summary of the survey and how to work
   vibloom status [--json]    the derived state of every node (exit 1 if any needs attention)
   vibloom run [-- args]      run the tests, record the run, show what changed
   vibloom check [--base ref] [-- args]
@@ -1244,6 +1445,9 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
             "--not-on",
             "--evidence",
             "--drop-evidence",
+            "--accept",
+            "--reason",
+            "--unaccept",
         ],
         "proposals" => &["--on"],
         "add" => &[
@@ -1260,7 +1464,7 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
     };
     let flags: &[&str] = match cmd {
         "status" => &["--json"],
-        "add" => &["--hypothetical", "--unprotected"],
+        "add" => &["--hypothetical", "--adopted", "--unprotected"],
         "survey" => &["--propose"],
         _ => &[],
     };
@@ -1309,7 +1513,7 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
     let as_json = set.contains(&"--json");
     let takes_words = matches!(
         cmd,
-        "hook" | "context" | "proposals" | "add" | "setup" | "edit" | "remove"
+        "hook" | "context" | "proposals" | "add" | "setup" | "edit" | "remove" | "survey"
     );
     if !takes_words && !words.is_empty() {
         return Err(format!(
@@ -1471,7 +1675,7 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
         }
         "add" => {
             verifier(io.role, "changes the map")?;
-            let usage = "Usage: vibloom add <assumption|invariant|intention> \"<title>\" [--file F --test N [--contract C]] [--watch P]... [--on ID]... [--detail D] [--id ID] [--hypothetical] [--unprotected]";
+            let usage = "Usage: vibloom add <assumption|invariant|intention> \"<title>\" [--file F --test N [--contract C]] [--watch P]... [--on ID]... [--detail D] [--id ID] [--hypothetical | --adopted] [--unprotected]";
             let (Some(kind), Some(title), None) = (
                 words.first().and_then(|k| Kind::parse(k)),
                 words.get(1),
@@ -1508,21 +1712,27 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
                 kind,
                 title: (*title).to_string(),
                 detail: opt("--detail").map(str::to_string),
-                stance: if set.contains(&"--hypothetical") {
-                    Stance::Hypothetical
-                } else {
-                    Stance::Adopted
-                },
+                stance: stance_for(
+                    kind,
+                    set.contains(&"--hypothetical"),
+                    set.contains(&"--adopted"),
+                )?,
                 test,
                 watch,
                 depends_on: all("--on"),
                 protected: kind == Kind::Invariant && !set.contains(&"--unprotected"),
                 evidence: all("--evidence"),
+                accepts: vec![],
             };
             let next = with_node(&map, node)
                 .map_err(|e| format!("The node cannot be added:\n- {}", e.join("\n- ")))?;
             write_atomic(&root.join(MAP_PATH), &serialize_map(&next))?;
-            (io.out)(&format!("Added {id}."));
+            let stance = next
+                .nodes
+                .iter()
+                .find(|n| n.id == id)
+                .map_or("", |n| n.stance.as_str());
+            (io.out)(&format!("Added {id} ({stance})."));
             Ok(0)
         }
         "install-hook" => {
@@ -1567,7 +1777,18 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
                         j
                     })
                     .collect();
-                (io.out)(&json!({ "nodes": nodes, "log_problems": problems }).to_string());
+                let risks: Vec<Value> = vs
+                    .iter()
+                    .flat_map(|v| {
+                        v.accepts.iter().map(|a| {
+                            json!({ "node": v.id, "dependency": a.id, "reason": a.reason, "in_effect": a.in_effect })
+                        })
+                    })
+                    .collect();
+                (io.out)(
+                    &json!({ "nodes": nodes, "accepted_risks": risks, "log_problems": problems })
+                        .to_string(),
+                );
             } else {
                 (io.out)(&table(&vs));
             }
@@ -1653,7 +1874,8 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
             Ok(0)
         }
         "survey" => {
-            (io.out)(&survey(&root, set.contains(&"--propose"))?);
+            let only: Vec<String> = words.iter().map(|w| (*w).to_string()).collect();
+            (io.out)(&survey(&root, set.contains(&"--propose"), &only)?);
             Ok(0)
         }
         "research" => {
@@ -1662,11 +1884,45 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
         }
         "edit" => {
             verifier(io.role, "changes the map")?;
-            let usage = "Usage: vibloom edit <id> [--title T] [--detail D] [--stance adopted|hypothetical|off] [--on ID] [--not-on ID] [--watch P] [--unwatch P] [--evidence E] [--drop-evidence E]";
+            let usage = "Usage: vibloom edit <id> [--title T] [--detail D] [--stance adopted|hypothetical|off] [--on ID] [--not-on ID] [--watch P] [--unwatch P] [--evidence E] [--drop-evidence E] [--accept ID --reason R] [--unaccept ID]";
             let (Some(id), None) = (words.first(), words.get(1)) else {
                 return Err(usage.into());
             };
             let mut map = load_map(&root)?;
+            let accept = match (all("--accept").as_slice(), opt("--reason")) {
+                ([], None) => None,
+                ([dep], Some(reason)) => {
+                    // An acceptance covers a dependency switched off on
+                    // purpose; for one that is on it would mean nothing.
+                    let off = map
+                        .nodes
+                        .iter()
+                        .find(|n| n.id == *dep)
+                        .map(|n| n.stance == Stance::Off);
+                    match off {
+                        Some(true) => {}
+                        Some(false) => {
+                            return Err(format!(
+                                "{dep} is not off. Only a dependency switched off (`vibloom edit {dep} --stance off`) can be accepted as a risk."
+                            ));
+                        }
+                        None => return Err(format!("No node {dep} in the map.")),
+                    }
+                    Some(Accept {
+                        id: dep.clone(),
+                        reason: reason.to_string(),
+                    })
+                }
+                ([_], None) => {
+                    return Err("--accept needs --reason \"why this risk is acceptable\".".into());
+                }
+                ([], Some(_)) => return Err("--reason goes with --accept <id>.".into()),
+                _ => {
+                    return Err(
+                        "Accept one dependency at a time: --accept <id> --reason \"...\".".into(),
+                    );
+                }
+            };
             let Some(n) = map.nodes.iter_mut().find(|n| n.id == *id) else {
                 return Err(format!("No node {id} in the map."));
             };
@@ -1715,6 +1971,16 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
             });
             change(&mut n.depends_on, "--on", "--not-on");
             change(&mut n.evidence, "--evidence", "--drop-evidence");
+            for dep in all("--unaccept") {
+                if !n.accepts.iter().any(|a| a.id == dep) {
+                    return Err(format!("{id} accepts no risk from {dep}."));
+                }
+                n.accepts.retain(|a| a.id != dep);
+            }
+            if let Some(a) = accept {
+                n.accepts.retain(|x| x.id != a.id);
+                n.accepts.push(a);
+            }
             let checked: Value =
                 serde_json::from_str(&serialize_map(&map)).map_err(|e| e.to_string())?;
             let map = parse_map(&checked).map_err(|e| {
@@ -1801,7 +2067,7 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
             }
             let problems = precommit(
                 &load_map(&root)?,
-                &views(&root)?,
+                &views_at(&root, io.role == Role::Verifier)?,
                 &staged,
                 io.role,
                 &load_log(&root).problems,
@@ -2000,12 +2266,25 @@ fn setup_agent(root: &Path, agent: &str) -> Fallible<(Vec<String>, Vec<String>)>
                     "Codex: register the tools once with: codex mcp add vibloom -- vibloom mcp".into(),
                     "Codex has no hooks to stop an edit while it works: the commit check and `vibloom check` in CI are what hold.".into(),
                 ],
-                vec![],
+                // Rewriting the instructions would tell the agent the guard is gone.
+                vec!["AGENTS.md".into()],
             ))
         }
         other => Err(format!(
             "Unknown agent {other:?}: use `vibloom setup claude` or `vibloom setup codex`."
         )),
+    }
+}
+
+// One rule for every node added by hand: an assumption is hypothetical until
+// someone adopts it; invariants and intentions are adopted.
+fn stance_for(kind: Kind, hypothetical: bool, adopted: bool) -> Fallible<Stance> {
+    match (hypothetical, adopted) {
+        (true, true) => Err("Give --hypothetical or --adopted, not both.".into()),
+        (true, false) => Ok(Stance::Hypothetical),
+        (false, true) => Ok(Stance::Adopted),
+        (false, false) if kind == Kind::Assumption => Ok(Stance::Hypothetical),
+        (false, false) => Ok(Stance::Adopted),
     }
 }
 
@@ -2107,6 +2386,7 @@ fn proposals(root: &Path, rest: &[&str], on: &[String], io: &mut Io) -> Fallible
                         return Err(format!("No pending proposal {id}."));
                     };
                     let mut node = None;
+                    let mut stance = "";
                     if action == "accept" {
                         // What the person links it to counts with what the
                         // proposal itself rests on.
@@ -2120,6 +2400,11 @@ fn proposals(root: &Path, rest: &[&str], on: &[String], io: &mut Io) -> Fallible
                             format!("{id} cannot be accepted:\n- {}", e.join("\n- "))
                         })?;
                         write_atomic(&root.join(MAP_PATH), &serialize_map(&map))?;
+                        stance = map
+                            .nodes
+                            .iter()
+                            .find(|n| n.id == new_id)
+                            .map_or("", |n| n.stance.as_str());
                         node = Some(new_id);
                     }
                     let d = Decision {
@@ -2135,10 +2420,10 @@ fn proposals(root: &Path, rest: &[&str], on: &[String], io: &mut Io) -> Fallible
                     )?;
                     (io.out)(&match node {
                         Some(n) => match p.node_id.as_deref().filter(|asked| *asked != n) {
-                            Some(asked) => {
-                                format!("Accepted {id} as {n} ({asked} is already in use).")
-                            }
-                            None => format!("Accepted {id} as {n}."),
+                            Some(asked) => format!(
+                                "Accepted {id} as {n} ({stance}; {asked} is already in use)."
+                            ),
+                            None => format!("Accepted {id} as {n} ({stance})."),
                         },
                         None => format!("Rejected {id}."),
                     });

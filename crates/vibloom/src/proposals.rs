@@ -275,6 +275,8 @@ pub fn accept(map: &RootsMap, p: &Proposal) -> Result<(RootsMap, String), Vec<St
         depends_on: p.depends_on.clone(),
         protected: kind == Kind::Invariant,
         evidence: p.evidence.clone(),
+        // Taking on a risk is the verifier's call, never a proposal's.
+        accepts: vec![],
     };
     Ok((with_node(map, node)?, id))
 }

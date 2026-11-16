@@ -94,6 +94,7 @@ pub fn add_found(map: &RootsMap, found: &[Found], watch: &[String]) -> (RootsMap
             depends_on: vec![],
             protected: true,
             evidence: vec![],
+            accepts: vec![],
         });
         added.push(id);
     }
