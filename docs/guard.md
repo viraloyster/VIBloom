@@ -200,7 +200,14 @@ How the survey reads a function's gate:
   `anyone, checks the caller at :LINE`. A caller check is a `require` or
   `assert`, or an `if` that reverts, whose condition uses the caller
   (`msg.sender`, `tx.origin`, `_msgSender()` or a local alias of it) outside a
-  `<` or `>` comparison and not only against the zero address. An `if` that
+  `<` or `>` comparison and not only against the zero address. The caller
+  compared with zero as the whole condition is a check
+  (`require(msg.sender == address(0))`, a chain's own VM); a parameter the
+  caller only passed on, tested against zero, is not. The caller handed to a
+  call into another contract counts only when that call is `view` or `pure`
+  (`require(token.hasRole(ROLE, msg.sender))`), since it then asks about the
+  caller; a state-changing one (`require(gem.transferFrom(msg.sender, ...))`)
+  asks the other contract to act, and is no check. An `if` that
   returns early followed by a revert counts, and so does a modifier that runs
   the function only for some callers (`if (msg.sender == admin) { _; }`). A
   check that only turns some callers away (`require(!blacklisted[msg.sender])`)
@@ -214,6 +221,20 @@ How the survey reads a function's gate:
   `set at deployment`. Inline assembly with `sstore` or `tstore` is flagged
   `writes storage in assembly`, and its `call`, `delegatecall` and
   `staticcall` are reported as low-level calls `(assembly)`.
+- Calls and low-level calls made by library and free functions that the
+  contract's code runs are the contract's own: they run in its context
+  (`SignatureChecker` asking a wallet with `staticcall`). A library function
+  inherited on the `from libraries:` line keeps its
+  `writes storage in assembly`.
+- An entry point with no gate and no caller check named `initialize...` or
+  `init` (`initializeV2`, `init_v2`, not `initiate`), or with an `initializer`
+  or `reinitializer` modifier, gets the candidate that the deployer called it
+  first. Whether a hand-written guard (`require(!initialized)`) really runs it
+  only once is not read, and the candidate says so.
+- A contract that another reported contract inherits is still reported, since
+  it can be deployed alone, with an `inherited by:` line. Its candidates keep
+  its own name in their ids; two contracts of one name get the file in the id
+  too, so no two candidates share one.
 - `fallback` and `receive` count as entry points.
 - Calls with `{value: ...}` options are seen.
 - For a gate whose check reads the contract's own state, the candidate says

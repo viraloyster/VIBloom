@@ -1012,3 +1012,27 @@ fn survey_and_gaps_leave_test_code_out_and_read_it_as_tests() {
     );
     assert!(!gaps.out.contains("VatTest"), "{}", gaps.out);
 }
+
+#[test]
+fn init_in_a_folder_without_sources_or_tests_says_so_and_still_succeeds() {
+    let dir = project();
+    fs::remove_dir_all(dir.join("src")).expect("rm");
+    fs::remove_dir_all(dir.join("test")).expect("rm");
+    let out = cli(&dir, &["init"]);
+    assert_eq!(out.code, 0, "{}", out.err);
+    assert!(
+        out.out
+            .contains("Found no source folder (src/) and no tests (test/) here"),
+        "{}",
+        out.out
+    );
+    assert!(
+        out.out.contains("at the root of the project"),
+        "{}",
+        out.out
+    );
+    assert!(dir.join(".vibloom/roots.json").is_file());
+    // A project with its folders gets no such warning.
+    let full = project();
+    assert!(!cli(&full, &["init"]).out.contains("Found no source folder"));
+}

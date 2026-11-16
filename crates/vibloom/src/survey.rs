@@ -95,6 +95,11 @@ pub struct Contract {
     pub upgrade_gate: Option<(String, String)>,
     pub low_level: Vec<(String, String)>,
     pub guards: Vec<Guard>,
+    /// What its candidate ids start with: its name, and its file too when
+    /// another contract of the project has the same name.
+    pub key: String,
+    /// The other reported contracts of the project that inherit from it.
+    pub inherited_by: Vec<String>,
 }
 
 fn s<'a>(v: &'a Value, k: &str) -> &'a str {
@@ -282,15 +287,42 @@ fn is_caller(e: &Value, aliases: &BTreeSet<i64>) -> bool {
     }
 }
 
+// A call into another contract that may change state: the compiler types
+// it `external` without `view` or `pure`. Without type information it is
+// not known to be one.
+fn changes_other_contract(call: &Value) -> bool {
+    if s(call, "nodeType") != "FunctionCall" {
+        return false;
+    }
+    let mut f = call.get("expression").unwrap_or(&Value::Null);
+    while s(f, "nodeType") == "FunctionCallOptions" {
+        f = f.get("expression").unwrap_or(&Value::Null);
+    }
+    let Some(rest) = type_id(f).strip_prefix("t_function_external_") else {
+        return false;
+    };
+    !matches!(
+        rest.split('$').next().unwrap_or(rest),
+        "view" | "pure" | "constant"
+    )
+}
+
 // Whether a condition depends on who the caller is. An amount compared with
 // `<` or `>` (`balanceOf[msg.sender] >= wad`) and a caller compared with the
-// zero address say nothing about who may call.
+// zero address say nothing about who may call. Neither does the caller handed
+// to a state-changing call into another contract
+// (`require(gem.transferFrom(msg.sender, ...))`): it asks that contract to
+// act, not whether the caller may. A `view` or `pure` one (`hasRole(r,
+// msg.sender)`) answers the question, so it counts.
 fn uses_caller(e: &Value, aliases: &BTreeSet<i64>) -> bool {
     match e {
         Value::Array(items) => items.iter().any(|x| uses_caller(x, aliases)),
         Value::Object(map) => {
             if is_caller(e, aliases) {
                 return true;
+            }
+            if changes_other_contract(e) {
+                return false;
             }
             if s(e, "nodeType") == "BinaryOperation" {
                 let l = e.get("leftExpression").unwrap_or(&Value::Null);
@@ -307,6 +339,29 @@ fn uses_caller(e: &Value, aliases: &BTreeSet<i64>) -> bool {
                 }
             }
             map.values().any(|x| uses_caller(x, aliases))
+        }
+        _ => false,
+    }
+}
+
+// The whole condition compares the caller itself with zero:
+// `require(msg.sender == address(0))` lets only the chain's own VM through
+// (Celo). The zero exclusion in `uses_caller` is for values the caller only
+// passed on, such as a parameter that a sanity check tests.
+fn caller_vs_zero(cond: &Value) -> bool {
+    let none = BTreeSet::new();
+    match s(cond, "nodeType") {
+        "TupleExpression" => match items(cond, "components") {
+            [one] => caller_vs_zero(one),
+            _ => false,
+        },
+        "UnaryOperation" if s(cond, "operator") == "!" => {
+            caller_vs_zero(cond.get("subExpression").unwrap_or(&Value::Null))
+        }
+        "BinaryOperation" if matches!(s(cond, "operator"), "==" | "!=") => {
+            let l = cond.get("leftExpression").unwrap_or(&Value::Null);
+            let r = cond.get("rightExpression").unwrap_or(&Value::Null);
+            (is_caller(l, &none) && is_zero(r)) || (is_caller(r, &none) && is_zero(l))
         }
         _ => false,
     }
@@ -402,8 +457,10 @@ fn assembly_checks_caller(asm: &Value) -> bool {
 /// branch reverts (a `revert` statement or a call to `revert`, `require` or
 /// `assert`), or an inline assembly block that has both `caller()` or
 /// `origin()` and `revert(`, where the condition uses the caller outside of
-/// a `<`, `>`, `<=` or `>=` comparison and not only in an `==` or `!=`
-/// against the zero address, and where passing takes more than the caller
+/// a `<`, `>`, `<=` or `>=` comparison, not only in an `==` or `!=` against
+/// the zero address (unless the whole condition is the caller itself against
+/// zero, see `caller_vs_zero`) and not only as an argument of a
+/// state-changing call into another contract, and where passing takes more than the caller
 /// not being named (see `only_excludes`). An `if` that returns early, followed
 /// by a revert in the same block, counts too. The caller is `msg.sender`,
 /// `tx.origin`, `_msgSender()` or `msgSender()`, or one of `aliases` (see
@@ -413,7 +470,7 @@ fn own_checks<'a>(body: &'a Value, aliases: &BTreeSet<i64>) -> Vec<(&'a Value, O
     walk(body, &mut |x| match s(x, "nodeType") {
         "FunctionCall" if matches!(callee_name(x), "require" | "assert") => {
             if let Some(cond) = args_of(x).first()
-                && uses_caller(cond, aliases)
+                && (uses_caller(cond, aliases) || caller_vs_zero(cond))
                 && !only_excludes(cond, false, aliases)
             {
                 out.push((x, Some(cond)));
@@ -432,7 +489,7 @@ fn own_checks<'a>(body: &'a Value, aliases: &BTreeSet<i64>) -> Vec<(&'a Value, O
                     || branch("falseBody")
                     || only("trueBody", "falseBody")
                     || only("falseBody", "trueBody"))
-                && uses_caller(cond, aliases)
+                && (uses_caller(cond, aliases) || caller_vs_zero(cond))
                 && !only_excludes(cond, pass_on_false, aliases)
             {
                 out.push((x, Some(cond)));
@@ -448,7 +505,7 @@ fn own_checks<'a>(body: &'a Value, aliases: &BTreeSet<i64>) -> Vec<(&'a Value, O
                     && st.get("trueBody").is_some_and(returns)
                     && let Some(cond) = st.get("condition")
                     && stmts[i + 1..].iter().any(always_reverts)
-                    && uses_caller(cond, aliases)
+                    && (uses_caller(cond, aliases) || caller_vs_zero(cond))
                     && !only_excludes(cond, false, aliases)
                 {
                     out.push((st, Some(cond)));
@@ -1582,10 +1639,28 @@ pub fn read(units: &[Unit], is_project: &dyn Fn(&str) -> bool) -> Vec<Contract> 
         })
         .collect();
     targets.sort_by_key(|c| (ix.cons[*c].unit, ix.cons[*c].name));
-    targets
-        .into_iter()
-        .map(|t| analyse(&ix, t, &project))
-        .collect()
+    let mut out: Vec<Contract> = targets.iter().map(|t| analyse(&ix, *t, &project)).collect();
+    // A concrete contract that another one builds on can still be deployed
+    // alone, so it stays; the report says what else carries its code.
+    for (i, t) in targets.iter().enumerate() {
+        out[i].inherited_by = targets
+            .iter()
+            .filter(|o| ix.lin(**o).order[1..].contains(t))
+            .map(|o| ix.cons[*o].name.to_string())
+            .collect();
+        // Two contracts of one name would otherwise share candidate ids.
+        if targets
+            .iter()
+            .filter(|o| ix.cons[**o].name == ix.cons[*t].name)
+            .count()
+            > 1
+        {
+            let file = &units[ix.cons[*t].unit].path;
+            let file = file.strip_suffix(".sol").unwrap_or(file);
+            out[i].key = id_part(&format!("{} {file}", ix.cons[*t].name));
+        }
+    }
+    out
 }
 
 fn analyse(ix: &Index, t: usize, project: &dyn Fn(usize) -> bool) -> Contract {
@@ -1846,6 +1921,39 @@ fn analyse(ix: &Index, t: usize, project: &dyn Fn(usize) -> bool) -> Contract {
             });
         }
     }
+    // Library and free functions run in the contract's own context, so what
+    // they call, the contract calls: `SignatureChecker` asking a wallet.
+    let mut todo: Vec<Def> = Vec::new();
+    for c in &order {
+        let k = &ix.cons[*c];
+        if matches!(k.kind, "library" | "interface") {
+            continue;
+        }
+        for n in items(k.node, "nodes") {
+            if matches!(
+                s(n, "nodeType"),
+                "FunctionDefinition" | "ModifierDefinition"
+            ) {
+                todo.push(Def {
+                    node: n,
+                    unit: k.unit,
+                    con: Some(*c),
+                });
+            }
+        }
+    }
+    let mut seen: BTreeSet<Ptr> = BTreeSet::new();
+    while let Some(d) = todo.pop() {
+        for (_, callee) in cx.modifiers(&d).iter().chain(cx.calls(&d).iter()) {
+            let Callee::Def(cd, _) = callee else { continue };
+            if (cd.con.is_none() || ix.is_library(cd)) && seen.insert(ptr(cd.node)) {
+                walk(cd.node.get("body").unwrap_or(&Value::Null), &mut |x| {
+                    note_call(ix, cd.unit, x, &mut calls, &mut low_level);
+                });
+                todo.push(*cd);
+            }
+        }
+    }
     let found: BTreeSet<&str> = functions.iter().map(|f| f.name.as_str()).collect();
     let abi = ix.units[con.unit]
         .abis
@@ -1885,6 +1993,8 @@ fn analyse(ix: &Index, t: usize, project: &dyn Fn(usize) -> bool) -> Contract {
         upgrade_gate,
         low_level,
         guards,
+        key: id_part(con.name),
+        inherited_by: vec![],
     }
 }
 
@@ -2006,7 +2116,22 @@ impl Function {
     }
 
     fn is_initializer(&self) -> bool {
-        self.others.iter().any(|m| m.starts_with("initializer"))
+        self.others
+            .iter()
+            .any(|m| m.starts_with("initializer") || m.starts_with("reinitializer"))
+    }
+
+    // An initializer guarded by its own code (`require(!initialized)`, a
+    // version check), known only by its name: `initialize`, `initializeV2`,
+    // `init`, `init_v2`; not `initiate`. Whether it runs once is not read.
+    fn is_hand_initializer(&self) -> bool {
+        let n = self.name.as_str();
+        self.gates.is_empty()
+            && self.checks.is_empty()
+            && !self.is_initializer()
+            && (n.starts_with("initialize")
+                || n.strip_prefix("init")
+                    .is_some_and(|rest| !rest.starts_with(|c: char| c.is_ascii_lowercase())))
     }
 
     // Who gets through: its gates, or where its body checks.
@@ -2078,7 +2203,7 @@ impl Contract {
     pub fn candidates(&self) -> Vec<Candidate> {
         let mut out = Vec::new();
         let c = &self.name;
-        let k = id_part(c);
+        let k = &self.key;
         // Who is trusted with what: one assumption per gate.
         let mut by_gate: BTreeMap<&str, Vec<&Function>> = BTreeMap::new();
         for f in &self.functions {
@@ -2177,17 +2302,27 @@ impl Contract {
                 evidence: vec![self.file.clone()],
             });
         }
-        for f in self
-            .functions
-            .iter()
-            .filter(|f| f.gates.is_empty() && f.is_initializer())
-        {
+        // Overloads share a name and so an id: one candidate per name.
+        let mut inits: BTreeMap<&str, (bool, Vec<String>)> = BTreeMap::new();
+        for f in &self.functions {
+            let by_modifier = f.gates.is_empty() && f.is_initializer();
+            if by_modifier || f.is_hand_initializer() {
+                let e = inits.entry(f.name.as_str()).or_default();
+                e.0 |= by_modifier;
+                e.1.push(f.at());
+            }
+        }
+        for (name, (by_modifier, evidence)) in inits {
             out.push(Candidate {
                 invariant: false,
-                id: format!("asm.{k}.{}", id_part(&f.name)),
-                title: format!("{c}: {} was called by the deployer before anyone else could", f.name),
-                detail: "It has no access check and runs once: whoever calls it first sets the roles. Check the deployment transaction of each proxy.".into(),
-                evidence: vec![f.at()],
+                id: format!("asm.{k}.{}", id_part(name)),
+                title: format!("{c}: {name} was called by the deployer before anyone else could"),
+                detail: if by_modifier {
+                    "It has no access check and runs once: whoever calls it first sets the roles. Check the deployment transaction of each proxy.".into()
+                } else {
+                    "It has no access check and no initializer modifier: its name says it initializes, and whether it can run only once rests on its own code (a flag or a version check), which this survey does not read. Whoever calls it first sets what it sets. Check the deployment transaction of each proxy, and that a second call reverts.".into()
+                },
+                evidence,
             });
         }
         if let Some((gate, at)) = &self.upgrade_gate {
@@ -2246,7 +2381,7 @@ impl Contract {
                     "{c}: {target} behaves as its interface says ({})",
                     uniq(members.iter().map(|(m, _)| *m)).join(", ")
                 ),
-                detail: "The contract calls into another one and takes what it does and returns on trust. Which contract is at that address is set at deployment or by an admin.".into(),
+                detail: "The contract calls into another one and takes what it does and returns on trust. Where that address comes from is not read here: fixed at deployment, set by an admin, or given by the caller; each is a different trust, so check every call site.".into(),
                 evidence: members.iter().map(|(_, at)| (*at).to_string()).collect(),
             });
         }
@@ -2315,6 +2450,12 @@ impl Contract {
         if !self.bases.is_empty() {
             out.push(format!("  inherits: {}", self.bases.join(", ")));
         }
+        if !self.inherited_by.is_empty() {
+            out.push(format!(
+                "  inherited by: {} (its code is reported there too)",
+                self.inherited_by.join(", ")
+            ));
+        }
         out.extend(self.own().map(Function::line));
         out.extend(
             self.of_project()
@@ -2324,13 +2465,21 @@ impl Contract {
         let mut from_libs: Vec<&Function> = self.functions.iter().filter(|f| f.library).collect();
         from_libs.sort_by(|a, b| a.name.cmp(&b.name));
         let libs = uniq_owned(from_libs.into_iter().map(|f| {
-            if !f.gates.is_empty() {
+            let mut text = if !f.gates.is_empty() {
                 format!("{} - {}", f.name, f.gates.join(", "))
             } else if !f.checks.is_empty() {
                 format!("{} - checks the caller", f.name)
             } else {
                 f.name.clone()
+            };
+            if f.asm_store {
+                text.push_str(if text.contains(" - ") {
+                    ", writes storage in assembly"
+                } else {
+                    " - anyone, writes storage in assembly"
+                });
             }
+            text
         }));
         if !libs.is_empty() {
             out.push(format!("  from libraries: {}", libs.join(", ")));
@@ -3546,6 +3695,354 @@ mod tests {
         assert!(
             ids.contains(&"asm.w.low-level-delegatecall-assembly".to_string()),
             "{ids:?}"
+        );
+    }
+
+    // A call into another contract, typed as the compiler types it.
+    fn ext(target: Value, member: &str, mutability: &str) -> Value {
+        json!({ "nodeType": "MemberAccess", "memberName": member, "expression": target,
+                "typeDescriptions": { "typeIdentifier":
+                    format!("t_function_external_{mutability}$_t_address_$returns$_t_bool_$") } })
+    }
+    fn placeholder() -> Value {
+        json!({ "nodeType": "PlaceholderStatement" })
+    }
+
+    #[test]
+    fn the_caller_handed_to_another_contract_is_a_check_only_when_it_is_asked_about() {
+        let gem = || id("gem", 1);
+        let c = read_one(
+            vec![contract(
+                "Join",
+                &[],
+                vec![
+                    json!({ "nodeType": "VariableDeclaration", "id": 1, "name": "gem", "src": at(2) }),
+                    // `require(gem.transferFrom(msg.sender, ...))` asks the token to act.
+                    func(
+                        10,
+                        "join",
+                        "external",
+                        3,
+                        json!([]),
+                        body(vec![require(
+                            call(
+                                ext(gem(), "transferFrom", "nonpayable"),
+                                vec![sender(), lit("1")],
+                                4,
+                            ),
+                            4,
+                        )]),
+                    ),
+                    func(
+                        11,
+                        "exit",
+                        "external",
+                        5,
+                        json!([]),
+                        body(vec![
+                            local(
+                                80,
+                                "bool",
+                                call(
+                                    ext(gem(), "transfer", "nonpayable"),
+                                    vec![sender(), lit("1")],
+                                    6,
+                                ),
+                            ),
+                            require(id("ok", 80), 7),
+                        ]),
+                    ),
+                    // `if (!token.hasRole(R, msg.sender)) revert`: a question about the caller.
+                    modifier(
+                        20,
+                        "onlyExternalAdmin",
+                        &[],
+                        body(vec![
+                            revert_if(
+                                not(call(
+                                    ext(gem(), "hasRole", "view"),
+                                    vec![id("R", 2), sender()],
+                                    9,
+                                )),
+                                9,
+                            ),
+                            placeholder(),
+                        ]),
+                    ),
+                    func(
+                        12,
+                        "register",
+                        "external",
+                        10,
+                        json!([uses("onlyExternalAdmin", 20)]),
+                        body(vec![]),
+                    ),
+                    // Celo: only the VM, which calls from the zero address.
+                    modifier(
+                        21,
+                        "onlyCeloVm",
+                        &[],
+                        body(vec![
+                            require(bin("==", sender(), address(lit("0"))), 12),
+                            placeholder(),
+                        ]),
+                    ),
+                    func(
+                        13,
+                        "debit",
+                        "external",
+                        13,
+                        json!([uses("onlyCeloVm", 21)]),
+                        body(vec![]),
+                    ),
+                    func(
+                        14,
+                        "credit",
+                        "external",
+                        14,
+                        json!([]),
+                        body(vec![revert_if(
+                            bin("!=", address(sender()), address(lit("0"))),
+                            15,
+                        )]),
+                    ),
+                    // Anyone but the zero address is no restriction.
+                    func(
+                        16,
+                        "open",
+                        "external",
+                        16,
+                        json!([]),
+                        body(vec![require(bin("!=", sender(), address(lit("0"))), 17)]),
+                    ),
+                ],
+            )],
+            "Join",
+        );
+        let f = |n: &str| c.functions.iter().find(|f| f.name == n).expect(n);
+        assert!(f("join").checks.is_empty(), "{:?}", f("join").checks);
+        assert!(f("exit").checks.is_empty(), "{:?}", f("exit").checks);
+        assert_eq!(f("register").gates, vec!["onlyExternalAdmin"]);
+        assert_eq!(f("debit").gates, vec!["onlyCeloVm"]);
+        assert_eq!(f("credit").checks, vec![15]);
+        assert!(f("open").checks.is_empty());
+        assert!(
+            c.report().contains("src/vat.sol:3 join - anyone\n"),
+            "{}",
+            c.report()
+        );
+    }
+
+    #[test]
+    fn an_initializer_guarded_by_its_own_code_is_known_by_its_name() {
+        let c = read_one(
+            vec![contract(
+                "Wallet",
+                &[],
+                vec![
+                    json!({ "nodeType": "VariableDeclaration", "id": 1, "name": "initialized", "src": at(2) }),
+                    func(
+                        10,
+                        "initialize",
+                        "external",
+                        3,
+                        json!([]),
+                        body(vec![
+                            require(not(id("initialized", 1)), 4),
+                            assign(id("initialized", 1)),
+                        ]),
+                    ),
+                    with_params(
+                        func(11, "initialize", "external", 5, json!([]), body(vec![])),
+                        &[(90, "x", false)],
+                    ),
+                    func(12, "initializeV2", "external", 6, json!([]), body(vec![])),
+                    func(13, "initiate", "external", 7, json!([]), body(vec![])),
+                    func(
+                        14,
+                        "init",
+                        "external",
+                        8,
+                        json!([]),
+                        body(vec![require(bin("==", sender(), id("owner", 2)), 9)]),
+                    ),
+                    func(
+                        15,
+                        "setUp",
+                        "external",
+                        10,
+                        json!([uses_with("reinitializer", vec![lit("2")])]),
+                        body(vec![]),
+                    ),
+                ],
+            )],
+            "Wallet",
+        );
+        let cands = c.candidates();
+        let by_id = |i: &str| cands.iter().find(|c| c.id == i);
+        let init = by_id("asm.wallet.initialize").expect("initialize");
+        assert_eq!(
+            init.title,
+            "Wallet: initialize was called by the deployer before anyone else could"
+        );
+        assert_eq!(init.evidence, vec!["src/vat.sol:3", "src/vat.sol:5"]);
+        assert!(
+            init.detail.contains("no initializer modifier"),
+            "{}",
+            init.detail
+        );
+        assert!(by_id("asm.wallet.initializev2").is_some());
+        assert!(by_id("asm.wallet.initiate").is_none());
+        assert!(by_id("asm.wallet.init").is_none(), "it checks the caller");
+        let set_up = by_id("asm.wallet.setup").expect("reinitializer");
+        assert!(set_up.detail.contains("runs once"), "{}", set_up.detail);
+        let ids: Vec<&str> = cands.iter().map(|c| c.id.as_str()).collect();
+        let unique: BTreeSet<&str> = ids.iter().copied().collect();
+        assert_eq!(unique.len(), ids.len(), "{ids:?}");
+    }
+
+    #[test]
+    fn a_base_that_is_reported_alone_says_who_inherits_it_and_ids_stay_unique() {
+        let gated = |fid: i64, line: usize| {
+            func(
+                fid,
+                "set",
+                "external",
+                line,
+                json!([uses_with("onlyOwner", vec![])]),
+                body(vec![]),
+            )
+        };
+        let cs = read(
+            &[
+                file(
+                    "src/Base.sol",
+                    vec![contract("Base", &[], vec![gated(1, 2)])],
+                ),
+                file(
+                    "src/a/Token.sol",
+                    vec![
+                        import("src/Base.sol", &[], ""),
+                        contract(
+                            "Token",
+                            &["Base"],
+                            vec![func(2, "mint", "external", 3, json!([]), body(vec![]))],
+                        ),
+                    ],
+                ),
+                file(
+                    "src/b/Token.sol",
+                    vec![contract("Token", &[], vec![gated(3, 4)])],
+                ),
+            ],
+            &project,
+        );
+        assert_eq!(cs.len(), 3);
+        let base = named(&cs, "Base");
+        assert_eq!(base.inherited_by, vec!["Token"]);
+        assert!(
+            base.report()
+                .contains("  inherited by: Token (its code is reported there too)\n"),
+            "{}",
+            base.report()
+        );
+        assert_eq!(base.key, "base");
+        let ids: Vec<String> = cs
+            .iter()
+            .flat_map(Contract::candidates)
+            .map(|c| c.id)
+            .collect();
+        assert!(
+            ids.contains(&"asm.token-src-a-token.onlyowner".to_string()),
+            "{ids:?}"
+        );
+        assert!(
+            ids.contains(&"asm.token-src-b-token.onlyowner".to_string()),
+            "{ids:?}"
+        );
+        let unique: BTreeSet<&String> = ids.iter().collect();
+        assert_eq!(unique.len(), ids.len(), "{ids:?}");
+    }
+
+    #[test]
+    fn reads_what_library_code_calls_and_flags_library_assembly_writes() {
+        let sstore = json!({ "nodeType": "InlineAssembly", "src": at(3), "AST": { "nodeType": "YulBlock",
+            "statements": [{ "nodeType": "YulFunctionCall", "functionName": { "name": "sstore" } }] } });
+        let up = contract(
+            "Up",
+            &[],
+            vec![func(
+                1,
+                "upgradeToAndCall",
+                "external",
+                2,
+                json!([]),
+                body(vec![sstore]),
+            )],
+        );
+        let staticcall = json!({ "nodeType": "MemberAccess", "memberName": "staticcall",
+            "expression": { "nodeType": "Identifier", "name": "signer", "referencedDeclaration": 21,
+                            "typeDescriptions": { "typeString": "address" } } });
+        let sig = json!({ "nodeType": "ContractDefinition", "name": "Sig", "contractKind": "library", "nodes": [
+            with_params(func(20, "check", "internal", 2, json!([]), body(vec![stmt(call(staticcall, vec![lit("0")], 3))])),
+                        &[(21, "signer", false)]),
+        ] });
+        let check = json!({ "nodeType": "MemberAccess", "memberName": "check",
+            "expression": { "nodeType": "Identifier", "name": "Sig",
+                            "typeDescriptions": { "typeString": "type(library Sig)" } } });
+        let w = contract(
+            "W",
+            &["Up"],
+            vec![func(
+                2,
+                "verify",
+                "external",
+                4,
+                json!([]),
+                body(vec![stmt(call(check, vec![id("who", 9)], 5))]),
+            )],
+        );
+        let cs = read(
+            &[
+                file(
+                    "src/W.sol",
+                    vec![
+                        import("lib/Up.sol", &[], ""),
+                        import("lib/Sig.sol", &[], ""),
+                        w,
+                    ],
+                ),
+                file("lib/Up.sol", vec![up]),
+                file("lib/Sig.sol", vec![sig]),
+            ],
+            &project,
+        );
+        let report = named(&cs, "W").report();
+        assert!(
+            report.contains(
+                "  from libraries: upgradeToAndCall - anyone, writes storage in assembly\n"
+            ),
+            "{report}"
+        );
+        assert!(
+            report.contains("  lib/Sig.sol:3 low-level staticcall"),
+            "{report}"
+        );
+    }
+
+    #[test]
+    fn a_call_into_another_contract_does_not_claim_where_its_address_comes_from() {
+        let cands = token().candidates();
+        let oracle = cands
+            .iter()
+            .find(|c| c.id == "asm.token.calls-ioracle")
+            .expect("oracle");
+        // `ClipperCallee(who).clipperCall(...)` calls an address the caller gave.
+        assert!(!oracle.detail.contains("set at deployment or by an admin"));
+        assert!(
+            oracle.detail.contains("given by the caller"),
+            "{}",
+            oracle.detail
         );
     }
 }

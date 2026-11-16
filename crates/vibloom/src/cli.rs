@@ -1300,6 +1300,16 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
             for n in p.notes.iter().chain(&agent_notes) {
                 (io.out)(n);
             }
+            // Most often run from the wrong folder: say so rather than leave a
+            // map that watches nothing.
+            let src = p.src.as_deref().unwrap_or("src/");
+            if !io.cwd.join(src).is_dir() && !io.cwd.join(&start.tests).is_dir() && files.is_empty()
+            {
+                (io.out)(&format!(
+                    "Found no source folder ({src}) and no tests ({}) here, so there is nothing to watch yet. Run `vibloom init` at the root of the project, where its foundry.toml or other project file is (remove {MAP_PATH} here first).",
+                    start.tests
+                ));
+            }
             // The commit check comes with the map when the project is the
             // repository itself. A folder inside a larger repository does not
             // take over that repository's hooks unasked.

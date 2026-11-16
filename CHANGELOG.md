@@ -2,6 +2,32 @@
 
 Changes to the `vibloom` binary. The web app is not versioned.
 
+## 0.6.1
+
+### Fixed
+
+- `vibloom survey` no longer counts the caller handed to a state-changing call
+  into another contract as a caller check: `require(gem.transferFrom(msg.sender,
+...))` was reported as `checks the caller`. A `view` or `pure` call that asks
+  about the caller (`hasRole(role, msg.sender)`) still is one.
+- `require(msg.sender == address(0))` is a caller check again: the zero-address
+  exclusion is for parameters the caller only passed on.
+- An initializer guarded by its own code (`require(!initialized)`, a version
+  check) gets the "called by the deployer first" candidate, known by its name
+  (`initialize...`, `init`); a `reinitializer` modifier counts too. Overloads
+  make one candidate.
+- Calls and low-level calls made inside library and free functions the
+  contract runs are reported (`SignatureChecker`'s `staticcall`, OpenZeppelin's
+  `Address` calls).
+- The `from libraries:` line keeps `writes storage in assembly`.
+- The candidate for a call into another contract no longer says its address is
+  set at deployment or by an admin: it may be given by the caller.
+- A contract that another reported contract inherits says so
+  (`inherited by:`), and two contracts of one name no longer share candidate
+  ids.
+- `vibloom init` in a folder with no source folder and no tests says so and
+  how to run it at the project root.
+
 ## 0.6.0
 
 ### Changed
