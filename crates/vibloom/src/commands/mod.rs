@@ -1,6 +1,7 @@
 //! The commands that need more than a line or two in `dispatch`.
 
 pub(crate) mod agents;
+pub(crate) mod diff;
 pub(crate) mod gaps;
 pub(crate) mod guide;
 pub(crate) mod hook;

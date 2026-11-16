@@ -135,6 +135,8 @@ mod tests {
                 status,
                 reason: None,
                 fuzz: None,
+                tool: None,
+                how: None,
             }],
             digests: BTreeMap::from([("inv.a".into(), "abc".into())]),
             error: None,

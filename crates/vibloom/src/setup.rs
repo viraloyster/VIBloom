@@ -275,9 +275,55 @@ pub fn unmentioned(names: &[String], tests: &str) -> Vec<String> {
         .collect()
 }
 
+/// The configuration files of the checks' tools: those a command names
+/// (`--config echidna.yaml`) and Halmos's own `halmos.toml`. Like
+/// `foundry.toml`, they set how hard the tool tries.
+pub fn check_configs(checks: &[crate::map::Check], has: &dyn Fn(&str) -> bool) -> Vec<String> {
+    let mut out = BTreeSet::new();
+    for c in checks {
+        if c.tool == crate::map::Tool::Halmos {
+            out.insert("halmos.toml".to_string());
+        }
+        for w in c
+            .command
+            .iter()
+            .flatten()
+            .flat_map(|a| a.split_whitespace())
+        {
+            let w = w.rsplit('=').next().unwrap_or(w).trim_matches(['"', '\'']);
+            if [".yaml", ".yml", ".toml"].iter().any(|e| w.ends_with(e)) {
+                out.insert(w.trim_start_matches("./").to_string());
+            }
+        }
+    }
+    out.into_iter()
+        .filter(|f| crate::map::safe_path(f) && has(f))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_the_config_files_a_check_runs_with() {
+        let m = crate::map::parse_map(&serde_json::json!({
+            "version": 1,
+            "checks": [
+                { "tool": "echidna", "report": "out/e.json",
+                  "command": ["sh", "-c", "echidna . --config ./echidna.yaml --format json > out/e.json"] },
+                { "tool": "halmos", "report": "out/h.json", "command": ["halmos", "--config=conf/h.toml", "--json-output", "out/h.json"] }
+            ],
+            "nodes": []
+        }))
+        .expect("map");
+        let has = |f: &str| matches!(f, "echidna.yaml" | "conf/h.toml" | "halmos.toml");
+        assert_eq!(
+            check_configs(&m.checks, &has),
+            vec!["conf/h.toml", "echidna.yaml", "halmos.toml"]
+        );
+        assert!(check_configs(&m.checks, &|_| false).is_empty());
+    }
     use serde_json::json;
 
     #[test]

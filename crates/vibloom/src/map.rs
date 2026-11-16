@@ -15,6 +15,81 @@ pub const LOCAL_DIR: &str = ".vibloom/local";
 pub const PROPOSALS_PATH: &str = ".vibloom/proposals.jsonl";
 pub const DEFAULT_RUNNER: [&str; 3] = ["forge", "test", "--json"];
 pub const DEFAULT_TIMEOUT: u64 = 3600;
+/// Written by `init` as the map's first key, so editors can complete it.
+pub const SCHEMA_URL: &str =
+    "https://raw.githubusercontent.com/viraloyster/VIBloom/main/schema/roots.v1.schema.json";
+
+// The keys each object of the map accepts; schema/roots.v1.schema.json lists
+// the same ones and a test keeps the two equal.
+pub const MAP_KEYS: [&str; 11] = [
+    "$schema",
+    "version",
+    "runner",
+    "report",
+    "timeout",
+    "tests",
+    "protect",
+    "strict",
+    "ignore_failures",
+    "checks",
+    "nodes",
+];
+pub const NODE_KEYS: [&str; 11] = [
+    "id",
+    "kind",
+    "title",
+    "detail",
+    "stance",
+    "test",
+    "watch",
+    "depends_on",
+    "protected",
+    "evidence",
+    "accepts",
+];
+pub const TEST_KEYS: [&str; 4] = ["tool", "file", "contract", "name"];
+pub const ACCEPT_KEYS: [&str; 2] = ["id", "reason"];
+pub const CHECK_KEYS: [&str; 3] = ["tool", "report", "command"];
+pub const KINDS: [&str; 3] = ["assumption", "invariant", "intention"];
+pub const STANCES: [&str; 3] = ["adopted", "hypothetical", "off"];
+pub const TOOLS: [&str; 3] = ["halmos", "echidna", "junit"];
+
+/// A tool other than the project's runner whose report decides a node.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Tool {
+    Halmos,
+    Echidna,
+    Junit,
+}
+
+impl Tool {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "halmos" => Some(Self::Halmos),
+            "echidna" => Some(Self::Echidna),
+            "junit" => Some(Self::Junit),
+            _ => None,
+        }
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Halmos => "halmos",
+            Self::Echidna => "echidna",
+            Self::Junit => "junit",
+        }
+    }
+}
+
+/// An extra source of results: the report a tool writes and, optionally, the
+/// command `check` runs to write it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Check {
+    pub tool: Tool,
+    pub report: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<Vec<String>>,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -70,6 +145,9 @@ impl Stance {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestRef {
+    /// The check whose report holds the result; none for the project's runner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<Tool>,
     pub file: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contract: Option<String>,
@@ -107,6 +185,8 @@ pub struct RootNode {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RootsMap {
+    /// The JSON Schema the file names for editors; kept, never fetched.
+    pub schema: Option<String>,
     pub runner: Vec<String>,
     /// Where the runner writes a JUnit XML report; without it, the runner's
     /// output is read as `forge test --json`.
@@ -122,12 +202,15 @@ pub struct RootsMap {
     /// Failing tests no node rests on that `check` lets pass: globs on
     /// `Contract.test` or the test's file. Listed by `status`, never silent.
     pub ignore_failures: Vec<String>,
+    /// Reports of other tools (Halmos, Echidna, a second JUnit runner).
+    pub checks: Vec<Check>,
     pub nodes: Vec<RootNode>,
 }
 
 impl RootsMap {
     pub fn empty() -> Self {
         Self {
+            schema: None,
             runner: DEFAULT_RUNNER.iter().map(|s| (*s).to_string()).collect(),
             report: None,
             timeout: DEFAULT_TIMEOUT,
@@ -135,6 +218,7 @@ impl RootsMap {
             protect: vec![],
             strict: false,
             ignore_failures: vec![],
+            checks: vec![],
             nodes: vec![],
         }
     }
@@ -216,22 +300,15 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
     let Some(obj) = raw.as_object() else {
         return Err(vec!["the map must be a JSON object".into()]);
     };
-    unknown_keys(
-        obj,
-        &[
-            "version",
-            "runner",
-            "report",
-            "timeout",
-            "tests",
-            "protect",
-            "strict",
-            "ignore_failures",
-            "nodes",
-        ],
-        "the map",
-        &mut errors,
-    );
+    unknown_keys(obj, &MAP_KEYS, "the map", &mut errors);
+    let schema = match obj.get("$schema") {
+        None => None,
+        Some(Value::String(s)) => Some(s.clone()),
+        Some(_) => {
+            errors.push("$schema must be text".into());
+            None
+        }
+    };
     if obj.get("version") != Some(&Value::from(1)) {
         errors.push("version must be 1".into());
     }
@@ -287,6 +364,7 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
                 vec![]
             }),
     };
+    let checks = parse_checks(obj.get("checks"), &mut errors);
     let raw_nodes = obj.get("nodes").and_then(Value::as_array);
     if raw_nodes.is_none() {
         errors.push("nodes must be a list".into());
@@ -311,31 +389,9 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
         if !seen.insert(id.to_string()) {
             errors.push(format!("{id}: duplicate id"));
         }
-        unknown_keys(
-            n,
-            &[
-                "id",
-                "kind",
-                "title",
-                "detail",
-                "stance",
-                "test",
-                "watch",
-                "depends_on",
-                "protected",
-                "evidence",
-                "accepts",
-            ],
-            id,
-            &mut errors,
-        );
+        unknown_keys(n, &NODE_KEYS, id, &mut errors);
         if let Some(t) = n.get("test").and_then(Value::as_object) {
-            unknown_keys(
-                t,
-                &["file", "contract", "name"],
-                &format!("{id}.test"),
-                &mut errors,
-            );
+            unknown_keys(t, &TEST_KEYS, &format!("{id}.test"), &mut errors);
         }
         let Some(kind) = n.get("kind").and_then(Value::as_str).and_then(Kind::parse) else {
             errors.push(format!(
@@ -392,8 +448,27 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
                 let name = t.get("name").and_then(Value::as_str);
                 let contract = t.get("contract");
                 let contract_ok = contract.is_none_or(Value::is_string);
+                let tool = match t.get("tool") {
+                    None => Some(None),
+                    Some(v) => v.as_str().and_then(Tool::parse).map(Some),
+                };
+                match tool {
+                    None => errors.push(format!(
+                        "{id}: test.tool must be one of {}",
+                        TOOLS.join(", ")
+                    )),
+                    Some(Some(tool)) if !checks.iter().any(|c| c.tool == tool) => {
+                        errors.push(format!(
+                            "{id}: its test reads the {} report, but \"checks\" lists no {} source",
+                            tool.as_str(),
+                            tool.as_str()
+                        ))
+                    }
+                    _ => {}
+                }
                 match (file, name, t.is_object() && contract_ok) {
                     (Some(file), Some(name), true) => Some(TestRef {
+                        tool: tool.flatten(),
                         file: file.into(),
                         contract: contract.and_then(Value::as_str).map(str::to_string),
                         name: test_name(name),
@@ -463,6 +538,7 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
 
     match (errors.is_empty(), runner, report, tests, protect) {
         (true, Some(runner), Some(report), Some(tests), Some(protect)) => Ok(RootsMap {
+            schema,
             runner,
             report,
             timeout: timeout.unwrap_or(DEFAULT_TIMEOUT),
@@ -470,10 +546,60 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
             protect,
             strict,
             ignore_failures,
+            checks,
             nodes,
         }),
         _ => Err(errors),
     }
+}
+
+fn parse_checks(v: Option<&Value>, errors: &mut Vec<String>) -> Vec<Check> {
+    let Some(v) = v else { return vec![] };
+    let Some(list) = v.as_array() else {
+        errors.push("checks must list {\"tool\", \"report\"} objects".into());
+        return vec![];
+    };
+    let mut out: Vec<Check> = Vec::new();
+    for (i, c) in list.iter().enumerate() {
+        let at = format!("checks[{i}]");
+        let Some(o) = c.as_object() else {
+            errors.push(format!("{at} must be an object with tool and report"));
+            continue;
+        };
+        unknown_keys(o, &CHECK_KEYS, &at, errors);
+        let Some(tool) = o.get("tool").and_then(Value::as_str).and_then(Tool::parse) else {
+            errors.push(format!("{at}.tool must be one of {}", TOOLS.join(", ")));
+            continue;
+        };
+        // A node names its source by tool, so one source per tool.
+        if out.iter().any(|x| x.tool == tool) {
+            errors.push(format!("{at}: {} is listed twice", tool.as_str()));
+        }
+        let Some(report) = o
+            .get("report")
+            .and_then(Value::as_str)
+            .filter(|s| safe_path(s))
+        else {
+            errors.push(format!("{at}.report must be a relative path"));
+            continue;
+        };
+        let command = match o.get("command") {
+            None => None,
+            Some(v) => match strings(v).filter(|c| !c.is_empty()) {
+                Some(c) => Some(c),
+                None => {
+                    errors.push(format!("{at}.command must be a non-empty string list"));
+                    None
+                }
+            },
+        };
+        out.push(Check {
+            tool,
+            report: report.to_string(),
+            command,
+        });
+    }
+    out
 }
 
 fn parse_accepts(id: &str, v: Option<&Value>, errors: &mut Vec<String>) -> Vec<Accept> {
@@ -583,6 +709,8 @@ struct NodeOut<'a> {
 
 #[derive(Serialize)]
 struct MapOut<'a> {
+    #[serde(rename = "$schema", skip_serializing_if = "Option::is_none")]
+    schema: Option<&'a str>,
     version: u8,
     runner: &'a [String],
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -595,12 +723,15 @@ struct MapOut<'a> {
     strict: bool,
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     ignore_failures: &'a [String],
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    checks: &'a [Check],
     nodes: Vec<NodeOut<'a>>,
 }
 
 /// The map as written to disk: snake_case keys, defaults left out.
 pub fn serialize_map(map: &RootsMap) -> String {
     let out = MapOut {
+        schema: map.schema.as_deref(),
         version: 1,
         runner: &map.runner,
         report: map.report.as_deref(),
@@ -609,6 +740,7 @@ pub fn serialize_map(map: &RootsMap) -> String {
         protect: &map.protect,
         strict: map.strict,
         ignore_failures: &map.ignore_failures,
+        checks: &map.checks,
         nodes: map
             .nodes
             .iter()
@@ -806,6 +938,81 @@ mod tests {
             let e = base(accepts).expect_err("invalid");
             assert!(e.iter().any(|x| x == want), "{want}: {e:?}");
         }
+    }
+
+    #[test]
+    fn keeps_the_schema_first_and_reads_checks() {
+        let m = parse_map(&json!({
+            "$schema": SCHEMA_URL,
+            "version": 1,
+            "checks": [{ "tool": "halmos", "report": "out/halmos.json",
+                         "command": ["halmos", "--json-output", "out/halmos.json"] }],
+            "nodes": [{ "id": "inv.sym", "kind": "invariant", "title": "sym",
+                        "test": { "tool": "halmos", "file": "test/S.t.sol", "contract": "S",
+                                  "name": "check_sum(uint256)" } }]
+        }))
+        .expect("valid");
+        assert_eq!(m.checks[0].tool, Tool::Halmos);
+        let t = m.nodes[0].test.as_ref().expect("test");
+        assert_eq!((t.tool, t.name.as_str()), (Some(Tool::Halmos), "check_sum"));
+        let text = serialize_map(&m);
+        assert!(
+            text.starts_with(&format!("{{\n  \"$schema\": \"{SCHEMA_URL}\",")),
+            "{text}"
+        );
+        let again: Value = serde_json::from_str(&text).expect("json");
+        assert_eq!(parse_map(&again).expect("valid"), m);
+    }
+
+    #[test]
+    fn rejects_checks_it_cannot_read() {
+        let errors = |checks: Value, test: Value| {
+            parse_map(&json!({
+                "version": 1,
+                "checks": checks,
+                "nodes": [{ "id": "inv.x", "kind": "invariant", "title": "x", "test": test }]
+            }))
+            .expect_err("invalid")
+        };
+        let t = json!({ "file": "test/X.t.sol", "name": "check_x" });
+        for (checks, want) in [
+            (
+                json!([{ "tool": "medusa", "report": "m.json" }]),
+                "checks[0].tool must be one of halmos, echidna, junit",
+            ),
+            (
+                json!([{ "tool": "halmos", "report": "/tmp/h.json" }]),
+                "checks[0].report must be a relative path",
+            ),
+            (
+                json!([{ "tool": "halmos", "report": "h.json", "command": [] }]),
+                "checks[0].command must be a non-empty string list",
+            ),
+            (
+                json!([{ "tool": "halmos", "report": "h.json", "args": [] }]),
+                "checks[0]: unknown key \"args\" (known: tool, report, command)",
+            ),
+            (
+                json!([{ "tool": "halmos", "report": "a.json" }, { "tool": "halmos", "report": "b.json" }]),
+                "checks[1]: halmos is listed twice",
+            ),
+            (json!({}), "checks must list {\"tool\", \"report\"} objects"),
+        ] {
+            let e = errors(checks, t.clone());
+            assert!(e.iter().any(|x| x == want), "{want}: {e:?}");
+        }
+        let mut with_tool = t.clone();
+        with_tool["tool"] = json!("echidna");
+        let e = errors(json!([]), with_tool);
+        assert!(e.iter().any(|x| x == "inv.x: its test reads the echidna report, but \"checks\" lists no echidna source"), "{e:?}");
+        let mut bad_tool = t;
+        bad_tool["tool"] = json!("forge");
+        let e = errors(json!([]), bad_tool);
+        assert!(
+            e.iter()
+                .any(|x| x == "inv.x: test.tool must be one of halmos, echidna, junit"),
+            "{e:?}"
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Every state shown to a person or an agent is derived here, from the map, the
 //! verified log and the files as they are now. Nothing else can set one.
 
-use crate::forge::{Fuzz, Outcome, Status};
+use crate::forge::{Fuzz, How, Outcome, Status};
 use crate::hash::files_digest;
 use crate::log::RunEntry;
 use crate::map::{Kind, RootNode, RootsMap, Stance, covers, watched_by};
@@ -32,6 +32,9 @@ pub enum Evidence {
     /// Its invariant passed, but every call the fuzzer made reverted (or it
     /// made none): nothing was exercised, so the pass says nothing.
     Vacuous,
+    /// The tool reached no verdict: it timed out or stopped, or its report
+    /// is older than the code it is about.
+    Inconclusive,
     Stale,
     /// Its protected test, or a guarded file the test leans on, differs from
     /// the last commit: a pass against it may come from a weakened test.
@@ -84,6 +87,9 @@ pub struct NodeView {
     /// The fuzz campaign behind the evidence, for an invariant test.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fuzz: Option<Fuzz>,
+    /// The kind of guarantee its test gives: unit, fuzzed or symbolic.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub how: Option<How>,
     pub depends_on: Vec<String>,
     pub watch: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -102,7 +108,8 @@ pub struct NodeView {
 pub(crate) fn matches(n: &RootNode, o: &Outcome) -> bool {
     n.test.as_ref().is_some_and(|t| {
         // A JUnit report may name no file; then the classname and name decide.
-        (o.file.is_empty() || o.file == t.file)
+        o.tool == t.tool
+            && (o.file.is_empty() || o.file == t.file)
             && o.name == t.name
             && t.contract.as_ref().is_none_or(|c| &o.contract == c)
     })
@@ -178,6 +185,13 @@ struct Own {
     reason: Option<String>,
     run: Option<u64>,
     fuzz: Option<Fuzz>,
+    how: Option<How>,
+}
+
+// What a tool's test gives before it ran: a project runner's test is unit
+// or fuzzed, which only its report says.
+fn how_before_a_run(n: &RootNode) -> Option<How> {
+    n.test.as_ref()?.tool.map(crate::checks::default_how)
 }
 
 pub fn derive(
@@ -204,6 +218,7 @@ pub fn derive(
                     reason: None,
                     run: None,
                     fuzz: None,
+                    how: None,
                 },
             );
             continue;
@@ -221,6 +236,7 @@ pub fn derive(
                     reason: None,
                     run: None,
                     fuzz: None,
+                    how: how_before_a_run(n),
                 },
             );
             continue;
@@ -240,6 +256,7 @@ pub fn derive(
                     )),
                     run: Some(entry.seq),
                     fuzz: None,
+                    how: Some(outcome.guarantee()),
                 },
             );
             continue;
@@ -267,6 +284,7 @@ pub fn derive(
                     }),
                     run: Some(entry.seq),
                     fuzz: outcome.fuzz.clone(),
+                    how: Some(outcome.guarantee()),
                 },
             );
             continue;
@@ -274,6 +292,8 @@ pub fn derive(
         let evidence = match outcome.status {
             Status::Fail => Evidence::Broken,
             Status::Skip => Evidence::Skipped,
+            Status::Vacuous => Evidence::Vacuous,
+            Status::Inconclusive => Evidence::Inconclusive,
             Status::Pass if !changed.is_empty() => Evidence::Stale,
             Status::Pass => Evidence::Holds,
         };
@@ -285,6 +305,7 @@ pub fn derive(
                 reason: outcome.reason.clone(),
                 run: Some(entry.seq),
                 fuzz: outcome.fuzz.clone(),
+                how: Some(outcome.guarantee()),
             },
         );
     }
@@ -341,6 +362,7 @@ pub fn derive(
                         | Evidence::Skipped
                         | Evidence::Missing
                         | Evidence::Vacuous
+                        | Evidence::Inconclusive
                         | Evidence::TestChanged
                 )
             ) || below == Support::Pending
@@ -401,6 +423,7 @@ pub fn derive(
                 reason: o.and_then(|o| o.reason.clone()),
                 run: o.and_then(|o| o.run),
                 fuzz: o.and_then(|o| o.fuzz.clone()),
+                how: o.and_then(|o| o.how.clone()),
                 depends_on: n.depends_on.clone(),
                 watch: watched_by(n),
                 test_file: n.test.as_ref().map(|t| t.file.clone()),
@@ -435,6 +458,7 @@ pub fn troubled(v: &NodeView) -> bool {
                 | Evidence::Skipped
                 | Evidence::Missing
                 | Evidence::Vacuous
+                | Evidence::Inconclusive
                 | Evidence::TestChanged
         ) || v.support != Support::Ok)
 }
@@ -450,7 +474,7 @@ pub fn label(v: &NodeView) -> &'static str {
         (Evidence::Vacuous, _) => "VACUOUS",
         (_, Support::Unsupported) if v.kind == Kind::Intention => "AT RISK",
         (_, Support::Unsupported) => "UNSUPPORTED",
-        (Evidence::Stale, _) | (_, Support::Pending) => "pending review",
+        (Evidence::Stale | Evidence::Inconclusive, _) | (_, Support::Pending) => "pending review",
         (Evidence::Holds, _) => "holds",
         (Evidence::Untested, _) => "untested",
         (Evidence::Skipped, _) => "skipped",
@@ -486,10 +510,16 @@ pub fn shown(v: &NodeView) -> String {
     if unreviewed(v) && label(v) != "hypothetical" {
         notes.push("unreviewed".to_string());
     }
+    // The kind of guarantee goes with the state, so a fuzz pass never reads
+    // as a proof.
+    let state = match v.how.as_ref().filter(|_| v.stance != Stance::Off) {
+        Some(h) => format!("{}, {}", label(v), h.shown()),
+        None => label(v).to_string(),
+    };
     if notes.is_empty() {
-        label(v).to_string()
+        state
     } else {
-        format!("{} ({})", label(v), notes.join(", "))
+        format!("{state} ({})", notes.join(", "))
     }
 }
 
@@ -510,11 +540,13 @@ pub fn why(v: &NodeView) -> Option<String> {
         let run = v.run.map_or_else(|| "?".to_string(), |r| r.to_string());
         Some(format!("changed since run {run}: {}", v.changed.join(", ")))
     } else if let Some(r) = &v.reason {
-        Some(if v.evidence == Evidence::TestChanged {
-            r.clone()
-        } else {
-            format!("failure: {r}")
-        })
+        Some(
+            if matches!(v.evidence, Evidence::TestChanged | Evidence::Inconclusive) {
+                r.clone()
+            } else {
+                format!("failure: {r}")
+            },
+        )
     } else if !v.because.is_empty() {
         Some(format!("because of {}", v.because.join(", ")))
     } else if v.evidence == Evidence::Untested {
@@ -564,6 +596,8 @@ mod tests {
             status,
             reason: (status == Status::Fail).then(|| "drift".into()),
             fuzz: None,
+            tool: None,
+            how: None,
         }
     }
 

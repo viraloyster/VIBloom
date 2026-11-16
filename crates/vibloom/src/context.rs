@@ -265,6 +265,7 @@ mod tests {
             reason: None,
             run: None,
             fuzz: None,
+            how: None,
             depends_on: vec![],
             watch: vec![],
             test_file: None,

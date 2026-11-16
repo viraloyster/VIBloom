@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/viraloyster/VIBloom/main/schema/roots.v1.schema.json",
+  "title": "VIBloom roots map, version 1",
+  "description": "The map of a code project's assumptions, invariants and intentions (.vibloom/roots.json). Rules a schema cannot say: ids are unique; depends_on names existing ids, never the node itself, and the links form no cycle; each accepts id is one of the node's depends_on; a test with a tool needs a check of that tool, and checks lists each tool once. See docs/format.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "nodes"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "The schema this file follows, for editors."
+    },
+    "version": {
+      "const": 1,
+      "description": "Bumped on any breaking change."
+    },
+    "runner": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "description": "The project's test command. Default: forge test --json."
+    },
+    "report": {
+      "$ref": "#/$defs/path",
+      "description": "Where the runner writes a JUnit XML report. Without it the runner's output is read as forge test --json."
+    },
+    "timeout": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "description": "Seconds a run (and each check's command) may take. Default 3600."
+    },
+    "tests": {
+      "$ref": "#/$defs/path",
+      "description": "The tests folder. Default test/."
+    },
+    "protect": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/path"
+      },
+      "description": "Further paths only the person may change."
+    },
+    "strict": {
+      "type": "boolean",
+      "description": "Count unreviewed nodes as needing attention. Default false."
+    },
+    "ignore_failures": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "\\S"
+      },
+      "description": "Globs (* and ?) on Contract.test or a test's file: failing tests no node rests on that may pass."
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/check"
+      },
+      "description": "Reports of other tools that decide nodes."
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/node"
+      }
+    }
+  },
+  "$defs": {
+    "path": {
+      "type": "string",
+      "pattern": "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)(?:/(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+))*/?$",
+      "description": "A path from the project root: no leading /, no . or .. segments, no backslash; a folder ends in /."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "report"],
+      "properties": {
+        "tool": {
+          "enum": ["halmos", "echidna", "junit"]
+        },
+        "report": {
+          "$ref": "#/$defs/path",
+          "description": "The file the tool writes: halmos --json-output, echidna --format json, or JUnit XML."
+        },
+        "command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "Run by check before reading the report, which is deleted first. Without it the report must be newer than every file its nodes watch."
+        }
+      }
+    },
+    "test": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "name"],
+      "properties": {
+        "tool": {
+          "enum": ["halmos", "echidna", "junit"],
+          "description": "The check whose report holds the result. Without it, the project's runner."
+        },
+        "file": {
+          "$ref": "#/$defs/path",
+          "description": "The test's source file in the project."
+        },
+        "contract": {
+          "type": "string",
+          "description": "The test's contract, or a JUnit classname."
+        },
+        "name": {
+          "type": "string",
+          "description": "The test's name; a Solidity signature loses its parameters."
+        }
+      }
+    },
+    "accept": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "reason"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*\\S[^\\u0000-\\u001f\\u007f-\\u009f]*$"
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "title"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "enum": ["assumption", "invariant", "intention"]
+        },
+        "title": {
+          "type": "string",
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*\\S[^\\u0000-\\u001f\\u007f-\\u009f]*$"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "stance": {
+          "enum": ["adopted", "hypothetical", "off"],
+          "description": "Default: hypothetical for an assumption, adopted otherwise."
+        },
+        "test": {
+          "$ref": "#/$defs/test"
+        },
+        "watch": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/path"
+          }
+        },
+        "depends_on": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "This node rests on these: if one fails, this is at risk."
+        },
+        "protected": {
+          "type": "boolean",
+          "description": "Only the person may edit its test. Default true for an invariant."
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "accepts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/accept"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "invariant"
+          }
+        }
+      },
+      "then": {
+        "required": ["test"]
+      }
+    }
+  }
+}

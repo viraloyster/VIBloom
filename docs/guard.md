@@ -8,9 +8,10 @@ to need them.
 `vibloom` keeps a map of what a project assumes, what must always hold and
 what each part is for, records every test run in a local log and derives from
 those runs whether each node still stands. An agent reads the map and
-proposes; it never sets a state. It reads Foundry (`forge test --json`) and
-any runner that writes JUnit XML: cargo-nextest, pytest, Jest, mocha
-(Hardhat), Go and most others. No model is involved and it depends on no
+proposes; it never sets a state. It reads Foundry (`forge test --json`),
+any runner that writes JUnit XML (cargo-nextest, pytest, Jest, mocha
+(Hardhat), Go and most others) and the reports of Halmos and Echidna, and
+it says what kind of guarantee each result gives. No model is involved and it depends on no
 particular agent: Claude Code, Codex, Cursor, Aider or a person editing by
 hand all go through the same map, rules and commit check.
 
@@ -145,12 +146,14 @@ with `VIBLOOM_ROLE=verifier`.
 
 ## The map
 
-`.vibloom/roots.json`, written by people and kept in git. From
-`examples/foundry-vault` after the [quickstart](quickstart.md), one of its two
-invariants left out:
+`.vibloom/roots.json`, written by people and kept in git. Its format is
+published as a JSON Schema and described for other tools in
+[format.md](format.md). From `examples/foundry-vault` after the
+[quickstart](quickstart.md), one of its two invariants left out:
 
 ```json
 {
+  "$schema": "https://raw.githubusercontent.com/viraloyster/VIBloom/main/schema/roots.v1.schema.json",
   "version": 1,
   "runner": ["forge", "test", "--json"],
   "tests": "test/",
@@ -217,7 +220,9 @@ context <file>` and the hook after an edit name it for a person to re-read.
 - `ignore_failures` lists globs (`*` and `?`) on `Contract.test` or on a
   test's file; failing tests no node rests on that match one do not fail the
   check (see [A red suite is red](#a-red-suite-is-red)).
-- `runner`, `report`, `tests` and `timeout`: see [Runners](#runners).
+- `runner`, `report`, `tests` and `timeout`: see [Runners](#runners);
+  `checks`, and a test's `tool`: see [Other tools](#other-tools-halmos-echidna-a-second-junit-runner).
+- `$schema` names the schema for editors; `init` writes it first.
 
 The map is checked strictly: an unknown key, such as a mistyped `watch`, is an
 error, not something ignored.
@@ -299,19 +304,19 @@ and `status` says it can be removed. The MCP `propose` tool refuses it.
 
 ## Derived states
 
-| State          | When                                                                           |
-| -------------- | ------------------------------------------------------------------------------ |
-| holds          | the latest run of its test passed, and no watched file changed since           |
-| BROKEN         | the latest run of its test failed                                              |
-| pending review | it passed, but a watched file changed since; or something below it is pending  |
-| UNSUPPORTED    | something it rests on is broken, off or unsupported                            |
-| AT RISK        | the same, for an intention                                                     |
-| untested       | its test has never run                                                         |
-| skipped        | the latest run skipped its test                                                |
-| MISSING        | its test ran once, but the latest run of the whole suite did not include it    |
-| VACUOUS        | its invariant passed, but every call the fuzzer made reverted, or it made none |
-| TEST CHANGED   | its protected test, or a guarded file the test leans on, differs from HEAD     |
-| off            | switched off by a person; a choice, not a problem                              |
+| State          | When                                                                                                                                        |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| holds          | the latest run of its test passed, and no watched file changed since                                                                        |
+| BROKEN         | the latest run of its test failed                                                                                                           |
+| pending review | it passed, but a watched file changed since; its tool did not finish or its report is older than the code; or something below it is pending |
+| UNSUPPORTED    | something it rests on is broken, off or unsupported                                                                                         |
+| AT RISK        | the same, for an intention                                                                                                                  |
+| untested       | its test has never run                                                                                                                      |
+| skipped        | the latest run skipped its test                                                                                                             |
+| MISSING        | its test ran once, but the latest run of the whole suite did not include it                                                                 |
+| VACUOUS        | its invariant passed, but every call the fuzzer made reverted, or it made none; or Halmos found every path reverted                         |
+| TEST CHANGED   | its protected test, or a guarded file the test leans on, differs from HEAD                                                                  |
+| off            | switched off by a person; a choice, not a problem                                                                                           |
 
 Every state but holds and off needs attention: `status`, `run` and `check`
 exit 1, the commit check refuses and the agent is sent back. A node with no
@@ -376,7 +381,7 @@ vibloom                       # where things stand and the one next step
 vibloom init [--stack S] [--agent claude|codex]
 vibloom check [--base ref [--allow-guard-changes]] [--strict] [--json | --format github] [-- args]
 vibloom status [--json] [--strict]
-vibloom add [assumption|invariant|intention] "<title>" [--on ID]... [--file F --test N [--contract C]] [--watch P]... [--evidence E]... [--detail D] [--id ID] [--hypothetical | --adopted] [--unprotected]
+vibloom add [assumption|invariant|intention] "<title>" [--on ID]... [--file F --test N [--contract C] [--tool T]] [--watch P]... [--evidence E]... [--detail D] [--id ID] [--hypothetical | --adopted] [--unprotected]
 vibloom proposals [<id> | --full] [--contract C]
 vibloom proposals accept <id>... | --all [--contract C] [--on ID]...
 vibloom proposals reject <id>... | --all [--contract C]
@@ -399,6 +404,7 @@ vibloom hooks                 # print the Claude Code hooks configuration
 vibloom hook pre-tool|post-tool|stop
 vibloom install-hook          # install the commit check in this clone
 vibloom precommit             # the commit check itself
+vibloom diff <ref> [--json]   # what is gone, weakened or changed under the map since <ref>
 vibloom verify                # check the local log's hash chain
 vibloom repair                # set aside everything after a broken link
 ```
@@ -448,13 +454,14 @@ vault's books broken, two of its five nodes shown:
       "changed": [],
       "files": ["test/Vault.t.sol", "src/Vault.sol", "test/handlers/VaultHandler.sol"],
       "fuzz": { "calls": 2048, "reverts": 204, "runs": 64 },
+      "how": { "depth": 32, "kind": "fuzzed", "loop": null, "runs": 64, "shown": "fuzzed 64x32" },
       "id": "inv.shares-are-backed",
       "kind": "invariant",
       "needs_attention": false,
       "reason": null,
       "rests_on_unreviewed": ["asm.rounding-in-withdraw-always"],
       "run": 5,
-      "shown": "holds (rests on 1 unreviewed)",
+      "shown": "holds, fuzzed 64x32 (rests on 1 unreviewed)",
       "stance": "adopted",
       "state": "holds",
       "title": "invariant_sharesAreBacked",
@@ -464,6 +471,7 @@ vault's books broken, two of its five nodes shown:
       "changed": [],
       "files": [],
       "fuzz": null,
+      "how": null,
       "id": "int.nobody-can-take-out-more-than",
       "kind": "intention",
       "needs_attention": true,
@@ -498,7 +506,12 @@ vault's books broken, two of its five nodes shown:
 ```
 
 - `state` is the plain label of the table above; `shown` adds what the table
-  shows after it (`accepts 1 risk`, `rests on 2 unreviewed`, `unreviewed`).
+  shows after it: the kind of guarantee (`fuzzed 64x32`) and the notes
+  (`accepts 1 risk`, `rests on 2 unreviewed`, `unreviewed`).
+- `how` is the kind of guarantee the node's test gives: `kind` (`unit`,
+  `fuzzed`, `symbolic`), `runs` and `depth` (calls per run) when known,
+  `loop` for a bounded symbolic run when the command sets it, and `shown`.
+  Null for a node without a test, and for a runner's test that never ran.
 - `troubled` is the node's own trouble; `needs_attention` is what counts,
   with `strict` applied.
 - `reason` is one line, or null; `files` lists the node's test first, then
@@ -513,12 +526,13 @@ vault's books broken, two of its five nodes shown:
   `test_changed`, `test_removed`, `unprotected`, `switched_off`,
   `accepts_added`, `dependency_removed`, `runner_changed`, `report_changed`,
   `timeout_changed`, `tests_changed`, `protect_removed`,
-  `ignore_failures_added`, `strict_off`), a `path`, a `node` when it is about
-  one, and a `message`.
+  `ignore_failures_added`, `strict_off`, `check_removed`, `check_changed`), a
+  `path`, a `node` when it is about one, and a `message`.
 - `run` is null for `status`. `tool_error` is null unless the exit is 2.
   Every accepted risk is `{ "node", "dependency", "reason", "in_effect" }`.
 
 New keys may be added; the ones above keep their meaning while `format` is 1.
+The shape is published as [`schema/status.v1.schema.json`](../schema/status.v1.schema.json).
 
 `check --format github` prints the usual text and, after it, GitHub Actions
 workflow commands: `::error` for each node that needs attention (on its test
@@ -552,6 +566,79 @@ a mocha reporter such as `mocha-junit-reporter` set in `hardhat.config`.)
   with `vibloom add invariant ... --file F --test N`.
 - `"timeout"` in the map is the number of seconds a run may take (3600 when
   not given). A run that does not finish is stopped and recorded as an error.
+
+### Other tools: Halmos, Echidna, a second JUnit runner
+
+The `runner` is the project's own test command. Results of other tools enter
+through `checks`, each `{ "tool", "report", "command"? }`, and a node reads
+one with `"tool"` in its test:
+
+```json
+{
+  "checks": [
+    {
+      "tool": "halmos",
+      "report": "halmos-report.json",
+      "command": ["halmos", "--loop", "2", "--json-output", "halmos-report.json"]
+    },
+    {
+      "tool": "echidna",
+      "report": "echidna.json",
+      "command": [
+        "sh",
+        "-c",
+        "echidna . --contract VaultEchidna --config echidna.yaml --format json > echidna.json"
+      ]
+    }
+  ]
+}
+```
+
+```bash
+vibloom add invariant "Withdraw takes out exactly the assets it pays" --file test/VaultSym.t.sol --contract VaultSymTest --test check_withdrawTakesAssetsOut --tool halmos --watch src/Vault.sol
+```
+
+- With `command`, `check` and `run` delete the report, run the command after
+  the runner, with the same `timeout`, and read the report. A tool that finds
+  a counterexample exits non-zero; the report says so. A command that writes
+  no report is an error (exit 2), with what it printed last.
+- Without `command`, a report someone ran by hand counts only while it is
+  newer than every file the nodes reading it watch. Missing or older, those
+  nodes are pending review and say why; a stale report is never trusted.
+- Checks run with a run of the whole suite only: a filtered run
+  (`vibloom run -- --mt X`) says nothing about them.
+- Halmos (`--json-output`): PASS holds; COUNTEREXAMPLE is BROKEN with the
+  model in the reason; REVERT_ALL is VACUOUS; TIMEOUT, STUCK and EXCEPTION
+  are pending review with "halmos did not finish". Halmos reads forge's build
+  output with its syntax trees; set `ast = true` in `foundry.toml`, or the
+  build `forge test` leaves behind has none and Halmos finds no tests.
+- Echidna (`--format json`, written to the report by the command): passed and
+  verified hold; solved is BROKEN with the reproducing calls; fuzzing,
+  shrinking and error are pending review with "echidna did not finish".
+  This reader was written from Echidna's documented output and has not yet
+  been checked against a real campaign; the Halmos one was.
+- `junit`: a second runner's JUnit XML, read like `report`.
+- Medusa is not supported: it writes no machine-readable test results (only
+  coverage and revert reports, and an exit code), and its log is no format.
+
+`init` and `scan` guard the tools' configuration as they guard
+`foundry.toml`: `halmos.toml` and any `.yaml`, `.yml` or `.toml` file a
+check's command names go to `protect` when they exist. Removing a check or
+changing its command or report is a guard change for `check --base`.
+
+### What each kind of guarantee establishes
+
+`status` shows the kind next to every state (`holds, fuzzed 64x32`,
+`holds, symbolic (bounded, loop 2)`, `BROKEN, unit`), and the JSON carries it
+as `how`. A result is never shown as a stronger kind than its tool gives.
+
+| Kind                 | Establishes                                                                | Does not establish                                                                  |
+| -------------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `unit`               | the property for the inputs the test wrote down                            | anything about other inputs or call orders                                          |
+| `fuzzed`             | no counterexample in the runs and calls made (runs x calls per run, shown) | that none exists; inputs the fuzzer did not reach, deeper sequences, other targets  |
+| `symbolic (bounded)` | no counterexample for any input, within the loop and depth bounds          | anything past those bounds, past the solver's timeouts, or outside the test's setup |
+
+A failure is a failure whatever the kind: one counterexample is enough.
 
 ## For smart contracts
 
@@ -894,8 +981,8 @@ runs the tests:
 - **The map.** A node removed, a node's test changed or removed, `protected`
   turned off, a stance set to `off`, an `accepts` added, a `depends_on` edge
   removed, an `ignore_failures` pattern added, `strict` turned off, the
-  `runner`, `report`, `timeout` or `tests` changed, or an entry taken out of
-  `protect`. Adding nodes, evidence, edges, `protect` entries or new
+  `runner`, `report`, `timeout` or `tests` changed, an entry taken out of
+  `protect`, or a check removed or its command or report changed. Adding nodes, evidence, edges, `protect` entries or new
   protected tests is not a guard change.
 - **What the base's map guards.** Each protected test of the base, the
   helpers it imports and every path in the base's `protect` is compared with
@@ -980,6 +1067,40 @@ With that in place, an agent with full control of its own machine can still
 write any code, but it cannot merge a change that breaks an invariant, weakens
 the map or edits a protected test without the owner's review.
 
+## After an audit
+
+What the auditors reviewed is a commit. Tag it, hand them the map with the
+code, and before each release compare what is there now with what they saw:
+
+```bash
+git tag audit-2026-11              # the commit the auditors reviewed
+vibloom diff audit-2026-11         # before each release
+```
+
+`vibloom diff <ref>` reads the map and the files it guards at `<ref>` from git
+and compares them with the working tree. It changes nothing and anyone may
+run it. It lists the nodes that are gone or weakened (test changed or
+removed, protection off, switched off, an accepted risk added, a dependency
+removed), the guard changes (guarded files, runner, checks), the nodes still
+the same in the map whose watched files changed (what the auditors saw is not
+what is there now), the nodes added since, and one closing line with the
+counts:
+
+```
+$ vibloom diff audit-2026-11
+Guard changes since audit-2026-11:
+- test/VaultSym.t.sol: guarded file changed
+Not what was reviewed at audit-2026-11 (same node, but files it watches changed):
+- inv.assets-match-flows: src/Vault.sol
+- inv.withdraw-takes-out-exactly-the: src/Vault.sol, test/VaultSym.t.sol
+- inv.shares-are-backed: src/Vault.sol
+Since audit-2026-11: 0 gone or weakened, 1 guard change, 3 nodes with changed files, 0 added.
+```
+
+It exits 1 when anything but additions differs, 0 otherwise, and 2 when it
+cannot compare. Long lists are cut to a screen; `--json` gives everything, in
+the shape of [`schema/diff.v1.schema.json`](../schema/diff.v1.schema.json).
+
 ## The log
 
 The run log is local state, never committed: `<git dir>/vibloom/log.jsonl`
@@ -1032,7 +1153,9 @@ does with `git rm --cached .vibloom/log.jsonl` and a commit.
   does not discover a dependency nobody wrote down.
 - `.vibloom/proposals.jsonl` is not hash-chained: it holds suggestions, not
   evidence, and nothing in it counts until a person accepts it into the map.
-- Two report formats are read: Foundry's JSON and JUnit XML. A runner that
-  writes neither needs a parser that returns the same outcomes.
+- The formats read are Foundry's JSON, JUnit XML, Halmos's `--json-output`
+  and Echidna's `--format json`. A tool that writes none of them needs a
+  parser that returns the same outcomes. The Echidna parser follows its
+  documented output and has not yet been run against the real binary here.
 - After a test command, the Claude Code hook re-runs that subset once more. On
   a large suite, filter with `--match-path` or `--match-test`.

@@ -1,15 +1,17 @@
 //! Running the tests and recording the run in the local log.
 
+use crate::checks::{echidna_how, flag_number, parse_echidna, parse_halmos};
 use crate::cli::Fallible;
 use crate::derive::{Evidence, NodeView, Snapshot, derive, matches, node_digest};
-use crate::forge::{Outcome, RunnerOutputError, parse_forge};
+use crate::forge::{Outcome, RunnerOutputError, Status, parse_forge};
 use crate::git::uncommitted;
 use crate::junit::parse_junit;
 use crate::log::{RunBody, RunEntry, next_entry, to_line};
-use crate::map::RootsMap;
+use crate::map::{Check, RootsMap, Tool, watched_by};
 use crate::proc::run_child;
 use crate::store::{
-    append, hash_watched, iso_now, load_log, load_map, locked, log_path, write_snapshot,
+    append, files_under, hash_watched, iso_now, load_log, load_map, locked, log_path,
+    write_snapshot,
 };
 use std::path::Path;
 
@@ -87,6 +89,19 @@ pub fn run(root: &Path, extra: &[String]) -> Fallible<RunReport> {
             }
         }
     }
+    // The other tools' reports count only for a run of the whole suite: a
+    // filtered run says nothing about them.
+    if extra.is_empty() && error.is_none() {
+        for c in &map.checks {
+            match check_outcomes(root, &map, c) {
+                Ok(o) => outcomes.extend(o),
+                Err(e) => {
+                    error = Some(format!("{}: {e}", c.tool.as_str()));
+                    break;
+                }
+            }
+        }
+    }
     // The tests may have taken minutes and another run may have been recorded
     // meanwhile: the entry is chained to the log as it is now, under the lock.
     let (entry, mut entries) = locked(root, || {
@@ -158,6 +173,105 @@ pub fn run(root: &Path, extra: &[String]) -> Fallible<RunReport> {
         views,
         fresh,
     })
+}
+
+/// The results a check gives: from the report its command writes, or from a
+/// report already there when it is newer than everything its nodes watch.
+fn check_outcomes(root: &Path, map: &RootsMap, c: &Check) -> Fallible<Vec<Outcome>> {
+    let path = root.join(&c.report);
+    // What the command printed last, to say why it wrote no report.
+    let mut said = String::new();
+    if let Some(command) = &c.command {
+        if path.exists() {
+            std::fs::remove_file(&path)
+                .map_err(|e| format!("could not remove the old report {}: {e}", c.report))?;
+        }
+        let (exe, args) = command.split_first().ok_or("the command is empty")?;
+        // A tool that finds a counterexample exits non-zero; its report says so.
+        let res = run_child(exe, args, root, map.timeout)?;
+        let src = if res.stderr.trim().is_empty() {
+            res.stdout
+        } else {
+            res.stderr
+        };
+        let lines: Vec<&str> = src.trim().lines().collect();
+        said = lines[lines.len().saturating_sub(4)..].join("\n");
+    } else if let Some(why) = not_fresh(root, map, c) {
+        let users = map
+            .nodes
+            .iter()
+            .filter_map(|n| n.test.as_ref())
+            .filter(|t| t.tool == Some(c.tool));
+        return Ok(users
+            .map(|t| Outcome {
+                file: t.file.clone(),
+                contract: t.contract.clone().unwrap_or_default(),
+                name: t.name.clone(),
+                status: Status::Inconclusive,
+                reason: Some(why.clone()),
+                fuzz: None,
+                tool: Some(c.tool),
+                how: Some(crate::checks::default_how(c.tool)),
+            })
+            .collect());
+    }
+    let text = std::fs::read_to_string(&path).map_err(|_| match &c.command {
+        Some(_) if said.is_empty() => format!("the command wrote no report at {}", c.report),
+        Some(_) => format!("the command wrote no report at {}\n{said}", c.report),
+        None => format!("no report at {}", c.report),
+    })?;
+    let parsed = match c.tool {
+        Tool::Halmos => parse_halmos(
+            &text,
+            c.command
+                .as_deref()
+                .and_then(|cmd| flag_number(cmd, "--loop")),
+        ),
+        Tool::Echidna => parse_echidna(&text, echidna_how(c.command.as_deref().unwrap_or(&[]))),
+        Tool::Junit => parse_junit(&text, &root.to_string_lossy()).map(|os| {
+            os.into_iter()
+                .map(|o| Outcome {
+                    tool: Some(Tool::Junit),
+                    ..o
+                })
+                .collect()
+        }),
+    };
+    parsed.map_err(|e| e.0)
+}
+
+// Why a report with no command to write it cannot be trusted now: missing,
+// or older than a file one of its nodes watches.
+fn not_fresh(root: &Path, map: &RootsMap, c: &Check) -> Option<String> {
+    let tool = c.tool.as_str();
+    let Ok(written) = std::fs::metadata(root.join(&c.report)).and_then(|m| m.modified()) else {
+        return Some(format!(
+            "no {tool} report at {}: run {tool}, or give the check a command",
+            c.report
+        ));
+    };
+    let mut files = vec![];
+    for n in map
+        .nodes
+        .iter()
+        .filter(|n| n.test.as_ref().is_some_and(|t| t.tool == Some(c.tool)))
+    {
+        for w in watched_by(n) {
+            match w.strip_suffix('/') {
+                Some(dir) => files_under(root, dir, &mut files),
+                None => files.push(w),
+            }
+        }
+    }
+    let newer = files.into_iter().find(|f| {
+        std::fs::metadata(root.join(f))
+            .and_then(|m| m.modified())
+            .is_ok_and(|m| m >= written)
+    })?;
+    Some(format!(
+        "the {tool} report {} is older than {newer}: run {tool} again",
+        c.report
+    ))
 }
 
 /// The failing tests of a run that no node rests on, by name: those that
@@ -289,6 +403,8 @@ mod tests {
             status,
             reason: None,
             fuzz: None,
+            tool: None,
+            how: None,
         }
     }
 

@@ -2,6 +2,49 @@
 
 Changes to the `vibloom` binary. The web app is not versioned.
 
+## 0.10.0
+
+An open format, evidence from other tools with its kind of guarantee in
+sight, and a handoff for audits.
+
+### Added
+
+- The map format is published as JSON Schema draft 2020-12:
+  `schema/roots.v1.schema.json`, with `schema/status.v1.schema.json` for
+  `status --json` and `check --json` and `schema/diff.v1.schema.json` for
+  `diff --json`. `docs/format.md` describes the format for other tools,
+  including the compatibility rule: `version` is raised on any breaking
+  change, a new optional key does not raise it. A test keeps the schemas and
+  the code from drifting.
+- `vibloom init` writes `"$schema"` as the map's first key, and the map
+  accepts it, so editors complete the map.
+- `"checks"` in the map: reports of Halmos (`--json-output`), Echidna
+  (`--format json`) and a second JUnit runner, each with an optional
+  `command` that `check` runs before reading the report (deleted first, same
+  timeout). Without a command the report counts only while it is newer than
+  every file its nodes watch. A node reads one with `"tool"` in its test;
+  `add --tool` writes it. Halmos COUNTEREXAMPLE and Echidna solved are
+  BROKEN with the model or the calls in the reason, Halmos REVERT_ALL is
+  VACUOUS, and a tool that did not finish leaves the node pending review,
+  never holding and never broken. Medusa writes no machine-readable results
+  and is not supported.
+- The kind of guarantee next to every state: `unit`, `fuzzed` (with runs x
+  calls per run when known) or `symbolic (bounded)` (with the loop bound when
+  the command sets it), in `status` (`holds, fuzzed 64x32`), `context` and
+  as `how` in the JSON. A Foundry fuzz test now shows its runs.
+- `init` and `scan` guard `halmos.toml` and the config files a check's
+  command names; `check --base` reports a check removed or its command or
+  report changed (`check_removed`, `check_changed`).
+- `vibloom diff <ref> [--json]`: what is gone or weakened in the map since
+  `<ref>`, the guard changes, the nodes whose watched files changed and the
+  nodes added, with one closing line of counts. Read-only, for anyone. See
+  "After an audit" in docs/guard.md.
+
+### Changed
+
+- `status`, `run` and `check` print the kind of guarantee after the state of
+  every node with a test (`holds, unit`), so a table row is longer.
+
 ## 0.9.0
 
 Simple by default, depth on demand.

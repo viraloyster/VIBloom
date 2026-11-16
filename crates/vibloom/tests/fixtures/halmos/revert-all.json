@@ -1,0 +1,24 @@
+{
+    "exitcode": 1,
+    "test_results": {
+        "test/VaultSym.t.sol:VaultRevertTest": [
+            {
+                "name": "check_withdrawFromEmpty(uint256)",
+                "exitcode": 4,
+                "num_models": 0,
+                "models": [],
+                "num_paths": [
+                    2,
+                    0,
+                    0
+                ],
+                "time": [
+                    0.022609327999987272,
+                    0.022573123000000805,
+                    3.244199999130615e-05
+                ],
+                "num_bounded_loops": 0
+            }
+        ]
+    }
+}

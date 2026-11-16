@@ -49,7 +49,10 @@ pub(crate) fn guide(io: &mut Io) -> Fallible<i32> {
 // Never run, or run against files that changed since: running the tests is
 // the step, not reading the table again.
 fn needs_run(v: &NodeView) -> bool {
-    matches!(v.evidence, Evidence::Untested | Evidence::Stale) || !v.changed.is_empty()
+    matches!(
+        v.evidence,
+        Evidence::Untested | Evidence::Stale | Evidence::Inconclusive
+    ) || !v.changed.is_empty()
 }
 
 // Trouble of its own, not only what it rests on.

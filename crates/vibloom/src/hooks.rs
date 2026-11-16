@@ -554,6 +554,7 @@ pub(crate) mod tests {
             changed: vec![],
             reason: None,
             fuzz: None,
+            how: None,
             run: Some(3),
             depends_on: vec![],
             watch: vec!["src/C.sol".into(), "test/C.t.sol".into()],

@@ -2,7 +2,8 @@ use crate::cli::{Args, Fallible, Io};
 use crate::commands::verifier;
 use crate::foundry::project_plan;
 use crate::map::{
-    Accept, Kind, MAP_PATH, RootNode, Stance, TestRef, parse_map, serialize_map, test_name,
+    Accept, Kind, MAP_PATH, RootNode, Stance, TOOLS, TestRef, Tool, parse_map, serialize_map,
+    test_name,
 };
 use crate::paths::{relative_to, watch_path};
 use crate::proposals::{fresh_id, with_node};
@@ -13,7 +14,7 @@ use std::path::Path;
 
 pub(crate) fn add(root: &Path, io: &mut Io, args: &Args) -> Fallible<i32> {
     verifier(io, "changes the map")?;
-    let usage = "Usage: vibloom add [assumption|invariant|intention] \"<title>\" [--on ID]... [--file F --test N [--contract C]] [--watch P]... [--evidence E]... [--detail D] [--id ID] [--hypothetical | --adopted] [--unprotected]\nWithout a kind it adds an assumption. --on X: this node rests on X; if X fails, this is at risk.";
+    let usage = "Usage: vibloom add [assumption|invariant|intention] \"<title>\" [--on ID]... [--file F --test N [--contract C] [--tool T]] [--watch P]... [--evidence E]... [--detail D] [--id ID] [--hypothetical | --adopted] [--unprotected]\nWithout a kind it adds an assumption. --on X: this node rests on X; if X fails, this is at risk.";
     // A title alone is an assumption: the simplest thing to write down.
     let (kind, title) = match args.words.as_slice() {
         [title] if Kind::parse(title).is_none() => (Kind::Assumption, title),
@@ -29,11 +30,21 @@ pub(crate) fn add(root: &Path, io: &mut Io, args: &Args) -> Fallible<i32> {
     known_ids(&map, &args.all("--on"))?;
     let test = match (args.opt("--file"), args.opt("--test")) {
         (Some(f), Some(n)) => Some(TestRef {
+            tool: match args.opt("--tool") {
+                None => None,
+                Some(t) => Some(
+                    Tool::parse(t)
+                        .ok_or_else(|| format!("Unknown tool {t}: use {}.", TOOLS.join(", ")))?,
+                ),
+            },
             file: relative_to(root, &io.cwd, f)
                 .ok_or_else(|| format!("{f} is outside the project."))?,
             contract: args.opt("--contract").map(str::to_string),
             name: test_name(n),
         }),
+        (None, None) if args.opt("--tool").is_some() => {
+            return Err(format!("--tool needs --file and --test.\n{usage}"));
+        }
         (None, None) => None,
         _ => return Err(format!("A test needs both --file and --test.\n{usage}")),
     };

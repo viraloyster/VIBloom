@@ -1,0 +1,525 @@
+{
+    "exitcode": 1,
+    "test_results": {
+        "test/Vault.t.sol:VaultTest": [
+            {
+                "name": "invariant_assetsMatchFlows()",
+                "exitcode": 1,
+                "num_models": 8,
+                "models": [
+                    {
+                        "model": {
+                            "halmos_msg_value_0x00000000000000000000000000000000aaaa0002_2898279_03": {
+                                "full_name": "halmos_msg_value_0x00000000000000000000000000000000aaaa0002_2898279_03",
+                                "variable_name": "msg",
+                                "solidity_type": "value",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 0
+                            },
+                            "p_assets_uint256_c6c6870_04": {
+                                "full_name": "p_assets_uint256_c6c6870_04",
+                                "variable_name": "assets",
+                                "solidity_type": "uint256",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 57896044618658097711785492504343953926634992332820282019728792003956564819968
+                            },
+                            "halmos_msg_sender_0x00000000000000000000000000000000aaaa0002_480b166_02": {
+                                "full_name": "halmos_msg_sender_0x00000000000000000000000000000000aaaa0002_480b166_02",
+                                "variable_name": "msg",
+                                "solidity_type": "sender",
+                                "smt_type": "BitVec 160",
+                                "size_bits": 160,
+                                "value": 0
+                            },
+                            "halmos_block_timestamp_depth1_f182e82": {
+                                "full_name": "halmos_block_timestamp_depth1_f182e82",
+                                "variable_name": "block",
+                                "solidity_type": "timestamp",
+                                "smt_type": "BitVec 64",
+                                "size_bits": 64,
+                                "value": 9223372036854775808
+                            }
+                        },
+                        "is_valid": true
+                    },
+                    {
+                        "model": {
+                            "halmos_msg_value_0x00000000000000000000000000000000aaaa0002_2898279_03": {
+                                "full_name": "halmos_msg_value_0x00000000000000000000000000000000aaaa0002_2898279_03",
+                                "variable_name": "msg",
+                                "solidity_type": "value",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 0
+                            },
+                            "p_assets_uint256_c6c6870_04": {
+                                "full_name": "p_assets_uint256_c6c6870_04",
+                                "variable_name": "assets",
+                                "solidity_type": "uint256",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 57896044618658097711785492504343953926634992332820282019728792003956564819968
+                            },
+                            "halmos_msg_sender_0x00000000000000000000000000000000aaaa0002_480b166_02": {
+                                "full_name": "halmos_msg_sender_0x00000000000000000000000000000000aaaa0002_480b166_02",
+                                "variable_name": "msg",
+                                "solidity_type": "sender",
+                                "smt_type": "BitVec 160",
+                                "size_bits": 160,
+                                "value": 0
+                            },
+                            "halmos_block_timestamp_depth1_f182e82": {
+                                "full_name": "halmos_block_timestamp_depth1_f182e82",
+                                "variable_name": "block",
+                                "solidity_type": "timestamp",
+                                "smt_type": "BitVec 64",
+                                "size_bits": 64,
+                                "value": 9223372036854775808
+                            },
+                            "halmos_msg_value_0x00000000000000000000000000000000aaaa0003_056d52e_19": {
+                                "full_name": "halmos_msg_value_0x00000000000000000000000000000000aaaa0003_056d52e_19",
+                                "variable_name": "msg",
+                                "solidity_type": "value",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 0
+                            },
+                            "halmos_block_timestamp_depth2_6644eb7": {
+                                "full_name": "halmos_block_timestamp_depth2_6644eb7",
+                                "variable_name": "block",
+                                "solidity_type": "timestamp",
+                                "smt_type": "BitVec 64",
+                                "size_bits": 64,
+                                "value": 9223372036854775808
+                            }
+                        },
+                        "is_valid": true
+                    },
+                    {
+                        "model": {
+                            "halmos_msg_value_0x00000000000000000000000000000000aaaa0002_2898279_03": {
+                                "full_name": "halmos_msg_value_0x00000000000000000000000000000000aaaa0002_2898279_03",
+                                "variable_name": "msg",
+                                "solidity_type": "value",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 0
+                            },
+                            "p_assets_uint256_c6c6870_04": {
+                                "full_name": "p_assets_uint256_c6c6870_04",
+                                "variable_name": "assets",
+                                "solidity_type": "uint256",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 57896044618658097711785492504343953926634992332820282019728792003956564819968
+                            },
+                            "halmos_msg_sender_0x00000000000000000000000000000000aaaa0002_480b166_02": {
+                                "full_name": "halmos_msg_sender_0x00000000000000000000000000000000aaaa0002_480b166_02",
+                                "variable_name": "msg",
+                                "solidity_type": "sender",
+                                "smt_type": "BitVec 160",
+                                "size_bits": 160,
+                                "value": 0
+                            },
+                            "halmos_block_timestamp_depth1_f182e82": {
+                                "full_name": "halmos_block_timestamp_depth1_f182e82",
+                                "variable_name": "block",
+                                "solidity_type": "timestamp",
+                                "smt_type": "BitVec 64",
+                                "size_bits": 64,
+                                "value": 9223372036854775808
+                            },
+                            "halmos_msg_value_0x00000000000000000000000000000000aaaa0003_ea0e080_15": {
+                                "full_name": "halmos_msg_value_0x00000000000000000000000000000000aaaa0003_ea0e080_15",
+                                "variable_name": "msg",
+                                "solidity_type": "value",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 0
+                            },
+                            "p_assets_uint256_26c2ab8_16": {
+                                "full_name": "p_assets_uint256_26c2ab8_16",
+                                "variable_name": "assets",
+                                "solidity_type": "uint256",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 0
+                            },
+                            "halmos_block_timestamp_depth2_2246e44": {
+                                "full_name": "halmos_block_timestamp_depth2_2246e44",
+                                "variable_name": "block",
+                                "solidity_type": "timestamp",
+                                "smt_type": "BitVec 64",
+                                "size_bits": 64,
+                                "value": 9223372036854775808
+                            }
+                        },
+                        "is_valid": true
+                    },
+                    {
+                        "model": {
+                            "halmos_msg_value_0x00000000000000000000000000000000aaaa0002_2898279_03": {
+                                "full_name": "halmos_msg_value_0x00000000000000000000000000000000aaaa0002_2898279_03",
+                                "variable_name": "msg",
+                                "solidity_type": "value",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 0
+                            },
+                            "p_assets_uint256_c6c6870_04": {
+                                "full_name": "p_assets_uint256_c6c6870_04",
+                                "variable_name": "assets",
+                                "solidity_type": "uint256",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 57896044618658097711785492504343953926634992332820282019728792003956564819968
+                            },
+                            "halmos_msg_sender_0x00000000000000000000000000000000aaaa0002_480b166_02": {
+                                "full_name": "halmos_msg_sender_0x00000000000000000000000000000000aaaa0002_480b166_02",
+                                "variable_name": "msg",
+                                "solidity_type": "sender",
+                                "smt_type": "BitVec 160",
+                                "size_bits": 160,
+                                "value": 0
+                            },
+                            "halmos_block_timestamp_depth1_f182e82": {
+                                "full_name": "halmos_block_timestamp_depth1_f182e82",
+                                "variable_name": "block",
+                                "solidity_type": "timestamp",
+                                "smt_type": "BitVec 64",
+                                "size_bits": 64,
+                                "value": 9223372036854775808
+                            },
+                            "halmos_msg_value_0x00000000000000000000000000000000aaaa0002_918e3a6_11": {
+                                "full_name": "halmos_msg_value_0x00000000000000000000000000000000aaaa0002_918e3a6_11",
+                                "variable_name": "msg",
+                                "solidity_type": "value",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 0
+                            },
+                            "p_shares_uint256_7703eea_12": {
+                                "full_name": "p_shares_uint256_7703eea_12",
+                                "variable_name": "shares",
+                                "solidity_type": "uint256",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 1
+                            },
+                            "halmos_msg_sender_0x00000000000000000000000000000000aaaa0002_604f2a0_10": {
+                                "full_name": "halmos_msg_sender_0x00000000000000000000000000000000aaaa0002_604f2a0_10",
+                                "variable_name": "msg",
+                                "solidity_type": "sender",
+                                "smt_type": "BitVec 160",
+                                "size_bits": 160,
+                                "value": 0
+                            },
+                            "halmos_block_timestamp_depth2_fe35016": {
+                                "full_name": "halmos_block_timestamp_depth2_fe35016",
+                                "variable_name": "block",
+                                "solidity_type": "timestamp",
+                                "smt_type": "BitVec 64",
+                                "size_bits": 64,
+                                "value": 9223372036854775808
+                            }
+                        },
+                        "is_valid": true
+                    },
+                    {
+                        "model": {
+                            "halmos_msg_value_0x00000000000000000000000000000000aaaa0002_2898279_03": {
+                                "full_name": "halmos_msg_value_0x00000000000000000000000000000000aaaa0002_2898279_03",
+                                "variable_name": "msg",
+                                "solidity_type": "value",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 0
+                            },
+                            "p_assets_uint256_c6c6870_04": {
+                                "full_name": "p_assets_uint256_c6c6870_04",
+                                "variable_name": "assets",
+                                "solidity_type": "uint256",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 57896044618658097711785492504343953926634992332820282019728792003956564819968
+                            },
+                            "halmos_msg_sender_0x00000000000000000000000000000000aaaa0002_480b166_02": {
+                                "full_name": "halmos_msg_sender_0x00000000000000000000000000000000aaaa0002_480b166_02",
+                                "variable_name": "msg",
+                                "solidity_type": "sender",
+                                "smt_type": "BitVec 160",
+                                "size_bits": 160,
+                                "value": 0
+                            },
+                            "halmos_block_timestamp_depth1_f182e82": {
+                                "full_name": "halmos_block_timestamp_depth1_f182e82",
+                                "variable_name": "block",
+                                "solidity_type": "timestamp",
+                                "smt_type": "BitVec 64",
+                                "size_bits": 64,
+                                "value": 9223372036854775808
+                            },
+                            "halmos_msg_value_0x00000000000000000000000000000000aaaa0002_7c2f16b_07": {
+                                "full_name": "halmos_msg_value_0x00000000000000000000000000000000aaaa0002_7c2f16b_07",
+                                "variable_name": "msg",
+                                "solidity_type": "value",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 0
+                            },
+                            "p_assets_uint256_098ea0c_08": {
+                                "full_name": "p_assets_uint256_098ea0c_08",
+                                "variable_name": "assets",
+                                "solidity_type": "uint256",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 1
+                            },
+                            "halmos_msg_sender_0x00000000000000000000000000000000aaaa0002_ace2bf8_06": {
+                                "full_name": "halmos_msg_sender_0x00000000000000000000000000000000aaaa0002_ace2bf8_06",
+                                "variable_name": "msg",
+                                "solidity_type": "sender",
+                                "smt_type": "BitVec 160",
+                                "size_bits": 160,
+                                "value": 0
+                            },
+                            "halmos_block_timestamp_depth2_648e0ae": {
+                                "full_name": "halmos_block_timestamp_depth2_648e0ae",
+                                "variable_name": "block",
+                                "solidity_type": "timestamp",
+                                "smt_type": "BitVec 64",
+                                "size_bits": 64,
+                                "value": 9223372036854775808
+                            }
+                        },
+                        "is_valid": true
+                    },
+                    {
+                        "model": {
+                            "halmos_msg_value_0x00000000000000000000000000000000aaaa0003_0e49ba9_15": {
+                                "full_name": "halmos_msg_value_0x00000000000000000000000000000000aaaa0003_0e49ba9_15",
+                                "variable_name": "msg",
+                                "solidity_type": "value",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 0
+                            },
+                            "halmos_block_timestamp_depth1_c0636c7": {
+                                "full_name": "halmos_block_timestamp_depth1_c0636c7",
+                                "variable_name": "block",
+                                "solidity_type": "timestamp",
+                                "smt_type": "BitVec 64",
+                                "size_bits": 64,
+                                "value": 9223372036854775808
+                            },
+                            "halmos_msg_value_0x00000000000000000000000000000000aaaa0002_5ba0a8d_19": {
+                                "full_name": "halmos_msg_value_0x00000000000000000000000000000000aaaa0002_5ba0a8d_19",
+                                "variable_name": "msg",
+                                "solidity_type": "value",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 0
+                            },
+                            "p_assets_uint256_a4580d2_20": {
+                                "full_name": "p_assets_uint256_a4580d2_20",
+                                "variable_name": "assets",
+                                "solidity_type": "uint256",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 57896044618658097711785492504343953926634992332820282019728792003956564819968
+                            },
+                            "halmos_msg_sender_0x00000000000000000000000000000000aaaa0002_621f7d4_18": {
+                                "full_name": "halmos_msg_sender_0x00000000000000000000000000000000aaaa0002_621f7d4_18",
+                                "variable_name": "msg",
+                                "solidity_type": "sender",
+                                "smt_type": "BitVec 160",
+                                "size_bits": 160,
+                                "value": 0
+                            },
+                            "halmos_block_timestamp_depth2_78b0b6f": {
+                                "full_name": "halmos_block_timestamp_depth2_78b0b6f",
+                                "variable_name": "block",
+                                "solidity_type": "timestamp",
+                                "smt_type": "BitVec 64",
+                                "size_bits": 64,
+                                "value": 9223372036854775808
+                            }
+                        },
+                        "is_valid": true
+                    },
+                    {
+                        "model": {
+                            "halmos_msg_value_0x00000000000000000000000000000000aaaa0003_a9db322_11": {
+                                "full_name": "halmos_msg_value_0x00000000000000000000000000000000aaaa0003_a9db322_11",
+                                "variable_name": "msg",
+                                "solidity_type": "value",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 0
+                            },
+                            "p_assets_uint256_76997b2_12": {
+                                "full_name": "p_assets_uint256_76997b2_12",
+                                "variable_name": "assets",
+                                "solidity_type": "uint256",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 0
+                            },
+                            "halmos_block_timestamp_depth1_67d92d1": {
+                                "full_name": "halmos_block_timestamp_depth1_67d92d1",
+                                "variable_name": "block",
+                                "solidity_type": "timestamp",
+                                "smt_type": "BitVec 64",
+                                "size_bits": 64,
+                                "value": 9223372036854775808
+                            },
+                            "halmos_msg_value_0x00000000000000000000000000000000aaaa0002_2f6491c_15": {
+                                "full_name": "halmos_msg_value_0x00000000000000000000000000000000aaaa0002_2f6491c_15",
+                                "variable_name": "msg",
+                                "solidity_type": "value",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 0
+                            },
+                            "p_assets_uint256_f871fac_16": {
+                                "full_name": "p_assets_uint256_f871fac_16",
+                                "variable_name": "assets",
+                                "solidity_type": "uint256",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 57896044618658097711785492504343953926634992332820282019728792003956564819968
+                            },
+                            "halmos_msg_sender_0x00000000000000000000000000000000aaaa0002_577d1c3_14": {
+                                "full_name": "halmos_msg_sender_0x00000000000000000000000000000000aaaa0002_577d1c3_14",
+                                "variable_name": "msg",
+                                "solidity_type": "sender",
+                                "smt_type": "BitVec 160",
+                                "size_bits": 160,
+                                "value": 0
+                            },
+                            "halmos_block_timestamp_depth2_6ef335e": {
+                                "full_name": "halmos_block_timestamp_depth2_6ef335e",
+                                "variable_name": "block",
+                                "solidity_type": "timestamp",
+                                "smt_type": "BitVec 64",
+                                "size_bits": 64,
+                                "value": 9223372036854775808
+                            }
+                        },
+                        "is_valid": true
+                    },
+                    {
+                        "model": {
+                            "halmos_msg_value_0x00000000000000000000000000000000aaaa0003_a9db322_11": {
+                                "full_name": "halmos_msg_value_0x00000000000000000000000000000000aaaa0003_a9db322_11",
+                                "variable_name": "msg",
+                                "solidity_type": "value",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 0
+                            },
+                            "p_assets_uint256_76997b2_12": {
+                                "full_name": "p_assets_uint256_76997b2_12",
+                                "variable_name": "assets",
+                                "solidity_type": "uint256",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 30021641119369388094015411020239677878144031935575649604462909807314587353087
+                            },
+                            "halmos_block_timestamp_depth1_67d92d1": {
+                                "full_name": "halmos_block_timestamp_depth1_67d92d1",
+                                "variable_name": "block",
+                                "solidity_type": "timestamp",
+                                "smt_type": "BitVec 64",
+                                "size_bits": 64,
+                                "value": 9223372036854775808
+                            },
+                            "halmos_msg_value_0x00000000000000000000000000000000aaaa0002_dd554be_19": {
+                                "full_name": "halmos_msg_value_0x00000000000000000000000000000000aaaa0002_dd554be_19",
+                                "variable_name": "msg",
+                                "solidity_type": "value",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 0
+                            },
+                            "p_shares_uint256_cc028e2_20": {
+                                "full_name": "p_shares_uint256_cc028e2_20",
+                                "variable_name": "shares",
+                                "solidity_type": "uint256",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 1
+                            },
+                            "halmos_msg_sender_0x00000000000000000000000000000000aaaa0002_2a771c5_18": {
+                                "full_name": "halmos_msg_sender_0x00000000000000000000000000000000aaaa0002_2a771c5_18",
+                                "variable_name": "msg",
+                                "solidity_type": "sender",
+                                "smt_type": "BitVec 160",
+                                "size_bits": 160,
+                                "value": 2863267843
+                            },
+                            "halmos_block_timestamp_depth2_d9cb173": {
+                                "full_name": "halmos_block_timestamp_depth2_d9cb173",
+                                "variable_name": "block",
+                                "solidity_type": "timestamp",
+                                "smt_type": "BitVec 64",
+                                "size_bits": 64,
+                                "value": 9223372036854775808
+                            }
+                        },
+                        "is_valid": true
+                    }
+                ],
+                "num_paths": [
+                    25,
+                    14,
+                    0
+                ],
+                "time": [
+                    61.434825479,
+                    2.1736314849999943,
+                    59.261187273000004
+                ],
+                "num_bounded_loops": 0
+            },
+            {
+                "name": "invariant_sharesAreBacked()",
+                "exitcode": 2,
+                "num_models": 0,
+                "models": [],
+                "num_paths": [
+                    30,
+                    23,
+                    0
+                ],
+                "time": [
+                    60.735898723999995,
+                    0.6986654859999959,
+                    60.037225801000005
+                ],
+                "num_bounded_loops": 0
+            }
+        ],
+        "test/VaultSym.t.sol:VaultSymTest": [
+            {
+                "name": "check_withdrawTakesAssetsOut(uint256,uint256)",
+                "exitcode": 0,
+                "num_models": 0,
+                "models": [],
+                "num_paths": [
+                    7,
+                    3,
+                    0
+                ],
+                "time": [
+                    0.12747468599999934,
+                    0.1274456000000157,
+                    2.1215999993273726e-05
+                ],
+                "num_bounded_loops": 0
+            }
+        ]
+    }
+}

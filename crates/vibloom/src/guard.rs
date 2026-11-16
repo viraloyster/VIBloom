@@ -146,6 +146,35 @@ pub fn map_changes(base: &RootsMap, head: &RootsMap) -> Vec<GuardChange> {
             format!("failing tests matching {p} no longer fail the check"),
         ));
     }
+    for b in &base.checks {
+        let tool = b.tool.as_str();
+        let cmd = |c: &crate::map::Check| {
+            c.command
+                .as_ref()
+                .map_or_else(|| "none".to_string(), |c| format!("`{}`", c.join(" ")))
+        };
+        match head.checks.iter().find(|h| h.tool == b.tool) {
+            None => out.push(on_map(
+                "check_removed",
+                None,
+                format!("the {tool} check ({}) was removed", b.report),
+            )),
+            Some(h) if h.command != b.command => out.push(on_map(
+                "check_changed",
+                None,
+                format!("the {tool} command changed from {} to {}", cmd(b), cmd(h)),
+            )),
+            Some(h) if h.report != b.report => out.push(on_map(
+                "check_changed",
+                None,
+                format!(
+                    "the {tool} report changed from {} to {}",
+                    b.report, h.report
+                ),
+            )),
+            Some(_) => {}
+        }
+    }
     if base.strict && !head.strict {
         out.push(on_map("strict_off", None, "strict was turned off".into()));
     }
@@ -313,6 +342,32 @@ mod tests {
         };
         assert_eq!(strict(true)[0].kind, "strict_off");
         assert!(strict(false).is_empty());
+        let with_checks = |checks: Value| {
+            let mut m = base();
+            m["checks"] = checks;
+            parse_map(&m).expect("map")
+        };
+        let b = with_checks(json!([
+            { "tool": "halmos", "report": "out/halmos.json", "command": ["halmos", "--json-output", "out/halmos.json"] },
+            { "tool": "echidna", "report": "out/echidna.json" }
+        ]));
+        let h = with_checks(json!([
+            { "tool": "halmos", "report": "out/halmos.json", "command": ["halmos", "--loop", "1", "--json-output", "out/halmos.json"] }
+        ]));
+        let got: Vec<(&str, String)> = map_changes(&b, &h)
+            .into_iter()
+            .map(|c| (c.kind, c.message))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("check_changed", "the halmos command changed from `halmos --json-output out/halmos.json` to `halmos --loop 1 --json-output out/halmos.json`".to_string()),
+                ("check_removed", "the echidna check (out/echidna.json) was removed".to_string()),
+            ]
+        );
+        // Adding a source is not a guard change; only the changed command is.
+        let back: Vec<&str> = map_changes(&h, &b).iter().map(|c| c.kind).collect();
+        assert_eq!(back, vec!["check_changed"]);
         let ignored = changes(|m| m["ignore_failures"] = json!(["LegacyTest.*"]));
         assert_eq!(
             ignored,

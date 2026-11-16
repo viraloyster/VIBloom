@@ -1,0 +1,1 @@
+{"success":true,"error":null,"tests":[{"contract":"VaultEchidna","name":"echidna_assets_match_flows","status":"passed","error":null,"events":[],"type":"property","transactions":null},{"contract":"VaultEchidna","name":"echidna_shares_backed","status":"verified","error":null,"events":[],"type":"property","transactions":null}],"seed":42,"coverage":{},"gas_info":[]}

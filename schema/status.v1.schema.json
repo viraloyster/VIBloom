@@ -1,0 +1,343 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/viraloyster/VIBloom/main/schema/status.v1.schema.json",
+  "title": "VIBloom status and check output, format 1",
+  "description": "What vibloom status --json and vibloom check --json print. Keys may be added while format is 1; readers ignore keys they do not know.",
+  "type": "object",
+  "required": [
+    "format",
+    "exit",
+    "summary",
+    "nodes",
+    "not_yet_reviewed",
+    "accepted_risks",
+    "guard",
+    "run",
+    "failures",
+    "ignore_failures",
+    "log_problems",
+    "tool_error"
+  ],
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "exit": {
+      "enum": [0, 1, 2]
+    },
+    "summary": {
+      "type": "object",
+      "required": ["nodes", "need_attention", "not_yet_reviewed", "accepted_risks", "strict"],
+      "properties": {
+        "nodes": {
+          "type": "integer"
+        },
+        "need_attention": {
+          "type": "integer"
+        },
+        "not_yet_reviewed": {
+          "type": "integer"
+        },
+        "accepted_risks": {
+          "type": "integer"
+        },
+        "strict": {
+          "type": "boolean"
+        }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/node"
+      }
+    },
+    "not_yet_reviewed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "adopt", "switch_off"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "adopt": {
+            "type": "string"
+          },
+          "switch_off": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "accepted_risks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["node", "dependency", "reason", "in_effect"],
+        "properties": {
+          "node": {
+            "type": "string"
+          },
+          "dependency": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "in_effect": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "guard": {
+      "type": ["object", "null"],
+      "required": ["base", "base_has_map", "allowed", "changes"],
+      "properties": {
+        "base": {
+          "type": "string"
+        },
+        "base_has_map": {
+          "type": "boolean"
+        },
+        "allowed": {
+          "type": "boolean"
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/guard_change"
+          }
+        }
+      },
+      "description": "Null without --base."
+    },
+    "run": {
+      "type": ["object", "null"],
+      "required": ["seq", "command", "error"],
+      "properties": {
+        "seq": {
+          "type": "integer"
+        },
+        "command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "error": {
+          "type": ["string", "null"]
+        }
+      },
+      "description": "Null for status."
+    },
+    "failures": {
+      "type": ["object", "null"],
+      "required": ["failed", "untracked", "ignored"],
+      "properties": {
+        "failed": {
+          "type": "integer"
+        },
+        "untracked": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ignored": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ignore_failures": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "log_problems": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tool_error": {
+      "type": ["string", "null"]
+    }
+  },
+  "$defs": {
+    "guard_change": {
+      "type": "object",
+      "required": ["kind", "path", "message"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "file_changed",
+            "file_removed",
+            "file_added",
+            "node_removed",
+            "test_changed",
+            "test_removed",
+            "unprotected",
+            "switched_off",
+            "accepts_added",
+            "dependency_removed",
+            "runner_changed",
+            "report_changed",
+            "timeout_changed",
+            "tests_changed",
+            "protect_removed",
+            "ignore_failures_added",
+            "strict_off",
+            "check_removed",
+            "check_changed"
+          ]
+        },
+        "node": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "stance",
+        "state",
+        "shown",
+        "troubled",
+        "needs_attention",
+        "reason",
+        "files",
+        "changed",
+        "rests_on_unreviewed",
+        "run",
+        "fuzz",
+        "how"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": ["assumption", "invariant", "intention"]
+        },
+        "title": {
+          "type": "string"
+        },
+        "stance": {
+          "enum": ["adopted", "hypothetical", "off"]
+        },
+        "state": {
+          "enum": [
+            "holds",
+            "BROKEN",
+            "pending review",
+            "UNSUPPORTED",
+            "AT RISK",
+            "untested",
+            "skipped",
+            "MISSING",
+            "VACUOUS",
+            "TEST CHANGED",
+            "off",
+            "adopted",
+            "hypothetical"
+          ]
+        },
+        "shown": {
+          "type": "string",
+          "description": "The state with the guarantee and notes, as status prints it."
+        },
+        "troubled": {
+          "type": "boolean"
+        },
+        "needs_attention": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": ["string", "null"]
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "changed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rests_on_unreviewed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "run": {
+          "type": ["integer", "null"]
+        },
+        "fuzz": {
+          "type": ["object", "null"],
+          "required": ["runs", "calls", "reverts"],
+          "properties": {
+            "runs": {
+              "type": "integer"
+            },
+            "calls": {
+              "type": "integer"
+            },
+            "reverts": {
+              "type": "integer"
+            },
+            "dead": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "how": {
+          "type": ["object", "null"],
+          "required": ["kind", "runs", "depth", "loop", "shown"],
+          "properties": {
+            "kind": {
+              "enum": ["unit", "fuzzed", "symbolic"]
+            },
+            "runs": {
+              "type": ["integer", "null"]
+            },
+            "depth": {
+              "type": ["integer", "null"]
+            },
+            "loop": {
+              "type": ["integer", "null"]
+            },
+            "shown": {
+              "type": "string"
+            }
+          },
+          "description": "The kind of guarantee the node's test gives; null for a node without a test, or a runner's test that has not run."
+        }
+      }
+    }
+  }
+}

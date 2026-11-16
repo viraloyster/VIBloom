@@ -12,6 +12,61 @@ pub enum Status {
     Pass,
     Fail,
     Skip,
+    /// It passed, but nothing was exercised: every path or call reverted.
+    Vacuous,
+    /// The tool did not reach a verdict (a timeout, an error, a report older
+    /// than the code): neither a pass nor a failure.
+    Inconclusive,
+}
+
+/// What kind of guarantee a result gives. Never upgraded: a fuzz pass is
+/// shown as fuzzed, a bounded symbolic pass as bounded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HowKind {
+    Unit,
+    Fuzzed,
+    Symbolic,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct How {
+    pub kind: HowKind,
+    /// Fuzz runs (sequences), when the report or the command says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runs: Option<u64>,
+    /// Calls per run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<u64>,
+    /// The loop bound of a symbolic run, when the command sets it.
+    #[serde(default, rename = "loop", skip_serializing_if = "Option::is_none")]
+    pub loop_bound: Option<u64>,
+}
+
+impl How {
+    pub fn of(kind: HowKind) -> Self {
+        Self {
+            kind,
+            runs: None,
+            depth: None,
+            loop_bound: None,
+        }
+    }
+
+    /// `unit`, `fuzzed 64x32`, `symbolic (bounded, loop 4)`.
+    pub fn shown(&self) -> String {
+        match (self.kind, self.runs, self.depth) {
+            (HowKind::Unit, _, _) => "unit".into(),
+            // A failing campaign replayed from Foundry's cache reports 0 runs.
+            (HowKind::Fuzzed, Some(r), Some(d)) if r > 0 && d > 0 => format!("fuzzed {r}x{d}"),
+            (HowKind::Fuzzed, Some(r), _) if r > 0 => format!("fuzzed {r} runs"),
+            (HowKind::Fuzzed, _, _) => "fuzzed".into(),
+            (HowKind::Symbolic, _, _) => match self.loop_bound {
+                Some(l) => format!("symbolic (bounded, loop {l})"),
+                None => "symbolic (bounded)".into(),
+            },
+        }
+    }
 }
 
 /// How hard a fuzz or invariant campaign pushed: without it a pass could mean
@@ -37,6 +92,30 @@ pub struct Outcome {
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fuzz: Option<Fuzz>,
+    /// The check the result comes from; none for the project's runner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<crate::map::Tool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub how: Option<How>,
+}
+
+impl Outcome {
+    /// The guarantee of this result; entries written before 0.10.0 carry
+    /// none, and then the fuzz numbers decide.
+    pub fn guarantee(&self) -> How {
+        if let Some(h) = &self.how {
+            return h.clone();
+        }
+        match &self.fuzz {
+            Some(f) => How {
+                kind: HowKind::Fuzzed,
+                runs: Some(f.runs),
+                depth: (f.runs > 0).then(|| f.calls / f.runs),
+                loop_bound: None,
+            },
+            None => How::of(HowKind::Unit),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -104,6 +183,15 @@ pub fn parse_forge(stdout: &str) -> Result<Vec<Outcome>, RunnerOutputError> {
                 dead,
             })
         };
+        // A fuzz test (not an invariant) reports its runs under kind.Fuzz.
+        let how_of = |v: &Value| {
+            v.pointer("/kind/Fuzz/runs")
+                .and_then(Value::as_u64)
+                .map(|runs| How {
+                    runs: Some(runs),
+                    ..How::of(HowKind::Fuzzed)
+                })
+        };
         for (sig, r) in results {
             // Since forge 1.9 the invariants of a contract run as one campaign,
             // reported under one of their names with a result for each.
@@ -124,6 +212,8 @@ pub fn parse_forge(stdout: &str) -> Result<Vec<Outcome>, RunnerOutputError> {
                         reason: unknown.or_else(|| reason_of(p)),
                         // One campaign: its numbers are every invariant's.
                         fuzz: fuzz_of(r),
+                        tool: None,
+                        how: None,
                     });
                 }
                 continue;
@@ -136,6 +226,8 @@ pub fn parse_forge(stdout: &str) -> Result<Vec<Outcome>, RunnerOutputError> {
                 status,
                 reason: unknown.or_else(|| reason_of(r)),
                 fuzz: fuzz_of(r),
+                tool: None,
+                how: how_of(r),
             });
         }
     }
@@ -249,6 +341,41 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn says_the_guarantee_without_upgrading_it() {
+        let fuzz = |runs, calls| Outcome {
+            file: String::new(),
+            contract: String::new(),
+            name: String::new(),
+            status: Status::Pass,
+            reason: None,
+            fuzz: Some(Fuzz {
+                runs,
+                calls,
+                reverts: 0,
+                dead: vec![],
+            }),
+            tool: None,
+            how: None,
+        };
+        assert_eq!(fuzz(64, 2048).guarantee().shown(), "fuzzed 64x32");
+        assert_eq!(fuzz(0, 0).guarantee().shown(), "fuzzed");
+        let unit = Outcome {
+            fuzz: None,
+            ..fuzz(1, 1)
+        };
+        assert_eq!(unit.guarantee().shown(), "unit");
+        let report = r#"{"test/A.t.sol:AT":{"test_results":{"testFuzz_add(uint256)":{"status":"Success","reason":null,"kind":{"Fuzz":{"runs":256,"mean_gas":1,"median_gas":1}}}}}}"#;
+        let o = parse_forge(report).expect("report");
+        assert_eq!(o[0].guarantee().shown(), "fuzzed 256 runs");
+        let sym = How {
+            loop_bound: Some(4),
+            ..How::of(HowKind::Symbolic)
+        };
+        assert_eq!(sym.shown(), "symbolic (bounded, loop 4)");
+        assert_eq!(How::of(HowKind::Symbolic).shown(), "symbolic (bounded)");
     }
 
     #[test]

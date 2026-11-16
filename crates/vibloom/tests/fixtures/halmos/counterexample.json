@@ -1,0 +1,46 @@
+{
+    "exitcode": 1,
+    "test_results": {
+        "test/VaultSym.t.sol:VaultSymTest": [
+            {
+                "name": "check_withdrawTakesAssetsOut(uint256,uint256)",
+                "exitcode": 1,
+                "num_models": 1,
+                "models": [
+                    {
+                        "model": {
+                            "p_a_uint256_e7a9b8b_00": {
+                                "full_name": "p_a_uint256_e7a9b8b_00",
+                                "variable_name": "a",
+                                "solidity_type": "uint256",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 57896044618658097711785492504343953926634992332820282019728792003956564819968
+                            },
+                            "p_s_uint256_9255e72_00": {
+                                "full_name": "p_s_uint256_9255e72_00",
+                                "variable_name": "s",
+                                "solidity_type": "uint256",
+                                "smt_type": "BitVec 256",
+                                "size_bits": 256,
+                                "value": 1
+                            }
+                        },
+                        "is_valid": true
+                    }
+                ],
+                "num_paths": [
+                    8,
+                    3,
+                    0
+                ],
+                "time": [
+                    1.4611418640000124,
+                    0.15515999900000566,
+                    1.3059746560000178
+                ],
+                "num_bounded_loops": 0
+            }
+        ]
+    }
+}

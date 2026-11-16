@@ -66,6 +66,12 @@ The person runs it in their own terminal: vibloom edit inv.assets-match-flows --
   map, in one page.
 - [docs/guard.md](docs/guard.md): the reference: every command, the map, the
   states, CI, agents, the limits.
+- [After an audit](docs/guard.md#after-an-audit): tag the audited commit and
+  run `vibloom diff <tag>` before each release to see what is gone, weakened
+  or changed under the map since.
+- [docs/format.md](docs/format.md): the map format and the JSON output, with
+  their JSON Schemas in [schema/](schema/), for tools that write or read a
+  map.
 - [examples/](examples/): a Foundry vault and a pytest ledger set up with the
   guard. Runners other than Foundry work through JUnit XML (cargo-nextest,
   pytest, Jest, mocha, Go).
@@ -79,7 +85,11 @@ The person runs it in their own terminal: vibloom edit inv.assets-match-flows --
   [Where the rules are enforced](docs/guard.md#where-the-rules-are-enforced).
 - **It knows only what the map says.** Passing tests do not prove a global
   property, and the guard does not discover a dependency nobody wrote down.
-- **Two report formats**: Foundry's JSON and JUnit XML.
+- **It uses other tools' results, it does not replace them.** It reads
+  Foundry's JSON, JUnit XML, Halmos and Echidna reports, and shows the kind
+  of guarantee each gives (`holds, fuzzed 64x32`, `holds, symbolic
+(bounded)`): a fuzz pass is never shown as a proof. It finds no
+  vulnerabilities, assigns no severity and proves nothing itself.
 
 No model and no API key are involved: the guard is deterministic, and Claude
 Code or Codex run on the plan they already use.
@@ -110,7 +120,8 @@ packages/engine   canonical JSON and hashing
 packages/contracts shared types and boundary validation
 tools/reference   SciPy reference data generator
 examples/         a Foundry vault and a pytest ledger set up with the guard
-docs/             quickstart, guard reference, architecture, science, validation
+schema/           JSON Schemas of the map and of the JSON output
+docs/             quickstart, guard reference, map format, architecture, science, validation
 ```
 
 ## License

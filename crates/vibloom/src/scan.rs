@@ -90,6 +90,7 @@ pub fn add_found(
             detail: None,
             stance: Stance::Adopted,
             test: Some(TestRef {
+                tool: None,
                 file: f.file.clone(),
                 contract: Some(f.contract.clone()),
                 name: f.name.clone(),

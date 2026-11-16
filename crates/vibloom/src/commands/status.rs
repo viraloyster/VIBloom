@@ -135,6 +135,13 @@ pub(crate) fn to_json(r: &Report) -> Value {
                 "rests_on_unreviewed": v.unreviewed,
                 "run": v.run,
                 "fuzz": v.fuzz,
+                "how": v.how.as_ref().map(|h| json!({
+                    "kind": h.kind,
+                    "runs": h.runs,
+                    "depth": h.depth,
+                    "loop": h.loop_bound,
+                    "shown": h.shown(),
+                })),
             })
         })
         .collect();

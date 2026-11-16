@@ -34,6 +34,7 @@ pub(crate) fn init(io: &mut Io, args: &Args) -> Fallible<i32> {
         protect.extend(guard);
     }
     let mut start = RootsMap {
+        schema: Some(crate::map::SCHEMA_URL.to_string()),
         runner: p.runner.clone(),
         report: p.report.clone(),
         tests: p.tests.clone(),
@@ -244,6 +245,8 @@ pub(crate) fn scan(
             helper_files.extend(c.helpers.iter().cloned());
         }
     }
+    let has = |f: &str| root.join(f).is_file();
+    helper_files.extend(crate::setup::check_configs(&map.checks, &has));
     helper_files.sort();
     helper_files.dedup();
     let mut guarded = Vec::new();

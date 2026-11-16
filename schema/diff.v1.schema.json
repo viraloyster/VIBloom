@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/viraloyster/VIBloom/main/schema/diff.v1.schema.json",
+  "title": "VIBloom diff output, format 1",
+  "description": "What vibloom diff <ref> --json prints. Keys may be added while format is 1; readers ignore keys they do not know.",
+  "type": "object",
+  "required": [
+    "format",
+    "base",
+    "base_has_map",
+    "exit",
+    "removed",
+    "weakened",
+    "guard",
+    "changed",
+    "added",
+    "summary"
+  ],
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "base": {
+      "type": "string"
+    },
+    "base_has_map": {
+      "type": "boolean"
+    },
+    "exit": {
+      "enum": [0, 1]
+    },
+    "removed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "weakened": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "changes"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/guard_change"
+            }
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["path", "change"],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "change": {
+                  "enum": ["changed", "added", "removed"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "guard": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/guard_change"
+      }
+    },
+    "changed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "files"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["path", "change"],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "change": {
+                  "enum": ["changed", "added", "removed"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "added": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["removed", "weakened", "guard", "changed", "added"],
+      "properties": {
+        "removed": {
+          "type": "integer"
+        },
+        "weakened": {
+          "type": "integer"
+        },
+        "guard": {
+          "type": "integer"
+        },
+        "changed": {
+          "type": "integer"
+        },
+        "added": {
+          "type": "integer"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "guard_change": {
+      "type": "object",
+      "required": ["kind", "path", "message"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "file_changed",
+            "file_removed",
+            "file_added",
+            "node_removed",
+            "test_changed",
+            "test_removed",
+            "unprotected",
+            "switched_off",
+            "accepts_added",
+            "dependency_removed",
+            "runner_changed",
+            "report_changed",
+            "timeout_changed",
+            "tests_changed",
+            "protect_removed",
+            "ignore_failures_added",
+            "strict_off",
+            "check_removed",
+            "check_changed"
+          ]
+        },
+        "node": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

@@ -1,6 +1,7 @@
 //! VIBloom for code: assumptions, invariants and intentions for a project and
 //! the agents working in it, with every state derived from recorded test runs.
 
+pub mod checks;
 pub mod cli;
 mod commands;
 pub mod context;

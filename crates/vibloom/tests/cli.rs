@@ -563,7 +563,13 @@ fn a_test_that_never_ran_was_skipped_or_went_missing_fails_the_check() {
     });
     let typo = cli(&dir, &["check"]);
     assert_eq!(typo.code, 1, "{}", typo.out);
-    assert!(typo.out.contains("untested  inv.typo"), "{}", typo.out);
+    assert!(
+        typo.out
+            .lines()
+            .any(|l| l.starts_with("untested ") && l.contains(" inv.typo ")),
+        "{}",
+        typo.out
+    );
     edit_map(&dir, |m| {
         m["nodes"].as_array_mut().expect("nodes").pop();
     });
@@ -578,7 +584,11 @@ fn a_test_that_never_ran_was_skipped_or_went_missing_fails_the_check() {
     .expect("write");
     let skipped = cli(&dir, &["check"]);
     assert_eq!(skipped.code, 1, "{}", skipped.out);
-    assert!(skipped.out.contains("skipped  inv.sum"), "{}", skipped.out);
+    assert!(
+        skipped.out.contains("skipped, unit  inv.sum"),
+        "{}",
+        skipped.out
+    );
 
     // The whole suite runs and the invariant is no longer in it.
     fs::write(
@@ -1181,7 +1191,11 @@ fn an_invariant_whose_every_call_reverted_fails_the_check() {
     fs::write(dir.join("runner.sh"), report(2048)).expect("write");
     let vacuous = cli(&dir, &["check"]);
     assert_eq!(vacuous.code, 1, "{}", vacuous.out);
-    assert!(vacuous.out.contains("VACUOUS  inv.sum"), "{}", vacuous.out);
+    assert!(
+        vacuous.out.contains("VACUOUS, fuzzed 64x32  inv.sum"),
+        "{}",
+        vacuous.out
+    );
     assert!(
         cli(&dir, &["context"])
             .out
@@ -1614,7 +1628,7 @@ fn watched_folders_are_written_the_way_the_map_compares_them() {
         status
             .out
             .lines()
-            .any(|l| l.starts_with("pending review ") && l.contains(" inv.sum ")),
+            .any(|l| l.starts_with("pending review, unit ") && l.contains(" inv.sum ")),
         "{}",
         status.out
     );
@@ -1983,7 +1997,11 @@ fn a_protected_test_changed_since_the_last_commit_does_not_hold() {
     fs::write(dir.join("test/handlers/H.sol"), "contract H { }").expect("write");
     let check = cli(&dir, &["check"]);
     assert_eq!(check.code, 1);
-    assert!(check.out.contains("TEST CHANGED  inv.sum"), "{}", check.out);
+    assert!(
+        check.out.contains("TEST CHANGED, unit  inv.sum"),
+        "{}",
+        check.out
+    );
     let stop = hook(&dir, "stop", json!({ "cwd": dir }));
     let reason = stop["reason"].as_str().unwrap_or_default();
     assert!(
@@ -2347,4 +2365,338 @@ fn proposals_are_listed_by_contract_and_decided_in_bulk() {
     let rest = vibloom(&dir, &["proposals", "reject", "--all"], "", true);
     assert_eq!(rest.out, "Rejected p3.\nRejected p4.");
     assert_eq!(cli(&dir, &["proposals"]).out, "No pending proposals.");
+}
+
+const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
+
+// Stands in for `halmos --json-output out/halmos.json`: copies the real
+// Halmos report named in src/C.sol ("pass", "counterexample", ...).
+const FAKE_HALMOS: &str = r#"#!/bin/sh
+[ "$1" = none ] && exit 1
+mkdir -p out
+case "$(cat src/C.sol)" in
+  *counterexample*) f=counterexample ;;
+  *revert*) f=revert-all ;;
+  *timeout*) f=invariants-timeout ;;
+  *) f=pass ;;
+esac
+cp "$FIX/halmos/$f.json" out/halmos.json
+[ "$f" = pass ] || exit 1
+"#;
+
+fn with_halmos(dir: &Path) {
+    with_runner(dir);
+    fs::write(dir.join("halmos.sh"), FAKE_HALMOS.replace("$FIX", FIXTURES)).expect("write");
+    fs::write(dir.join("test/VaultSym.t.sol"), "contract VaultSymTest {}").expect("write");
+    fs::write(dir.join("src/C.sol"), "contract C { }").expect("write");
+    edit_map(dir, |m| {
+        m["checks"] = json!([{ "tool": "halmos", "report": "out/halmos.json",
+                               "command": ["sh", "halmos.sh", "--loop", "3"] }]);
+        m["nodes"].as_array_mut().expect("nodes").push(json!({
+            "id": "inv.sym", "kind": "invariant", "title": "withdraw takes its assets out",
+            "test": { "tool": "halmos", "file": "test/VaultSym.t.sol", "contract": "VaultSymTest",
+                      "name": "check_withdrawTakesAssetsOut(uint256,uint256)" },
+            "watch": ["src/C.sol"] }));
+    });
+}
+
+fn line_of<'a>(out: &'a str, id: &str) -> &'a str {
+    out.lines()
+        .find(|l| l.contains(&format!(" {id} ")))
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_halmos_check_keeps_its_guarantee_and_never_reads_a_timeout_as_a_verdict() {
+    let dir = project();
+    with_halmos(&dir);
+    let ok = cli(&dir, &["check"]);
+    assert_eq!(ok.code, 0, "{}\n{}", ok.out, ok.err);
+    assert!(
+        line_of(&ok.out, "inv.sym").starts_with("holds, symbolic (bounded, loop 3)  inv.sym"),
+        "{}",
+        ok.out
+    );
+    assert!(
+        line_of(&ok.out, "inv.sum").starts_with("holds, unit "),
+        "{}",
+        ok.out
+    );
+    let json: Value = serde_json::from_str(&cli(&dir, &["status", "--json"]).out).expect("json");
+    let sym = json["nodes"]
+        .as_array()
+        .and_then(|n| n.iter().find(|n| n["id"] == "inv.sym"))
+        .expect("node");
+    assert_eq!(
+        sym["how"],
+        json!({ "kind": "symbolic", "runs": null, "depth": null, "loop": 3,
+                "shown": "symbolic (bounded, loop 3)" })
+    );
+
+    fs::write(dir.join("src/C.sol"), "contract C { /* counterexample */ }").expect("write");
+    let broken = cli(&dir, &["check"]);
+    assert_eq!(broken.code, 1);
+    assert!(
+        broken.out.contains("inv.sym: pending review -> BROKEN"),
+        "{}",
+        broken.out
+    );
+    let status = cli(&dir, &["status", "--json"]).out;
+    assert!(
+        status.contains("failure: counterexample: a=57896044618658097711785492504343953926634992332820282019728792003956564819968, s=1"),
+        "{status}"
+    );
+
+    edit_map(&dir, |m| {
+        m["nodes"][1]["test"]["contract"] = json!("VaultRevertTest");
+        m["nodes"][1]["test"]["name"] = json!("check_withdrawFromEmpty");
+    });
+    fs::write(dir.join("src/C.sol"), "contract C { /* revert */ }").expect("write");
+    let vacuous = cli(&dir, &["check"]);
+    assert!(
+        line_of(&vacuous.out, "inv.sym").starts_with("VACUOUS, symbolic (bounded, loop 3)"),
+        "{}",
+        vacuous.out
+    );
+
+    // The real report holds a TIMEOUT for invariant_sharesAreBacked.
+    edit_map(&dir, |m| {
+        m["nodes"][1]["test"] = json!({ "tool": "halmos", "file": "test/Vault.t.sol",
+            "contract": "VaultTest", "name": "invariant_sharesAreBacked" });
+    });
+    fs::write(dir.join("test/Vault.t.sol"), "contract VaultTest {}").expect("write");
+    fs::write(dir.join("src/C.sol"), "contract C { /* timeout */ }").expect("write");
+    let timeout = cli(&dir, &["check"]);
+    assert_eq!(timeout.code, 1);
+    assert!(
+        line_of(&timeout.out, "inv.sym").starts_with("pending review, symbolic"),
+        "{}",
+        timeout.out
+    );
+    let json: Value = serde_json::from_str(&cli(&dir, &["status", "--json"]).out).expect("json");
+    let sym = json["nodes"]
+        .as_array()
+        .and_then(|n| n.iter().find(|n| n["id"] == "inv.sym"))
+        .expect("node");
+    assert_eq!(
+        sym["reason"],
+        "halmos did not finish (TIMEOUT), so the property is neither shown nor refuted"
+    );
+
+    // A command that writes no report is the guard failing, and the report
+    // of the run before is deleted, never read again.
+    edit_map(&dir, |m| {
+        m["checks"][0]["command"] = json!(["sh", "halmos.sh", "none"])
+    });
+    let none = cli(&dir, &["check"]);
+    assert_eq!(none.code, 2);
+    assert!(
+        none.err
+            .contains("halmos: the command wrote no report at out/halmos.json"),
+        "{}",
+        none.err
+    );
+    assert!(!dir.join("out/halmos.json").exists());
+
+    // A filtered run leaves the checks alone.
+    edit_map(&dir, |m| {
+        m["checks"][0]["command"] = json!(["sh", "halmos.sh"])
+    });
+    assert_eq!(cli(&dir, &["run", "--", "--mt", "invariant_sum"]).code, 1);
+    assert!(!dir.join("out/halmos.json").exists());
+}
+
+#[test]
+fn an_echidna_report_without_a_command_counts_only_while_it_is_fresh() {
+    let dir = project();
+    with_runner(&dir);
+    fs::write(dir.join("src/C.sol"), "contract C { }").expect("write");
+    fs::write(
+        dir.join("test/VaultEchidna.sol"),
+        "contract VaultEchidna {}",
+    )
+    .expect("write");
+    edit_map(&dir, |m| {
+        m["checks"] = json!([{ "tool": "echidna", "report": "out/echidna.json" }]);
+        m["nodes"].as_array_mut().expect("nodes").push(json!({
+            "id": "inv.flows", "kind": "invariant", "title": "assets match flows",
+            "test": { "tool": "echidna", "file": "test/VaultEchidna.sol",
+                      "contract": "VaultEchidna", "name": "echidna_assets_match_flows" },
+            "watch": ["src/C.sol"] }));
+    });
+    let missing = cli(&dir, &["check"]);
+    assert_eq!(missing.code, 1);
+    assert!(
+        missing.out.contains("pending review, fuzzed  inv.flows"),
+        "{}",
+        missing.out
+    );
+    let why = cli(&dir, &["status", "--json"]).out;
+    assert!(
+        why.contains(
+            "no echidna report at out/echidna.json: run echidna, or give the check a command"
+        ),
+        "{why}"
+    );
+
+    fs::create_dir_all(dir.join("out")).expect("dir");
+    fs::copy(
+        format!("{FIXTURES}/echidna/passed.json"),
+        dir.join("out/echidna.json"),
+    )
+    .expect("copy");
+    let fresh = cli(&dir, &["check"]);
+    assert_eq!(fresh.code, 0, "{}", fresh.out);
+    assert!(
+        fresh.out.contains("holds, fuzzed  inv.flows"),
+        "{}",
+        fresh.out
+    );
+
+    // The code changed after the report was written: it says nothing now.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    fs::write(dir.join("src/C.sol"), "contract C { uint x; }").expect("write");
+    let stale = cli(&dir, &["check"]);
+    assert_eq!(stale.code, 1);
+    let why = cli(&dir, &["status", "--json"]).out;
+    assert!(
+        why.contains(
+            "the echidna report out/echidna.json is older than src/C.sol: run echidna again"
+        ),
+        "{why}"
+    );
+
+    fs::copy(
+        format!("{FIXTURES}/echidna/solved.json"),
+        dir.join("out/echidna.json"),
+    )
+    .expect("copy");
+    let solved = cli(&dir, &["check"]);
+    assert_eq!(solved.code, 1);
+    assert!(
+        solved.out.contains("inv.flows: pending review -> BROKEN"),
+        "{}",
+        solved.out
+    );
+}
+
+#[test]
+fn checks_and_their_configs_are_guarded() {
+    let dir = project();
+    with_halmos(&dir);
+    fs::write(dir.join("echidna.yaml"), "testLimit: 50000\n").expect("write");
+    edit_map(&dir, |m| {
+        m["checks"].as_array_mut().expect("checks").push(json!({
+            "tool": "echidna", "report": "out/echidna.json",
+            "command": ["sh", "-c", "echidna . --config echidna.yaml --format json > out/echidna.json"] }));
+    });
+    let scan = vibloom(&dir, &["scan"], "", true);
+    assert!(
+        scan.out.contains("Now guarded: echidna.yaml."),
+        "{}",
+        scan.out
+    );
+    git(&dir, &["init", "-q"]);
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "start"]);
+    edit_map(&dir, |m| {
+        m["checks"] = json!([{ "tool": "halmos", "report": "out/halmos.json",
+                               "command": ["sh", "halmos.sh", "--loop", "1"] }]);
+    });
+    fs::write(dir.join("echidna.yaml"), "testLimit: 1\n").expect("write");
+    let base = cli(&dir, &["check", "--base", "HEAD"]);
+    assert_eq!(base.code, 1);
+    for want in [
+        "- the halmos command changed from `sh halmos.sh --loop 3` to `sh halmos.sh --loop 1`",
+        "- the echidna check (out/echidna.json) was removed",
+        "- echidna.yaml: guarded file changed",
+    ] {
+        assert!(base.out.contains(want), "{want}\n{}", base.out);
+    }
+}
+
+#[test]
+fn init_names_the_schema_first() {
+    let dir = project();
+    assert_eq!(vibloom(&dir, &["init"], "", true).code, 0);
+    let text = fs::read_to_string(dir.join(".vibloom/roots.json")).expect("map");
+    assert!(
+        text.starts_with("{\n  \"$schema\": \"https://raw.githubusercontent.com/viraloyster/VIBloom/main/schema/roots.v1.schema.json\","),
+        "{text}"
+    );
+}
+
+#[test]
+fn diff_shows_what_changed_since_the_audited_commit() {
+    let dir = project();
+    with_runner(&dir);
+    fs::write(dir.join("src/C.sol"), "contract C { }").expect("write");
+    fs::write(dir.join("src/D.sol"), "contract D { }").expect("write");
+    edit_map(&dir, |m| {
+        let nodes = m["nodes"].as_array_mut().expect("nodes");
+        nodes[0]["watch"] = json!(["src/C.sol"]);
+        nodes.push(
+            json!({ "id": "asm.d", "kind": "assumption", "title": "D is trusted",
+            "stance": "adopted", "watch": ["src/D.sol"] }),
+        );
+        nodes.push(json!({ "id": "asm.gone", "kind": "assumption", "title": "soon gone" }));
+        nodes.push(
+            json!({ "id": "int.safe", "kind": "intention", "title": "safe",
+            "depends_on": ["inv.sum", "asm.d"] }),
+        );
+    });
+    git(&dir, &["init", "-q"]);
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "audited"]);
+    git(&dir, &["tag", "audit-1"]);
+    let same = cli(&dir, &["diff", "audit-1"]);
+    assert_eq!(same.code, 0, "{}", same.err);
+    assert_eq!(
+        same.out,
+        "Since audit-1: 0 gone or weakened, 0 guard changes, 0 nodes with changed files, 0 added."
+    );
+
+    fs::write(dir.join("src/D.sol"), "contract D { uint x; }").expect("write");
+    fs::write(
+        dir.join("test/C.t.sol"),
+        "contract CT { function invariant_sum() public { } }",
+    )
+    .expect("write");
+    edit_map(&dir, |m| {
+        let nodes = m["nodes"].as_array_mut().expect("nodes");
+        nodes.retain(|n| n["id"] != "asm.gone");
+        nodes[0]["protected"] = json!(false);
+        nodes.push(json!({ "id": "asm.new", "kind": "assumption", "title": "new one" }));
+    });
+    // Read-only, so an agent may run it too.
+    let d = cli(&dir, &["diff", "audit-1"]);
+    assert_eq!(d.code, 1, "{}", d.err);
+    assert_eq!(
+        d.out,
+        [
+            "Gone or weakened since audit-1:",
+            "- asm.gone: removed (\"soon gone\")",
+            "- inv.sum: its test is no longer protected; files changed: test/C.t.sol",
+            "Guard changes since audit-1:",
+            "- test/C.t.sol: guarded file changed",
+            "Not what was reviewed at audit-1 (same node, but files it watches changed):",
+            "- asm.d: src/D.sol",
+            "Added since audit-1:",
+            "- asm.new: new one",
+            "Since audit-1: 2 gone or weakened, 1 guard change, 1 node with changed files, 1 added.",
+        ]
+        .join("\n")
+    );
+    let j: Value =
+        serde_json::from_str(&cli(&dir, &["diff", "audit-1", "--json"]).out).expect("json");
+    assert_eq!(
+        j["summary"],
+        json!({ "removed": 1, "weakened": 1, "guard": 1, "changed": 1, "added": 1 })
+    );
+    assert_eq!(
+        j["changed"][0]["files"],
+        json!([{ "path": "src/D.sol", "change": "changed" }])
+    );
+    assert_eq!(cli(&dir, &["diff", "nope"]).code, 2);
+    assert_eq!(cli(&dir, &["diff"]).code, 2);
 }

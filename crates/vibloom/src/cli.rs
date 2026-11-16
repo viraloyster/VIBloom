@@ -73,8 +73,8 @@ Everyday:
 More:
   Map editing
     vibloom add assumption|invariant|intention \"<title>\" [--on ID]... [--file F --test N
-                [--contract C]] [--watch P]... [--evidence E]... [--detail D] [--id ID]
-                [--hypothetical | --adopted] [--unprotected]
+                [--contract C] [--tool T]] [--watch P]... [--evidence E]... [--detail D]
+                [--id ID] [--hypothetical | --adopted] [--unprotected]
     vibloom edit <id> [--title T] [--detail D] [--stance adopted|hypothetical|off]
                 [--on ID] [--not-on ID] [--watch P] [--unwatch P] [--evidence E]
                 [--drop-evidence E] [--accept ID --reason R] [--unaccept ID]
@@ -96,6 +96,9 @@ More:
     vibloom check --base <ref> [--allow-guard-changes] [--strict] [--json | --format github]
     vibloom status --json [--strict]
     vibloom install-hook                install the commit check in this clone
+  Audit
+    vibloom diff <ref> [--json]         what is gone, weakened or changed under the map
+                                        since <ref> (the audited tag); read-only
     vibloom precommit                   the commit check itself
   Repair
     vibloom verify                      check the local run log's hash chain
@@ -108,7 +111,7 @@ only proposes. VIBLOOM_ROLE=verifier or builder overrides the detection.
 Exit codes: 0 nothing needs attention, 1 something does (a verdict), 2 vibloom
 could not do its job (no map, bad arguments, git error, the runner failed).";
 
-const COMMANDS: [&str; 22] = [
+const COMMANDS: [&str; 23] = [
     "init",
     "check",
     "status",
@@ -130,6 +133,7 @@ const COMMANDS: [&str; 22] = [
     "precommit",
     "verify",
     "repair",
+    "diff",
     "help",
 ];
 
@@ -208,6 +212,7 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
             "--id",
             "--file",
             "--contract",
+            "--tool",
             "--test",
             "--watch",
             "--on",
@@ -218,6 +223,7 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
     };
     let flags: &[&str] = match cmd {
         "status" => &["--json", "--strict"],
+        "diff" => &["--json"],
         "check" => &["--json", "--strict", "--allow-guard-changes"],
         "scan" => &["--tighten"],
         "add" => &["--hypothetical", "--adopted", "--unprotected"],
@@ -265,7 +271,7 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
     let strict = args.set.contains(&"--strict");
     let takes_words = matches!(
         cmd,
-        "hook" | "context" | "proposals" | "add" | "setup" | "edit" | "remove" | "survey"
+        "hook" | "context" | "proposals" | "add" | "setup" | "edit" | "remove" | "survey" | "diff"
     );
     if !takes_words && !args.words.is_empty() {
         return Err(format!(
@@ -329,6 +335,7 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
         }
         "setup" => commands::agents::setup(&root, io, &args),
         "status" => commands::status::status(&root, io, as_json, strict),
+        "diff" => commands::diff::diff(&root, io, &args, as_json),
         "run" => commands::run::run_tests(&root, io, &extra),
         "check" => {
             let format = match (as_json, args.opt("--format")) {
