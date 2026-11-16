@@ -14,13 +14,42 @@ pub enum Role {
     Verifier,
 }
 
+/// What agent tools set in the environment of the commands they run, and the
+/// tool each one names. Only variables confirmed in each tool's docs or source.
+pub const AGENT_VARS: [(&str, &str); 5] = [
+    // Claude Code: set for the commands it runs (its CHANGELOG; seen in a session).
+    ("CLAUDECODE", "Claude Code"),
+    // Codex CLI: codex-rs/protocol/src/shell_environment.rs.
+    ("CODEX_THREAD_ID", "Codex"),
+    // Codex CLI, under its sandbox: codex-rs/core/src/spawn.rs.
+    ("CODEX_SANDBOX", "Codex"),
+    // Cursor's agent: cursor.com/docs/agent/tools/terminal.
+    ("CURSOR_AGENT", "Cursor"),
+    // Gemini CLI: packages/core/src/services/shellExecutionService.ts.
+    ("GEMINI_CLI", "Gemini CLI"),
+];
+
 impl Role {
-    pub fn from_env(value: Option<&str>) -> Self {
-        if value == Some("verifier") {
-            Self::Verifier
-        } else {
-            Self::Builder
+    /// `VIBLOOM_ROLE` when set; else builder inside an agent; else a person at
+    /// a terminal, the verifier. Also says why, for the messages that refuse.
+    pub fn resolve(env: &dyn Fn(&str) -> Option<String>) -> (Self, String) {
+        let set = |k: &str| env(k).filter(|v| !v.is_empty());
+        match set("VIBLOOM_ROLE").as_deref() {
+            Some("verifier") => return (Self::Verifier, "VIBLOOM_ROLE is verifier".into()),
+            Some(other) => {
+                return (Self::Builder, format!("VIBLOOM_ROLE is {other}"));
+            }
+            None => {}
         }
+        for (var, tool) in AGENT_VARS {
+            if set(var).is_some() {
+                return (
+                    Self::Builder,
+                    format!("{var} is set: {tool} is running this command"),
+                );
+            }
+        }
+        (Self::Verifier, "no agent detected".into())
     }
 }
 
@@ -130,6 +159,19 @@ static NO_VERIFY: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\bgit\b[^;&|]*\bcommit\b[^;&|]*(--no-verify\b|\s-[a-zA-Z]*n[a-zA-Z]*\b)")
         .expect("static regex")
 });
+// `env -i` and `env -u` start a command without the variables that say an
+// agent runs it.
+static ENV_CLEAR: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(^|[\s;&|(`])env\s+(-[a-zA-Z]*[iu]|--ignore-environment|--unset)\b")
+        .expect("static regex")
+});
+
+fn names_role(cmd: &str) -> bool {
+    cmd.contains("VIBLOOM_ROLE")
+        || AGENT_VARS.iter().any(|(v, _)| cmd.contains(v))
+        || ENV_CLEAR.is_match(cmd)
+}
+
 // Where git finds the commit check: moving or editing it skips the check.
 static GIT_HOOKS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)core\.hookspath|\.git/hooks\b").expect("static regex"));
@@ -229,16 +271,17 @@ pub fn pre_tool(
         && guarded_hit(map, &r, false).is_some()
     {
         return deny(format!(
-            "VIBloom: {r} is guarded. Only the verifier role may change protected tests and the roots map. \
+            "VIBloom: {r} is guarded. Protected tests and the roots map are the person's to change, not an agent's. \
              If the test is wrong, say so and explain why; do not change it to make it pass."
         ));
     }
     if input.tool_name == "Bash" {
         let cmd = input.command.as_deref().unwrap_or_default();
-        // The role is given by whoever starts the agent, never taken by it.
-        if cmd.contains("VIBLOOM_ROLE") {
+        // The role is given by whoever starts the agent, never taken by it:
+        // not by setting it, nor by hiding the variables that say an agent runs.
+        if names_role(cmd) {
             return deny(
-                "VIBloom: a builder does not set VIBLOOM_ROLE. Ask the person to do what needs the verifier."
+                "VIBloom: an agent does not change its role or the variables that say an agent is running. What needs the verifier is a decision for the person: ask them to run it in their own terminal."
                     .into(),
             );
         }
@@ -284,7 +327,7 @@ pub fn pre_tool_unreadable(input: &HookInput, role: Role, problem: &str) -> Hook
     let writes = EDIT_TOOLS.contains(&input.tool_name.as_str())
         || (input.tool_name == "Bash"
             && (WRITES.is_match(cmd)
-                || cmd.contains("VIBLOOM_ROLE")
+                || names_role(cmd)
                 || CHAIN_WRITE.is_match(cmd)
                 || NO_VERIFY.is_match(cmd)
                 || GIT_HOOKS.is_match(cmd)));
@@ -601,6 +644,12 @@ pub(crate) mod tests {
             "forge create src/C.sol:C",
             "VIBLOOM_ROLE=verifier vibloom proposals accept p1",
             "export VIBLOOM_ROLE=verifier",
+            "unset CLAUDECODE; vibloom proposals accept --all",
+            "CLAUDECODE= vibloom edit inv.x --stance off",
+            "env -u CODEX_THREAD_ID vibloom remove inv.x",
+            "env -i PATH=$PATH vibloom proposals accept p1",
+            "env --ignore-environment vibloom add x",
+            "GEMINI_CLI='' CURSOR_AGENT= vibloom add x",
             "git commit --no-verify -m x",
             "git add -A && git commit -nm x",
             "git checkout HEAD~1 -- test/C.t.sol",
@@ -619,6 +668,7 @@ pub(crate) mod tests {
             "git commit --amend -m x",
             "git checkout -b feature",
             "git log -n 3",
+            "env | sort",
         ] {
             assert_eq!(
                 pre_tool(&bash(cmd), &map(), Role::Builder, &rel),
@@ -635,6 +685,37 @@ pub(crate) mod tests {
             ),
             HookOutput::default()
         );
+    }
+
+    #[test]
+    fn a_person_is_the_verifier_and_an_agent_the_builder() {
+        let role = |vars: &[(&str, &str)]| {
+            let vars: Vec<(String, String)> = vars
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                .collect();
+            Role::resolve(&|k| vars.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone()))
+        };
+        assert_eq!(role(&[]).0, Role::Verifier);
+        assert_eq!(role(&[("CLAUDECODE", "")]).0, Role::Verifier);
+        for var in [
+            "CLAUDECODE",
+            "CODEX_THREAD_ID",
+            "CODEX_SANDBOX",
+            "CURSOR_AGENT",
+            "GEMINI_CLI",
+        ] {
+            let (r, why) = role(&[(var, "1")]);
+            assert_eq!(r, Role::Builder, "{var}");
+            assert!(why.starts_with(var), "{why}");
+        }
+        // The variable says it outright, whatever runs the command.
+        assert_eq!(
+            role(&[("CLAUDECODE", "1"), ("VIBLOOM_ROLE", "verifier")]).0,
+            Role::Verifier
+        );
+        assert_eq!(role(&[("VIBLOOM_ROLE", "builder")]).0, Role::Builder);
+        assert_eq!(role(&[("VIBLOOM_ROLE", "admin")]).0, Role::Builder);
     }
 
     // Like the CLI's: relative paths are read from /repo, and ".." is folded.

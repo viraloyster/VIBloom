@@ -160,33 +160,182 @@ pub fn run(root: &Path, extra: &[String]) -> Fallible<RunReport> {
     })
 }
 
-/// The line that says what a run recorded. Failures are counted too: a test
-/// no node rests on can fail without any node needing attention, and that
-/// must not read as a clean run.
-pub fn recorded(entry: &RunEntry, map: &RootsMap) -> String {
-    let n = entry.outcomes.len();
-    let failed: Vec<_> = entry
+/// The failing tests of a run that no node rests on, by name: those that
+/// fail the check, and those the map's `ignore_failures` lets pass.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Failures {
+    pub failed: usize,
+    pub untracked: Vec<String>,
+    pub ignored: Vec<String>,
+}
+
+pub fn failures(entry: &RunEntry, map: &RootsMap) -> Failures {
+    let mut out = Failures::default();
+    for o in entry
         .outcomes
         .iter()
         .filter(|o| o.status == crate::forge::Status::Fail)
-        .collect();
+    {
+        out.failed += 1;
+        if map.nodes.iter().any(|n| crate::derive::matches(n, o)) {
+            continue;
+        }
+        let name = test_label(o);
+        if ignored_by(map, o).is_some() {
+            out.ignored.push(name);
+        } else {
+            out.untracked.push(name);
+        }
+    }
+    out
+}
+
+fn test_label(o: &crate::forge::Outcome) -> String {
+    if o.contract.is_empty() {
+        o.name.clone()
+    } else {
+        format!("{}.{}", o.contract, o.name)
+    }
+}
+
+/// The `ignore_failures` pattern that covers a test, if any: a glob on
+/// `Contract.test` or on the test's file.
+pub fn ignored_by<'a>(map: &'a RootsMap, o: &crate::forge::Outcome) -> Option<&'a str> {
+    let label = test_label(o);
+    map.ignore_failures
+        .iter()
+        .find(|p| glob(p, &label) || (!o.file.is_empty() && glob(p, &o.file)))
+        .map(String::as_str)
+}
+
+// `*` stands for any run of characters, `?` for one; nothing else is special.
+fn glob(pattern: &str, text: &str) -> bool {
+    let (p, t): (Vec<char>, Vec<char>) = (pattern.chars().collect(), text.chars().collect());
+    let (mut pi, mut ti) = (0, 0);
+    let mut star: Option<(usize, usize)> = None;
+    while ti < t.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == t[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = Some((pi, ti));
+            pi += 1;
+        } else if let Some((sp, st)) = star {
+            pi = sp + 1;
+            ti = st + 1;
+            star = Some((sp, st + 1));
+        } else {
+            return false;
+        }
+    }
+    p[pi..].iter().all(|c| *c == '*')
+}
+
+/// The line that says what a run recorded, and the failing tests no node
+/// rests on: they fail the check too, unless the map ignores them by rule.
+pub fn recorded(entry: &RunEntry, map: &RootsMap) -> String {
+    let n = entry.outcomes.len();
+    let f = failures(entry, map);
     let mut line = format!(
         "Run {}: {n} test {} recorded",
         entry.seq,
         if n == 1 { "result" } else { "results" }
     );
-    if !failed.is_empty() {
-        let loose = failed
-            .iter()
-            .filter(|o| !map.nodes.iter().any(|nd| crate::derive::matches(nd, o)))
-            .count();
-        line.push_str(&format!(", {} failed", failed.len()));
-        if loose > 0 {
-            line.push_str(&format!(
-                " ({loose} tied to no node, so no state shows them)"
-            ));
-        }
+    if f.failed > 0 {
+        line.push_str(&format!(", {} failed", f.failed));
     }
     line.push('.');
+    if !f.untracked.is_empty() {
+        let shown: Vec<&str> = f.untracked.iter().take(5).map(String::as_str).collect();
+        let more = f.untracked.len() - shown.len();
+        line.push_str(&format!(
+            "\n{} failing {} no node rests on, which still {} the check: {}{}.\nFix {}, or tie {} to a node; a test known to be red can be listed in \"ignore_failures\" in the map.",
+            f.untracked.len(),
+            if f.untracked.len() == 1 { "test" } else { "tests" },
+            if f.untracked.len() == 1 { "fails" } else { "fail" },
+            shown.join(", "),
+            if more > 0 { format!(" and {more} more") } else { String::new() },
+            if f.untracked.len() == 1 { "it" } else { "them" },
+            if f.untracked.len() == 1 { "it" } else { "them" },
+        ));
+    }
+    if !f.ignored.is_empty() {
+        line.push_str(&format!(
+            "\nIgnoring {} failing {} by rule (ignore_failures in the map).",
+            f.ignored.len(),
+            if f.ignored.len() == 1 {
+                "test"
+            } else {
+                "tests"
+            }
+        ));
+    }
     line
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::forge::{Outcome, Status};
+    use crate::log::{RunBody, next_entry};
+    use crate::map::parse_map;
+    use serde_json::json;
+
+    fn outcome(file: &str, contract: &str, name: &str, status: Status) -> Outcome {
+        Outcome {
+            file: file.into(),
+            contract: contract.into(),
+            name: name.into(),
+            status,
+            reason: None,
+            fuzz: None,
+        }
+    }
+
+    #[test]
+    fn globs_match_whole_names() {
+        assert!(glob("LegacyTest.*", "LegacyTest.test_old"));
+        assert!(glob("test/legacy/*", "test/legacy/Old.t.sol"));
+        assert!(glob("*.test_?", "A.test_x"));
+        assert!(!glob("Legacy*", "VaultTest.test_x"));
+        assert!(!glob("A.test", "A.test_x"));
+    }
+
+    #[test]
+    fn counts_failures_no_node_rests_on_and_those_ignored_by_rule() {
+        let map = parse_map(&json!({
+            "version": 1,
+            "ignore_failures": ["Legacy*"],
+            "nodes": [{ "id": "inv.sum", "kind": "invariant", "title": "sum",
+                        "test": { "file": "test/C.t.sol", "name": "invariant_sum" } }]
+        }))
+        .expect("valid");
+        let entry = next_entry(
+            None,
+            RunBody {
+                at: "t".into(),
+                command: vec![],
+                outcomes: vec![
+                    outcome("test/C.t.sol", "CT", "invariant_sum", Status::Fail),
+                    outcome("test/C.t.sol", "CT", "test_edge", Status::Fail),
+                    outcome("test/L.t.sol", "LegacyTest", "test_old", Status::Fail),
+                    outcome("test/C.t.sol", "CT", "test_ok", Status::Pass),
+                ],
+                digests: Default::default(),
+                error: None,
+            },
+        );
+        let f = failures(&entry, &map);
+        assert_eq!(f.failed, 3);
+        assert_eq!(f.untracked, vec!["CT.test_edge"]);
+        assert_eq!(f.ignored, vec!["LegacyTest.test_old"]);
+        let line = recorded(&entry, &map);
+        assert!(
+            line.contains(
+                "1 failing test no node rests on, which still fails the check: CT.test_edge."
+            ),
+            "{line}"
+        );
+        assert!(line.contains("Ignoring 1 failing test by rule"), "{line}");
+    }
 }

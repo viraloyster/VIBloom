@@ -35,23 +35,50 @@ fn project() -> PathBuf {
     dir
 }
 
+// The role comes from the environment, and these tests may themselves run
+// inside an agent: every child starts with none of the variables it reads.
+const ROLE_VARS: [&str; 6] = [
+    "VIBLOOM_ROLE",
+    "CLAUDECODE",
+    "CODEX_THREAD_ID",
+    "CODEX_SANDBOX",
+    "CURSOR_AGENT",
+    "GEMINI_CLI",
+];
+
+fn clean(cmd: &mut Command) -> &mut Command {
+    for v in ROLE_VARS {
+        cmd.env_remove(v);
+    }
+    cmd
+}
+
 struct Out {
     code: i32,
     out: String,
     err: String,
 }
 
-fn vibloom(dir: &Path, args: &[&str], stdin: &str, verifier: bool) -> Out {
+// `person` runs it as someone at a terminal, with no role set; otherwise as
+// an agent, the way Claude Code runs its commands.
+fn vibloom(dir: &Path, args: &[&str], stdin: &str, person: bool) -> Out {
+    vibloom_env(
+        dir,
+        args,
+        stdin,
+        if person { &[] } else { &[("CLAUDECODE", "1")] },
+    )
+}
+
+fn vibloom_env(dir: &Path, args: &[&str], stdin: &str, env: &[(&str, &str)]) -> Out {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_vibloom"));
-    cmd.args(args)
+    clean(&mut cmd)
+        .args(args)
         .current_dir(dir)
-        .env_remove("VIBLOOM_ROLE")
+        .envs(env.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if verifier {
-        cmd.env("VIBLOOM_ROLE", "verifier");
-    }
     let mut child = cmd.spawn().expect("spawn");
     child
         .stdin
@@ -84,7 +111,7 @@ fn with_runner(dir: &Path) {
 }
 
 fn git(dir: &Path, args: &[&str]) {
-    let ok = Command::new("git")
+    let ok = clean(&mut Command::new("git"))
         .args([
             "-c",
             "user.name=t",
@@ -365,7 +392,7 @@ fn check_against_the_base_passes_new_nodes_and_new_tests_and_runs_fresh() {
     fs::write(&log, forged).expect("write");
     assert_eq!(cli(&dir, &["check"]).code, 1);
     // No map on the base: said, and the guard part passes.
-    let empty = Command::new("git")
+    let empty = clean(&mut Command::new("git"))
         .args(["-c", "user.name=t", "-c", "user.email=t@t", "commit-tree"])
         .args(["4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "empty"])
         .current_dir(&dir)
@@ -494,13 +521,15 @@ fn serves_mcp_and_keeps_proposals_out_of_the_map_until_accepted() {
     assert!(
         cli(&dir, &["proposals"])
             .out
-            .contains("p1  assumption  Only add() changes total")
+            .contains("  assumption\n    p1  Only add() changes total")
     );
     // An agent cannot accept what it proposed: deciding needs the verifier.
     let refused = cli(&dir, &["proposals", "accept", "p1"]);
     assert_eq!(refused.code, 2);
     assert!(
-        refused.err.contains("Only the verifier decides"),
+        refused
+            .err
+            .contains("decides what enters the map, which is a decision for the person"),
         "{}",
         refused.err
     );
@@ -568,10 +597,9 @@ fn concurrent_runs_keep_one_chain_and_a_broken_log_can_be_repaired() {
     with_runner(&dir);
     let runs: Vec<_> = (0..6)
         .map(|_| {
-            Command::new(env!("CARGO_BIN_EXE_vibloom"))
+            clean(&mut Command::new(env!("CARGO_BIN_EXE_vibloom")))
                 .arg("run")
                 .current_dir(&dir)
-                .env_remove("VIBLOOM_ROLE")
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
@@ -683,7 +711,7 @@ fn init_guards_what_an_invariant_test_leans_on() {
     .expect("write");
     fs::write(dir.join("test/handlers/H.sol"), "contract H {}").expect("write");
     // No forge at all: the imports are read from the text, and it says so.
-    let o = Command::new(env!("CARGO_BIN_EXE_vibloom"))
+    let o = clean(&mut Command::new(env!("CARGO_BIN_EXE_vibloom")))
         .arg("init")
         .current_dir(&dir)
         .env("PATH", "/usr/bin:/bin")
@@ -729,7 +757,25 @@ fn sets_up_another_stack_and_adds_nodes_by_hand() {
     ];
     let refused = cli(&dir, &[&add[..], &test[..]].concat());
     assert_eq!(refused.code, 2);
-    assert!(refused.err.contains("only the verifier"), "{}", refused.err);
+    assert!(
+        refused.err.contains("a decision for the person"),
+        "{}",
+        refused.err
+    );
+    assert!(
+        refused
+            .err
+            .contains("CLAUDECODE is set: Claude Code is running this command"),
+        "{}",
+        refused.err
+    );
+    assert!(
+        refused.err.ends_with(
+            "in their own terminal: vibloom add invariant 'a balance never goes negative' --file tests/test_vault.py --test test_never_negative"
+        ),
+        "{}",
+        refused.err
+    );
     let no_test = vibloom(&dir, &add, "", true);
     assert!(
         no_test.err.contains("an invariant needs a test"),
@@ -745,13 +791,13 @@ fn sets_up_another_stack_and_adds_nodes_by_hand() {
     let intent = ["add", "intention", "withdraw caps at the balance"];
     assert_eq!(
         vibloom(&dir, &[&intent[..], &on[..]].concat(), "", true).out,
-        "Added int.withdraw-caps-at-the-balance (adopted)."
+        "Added int.withdraw-caps-at-the-balance (adopted).\nint.withdraw-caps-at-the-balance rests on inv.a-balance-never-goes-negative: if inv.a-balance-never-goes-negative fails, int.withdraw-caps-at-the-balance is at risk."
     );
     // One rule: an assumption is hypothetical until someone adopts it.
     let asm = ["add", "assumption", "the oracle is fresh"];
     assert_eq!(
         vibloom(&dir, &asm, "", true).out,
-        "Added asm.the-oracle-is-fresh (hypothetical)."
+        "Added asm.the-oracle-is-fresh (hypothetical: not yet reviewed; `vibloom edit asm.the-oracle-is-fresh --stance adopted` adopts it)."
     );
     assert_eq!(
         vibloom(
@@ -771,7 +817,7 @@ fn sets_up_another_stack_and_adds_nodes_by_hand() {
             true
         )
         .out,
-        "Added int.maybe (hypothetical)."
+        "Added int.maybe (hypothetical: not yet reviewed; `vibloom edit int.maybe --stance adopted` adopts it)."
     );
     let both = vibloom(
         &dir,
@@ -788,9 +834,51 @@ fn sets_up_another_stack_and_adds_nodes_by_hand() {
         true,
     );
     assert!(
-        unknown.err.contains("depends on unknown inv.nope"),
+        unknown.err.starts_with("No node inv.nope."),
         "{}",
         unknown.err
+    );
+    // A typo anywhere an id is taken gets the nearest ones.
+    for args in [
+        &["add", "x", "--on", "inv.a-balance-never-goes-negativ"][..],
+        &["edit", "inv.a-balance-never-goes-negativ", "--title", "t"],
+        &[
+            "edit",
+            "asm.the-oracle-is-fresh",
+            "--on",
+            "inv.a-balance-never-goes-negativ",
+        ],
+        &["remove", "inv.a-balance-never-goes-negativ"],
+    ] {
+        let typo = vibloom(&dir, args, "", true);
+        assert_eq!(typo.code, 2, "{args:?}");
+        assert!(
+            typo.err.contains(
+                "No node inv.a-balance-never-goes-negativ. Did you mean inv.a-balance-never-goes-negative?"
+            ),
+            "{}",
+            typo.err
+        );
+    }
+    // A title alone is an assumption, and the edge is said in one phrase.
+    let plain = vibloom(
+        &dir,
+        &[
+            "add",
+            "deposits never round up",
+            "--on",
+            "inv.a-balance-never-goes-negative",
+        ],
+        "",
+        true,
+    );
+    assert_eq!(
+        plain.out,
+        "Added asm.deposits-never-round-up (hypothetical: not yet reviewed; `vibloom edit asm.deposits-never-round-up --stance adopted` adopts it).\nasm.deposits-never-round-up rests on inv.a-balance-never-goes-negative: if inv.a-balance-never-goes-negative fails, asm.deposits-never-round-up is at risk."
+    );
+    assert_eq!(
+        vibloom(&dir, &["remove", "asm.deposits-never-round-up"], "", true).code,
+        0
     );
 
     let m = read_map(&dir);
@@ -844,7 +932,7 @@ fn unreviewed_assumptions_are_shown_and_count_only_when_strict() {
     for want in [
         "4 nodes, 0 need attention, 2 not yet reviewed.",
         "adopted (rests on 2 unreviewed)  int.x",
-        "Not yet reviewed (as the verifier, adopt it or switch it off):",
+        "Not yet reviewed (yours to decide: adopt it or switch it off):",
         "- asm.a: vibloom edit asm.a --stance adopted   (or --stance off)",
     ] {
         assert!(r.out.contains(want), "{want}: {}", r.out);
@@ -1121,12 +1209,12 @@ fn a_reader_that_stops_early_is_not_a_crash() {
         .collect();
     fs::write(dir.join(".vibloom/proposals.jsonl"), many).expect("write");
     let out = Command::new("sh")
-        .args(["-c", "\"$VIBLOOM\" proposals | head -1"])
+        .args(["-c", "\"$VIBLOOM\" proposals --full | head -1"])
         .env("VIBLOOM", env!("CARGO_BIN_EXE_vibloom"))
         .current_dir(&dir)
         .output()
         .expect("sh");
-    assert!(String::from_utf8_lossy(&out.stdout).starts_with("p1  assumption"));
+    assert!(String::from_utf8_lossy(&out.stdout).starts_with("400 pending proposals."));
     assert_eq!(String::from_utf8_lossy(&out.stderr), "");
 }
 
@@ -1212,11 +1300,10 @@ fn with_forge(dir: &Path, args: &[&str]) -> Out {
         dir.join("bin").display(),
         std::env::var("PATH").unwrap_or_default()
     );
-    let o = Command::new(env!("CARGO_BIN_EXE_vibloom"))
+    let o = clean(&mut Command::new(env!("CARGO_BIN_EXE_vibloom")))
         .args(args)
         .current_dir(dir)
         .env("PATH", path)
-        .env("VIBLOOM_ROLE", "verifier")
         .stdin(Stdio::null())
         .output()
         .expect("run");
@@ -1235,7 +1322,7 @@ fn finds_forge_where_foundryup_installs_it_when_the_path_lacks_it() {
     fs::create_dir_all(home.join(".foundry/bin")).expect("dir");
     fs::rename(dir.join("bin/forge"), home.join(".foundry/bin/forge")).expect("move");
     let run = |home: &Path| {
-        Command::new(env!("CARGO_BIN_EXE_vibloom"))
+        clean(&mut Command::new(env!("CARGO_BIN_EXE_vibloom")))
             .arg("init")
             .current_dir(&dir)
             .env("PATH", "/usr/bin:/bin")
@@ -1590,15 +1677,42 @@ printf '{"test/C.t.sol:CT":{"test_results":{"invariant_sum()":{"status":"Success
 "#,
     )
     .expect("write");
+    // A red suite is red, whether or not a node rests on the test.
     let out = cli(&dir, &["check"]);
-    assert_eq!(out.code, 0, "{}", out.err);
+    assert_eq!(out.code, 1, "{}", out.err);
     assert!(
         out.out.contains(
-            "Run 1: 2 test results recorded, 1 failed (1 tied to no node, so no state shows them)."
+            "Run 1: 2 test results recorded, 1 failed.\n1 failing test no node rests on, which still fails the check: CT.test_other."
         ),
         "{}",
         out.out
     );
+    let json: Value = serde_json::from_str(&cli(&dir, &["check", "--json"]).out).expect("json");
+    assert_eq!(json["exit"], 1);
+    assert_eq!(json["failures"]["untracked"], json!(["CT.test_other"]));
+    // A known-red test is let through only by a rule in the map, which stays
+    // in sight.
+    edit_map(&dir, |m| m["ignore_failures"] = json!(["CT.test_o*"]));
+    let ignored = cli(&dir, &["check"]);
+    assert_eq!(ignored.code, 0, "{}", ignored.out);
+    assert!(
+        ignored
+            .out
+            .contains("Ignoring 1 failing test by rule (ignore_failures in the map)."),
+        "{}",
+        ignored.out
+    );
+    let status = cli(&dir, &["status"]);
+    assert!(
+        status.out.ends_with(
+            "Ignoring 1 failing test by rule (in the latest run; ignore_failures: CT.test_o*)."
+        ),
+        "{}",
+        status.out
+    );
+    let json: Value = serde_json::from_str(&cli(&dir, &["status", "--json"]).out).expect("json");
+    assert_eq!(json["failures"]["ignored"], json!(["CT.test_other"]));
+    assert_eq!(json["ignore_failures"], json!(["CT.test_o*"]));
 }
 
 #[test]
@@ -1642,7 +1756,7 @@ fn decides_a_proposal_once_and_says_when_its_id_was_taken() {
     assert_eq!(accepted.code, 0, "{}", accepted.err);
     assert_eq!(
         accepted.out,
-        "Accepted p1 as asm.total-only-grows (hypothetical; asm.grows is already in use)."
+        "Accepted p1 as asm.total-only-grows (hypothetical; asm.grows is already in use).\nCreated 1 node in the map; 1 starts hypothetical (not yet reviewed) until you adopt it with `vibloom edit <id> --stance adopted` or switch it off."
     );
 }
 
@@ -1658,7 +1772,13 @@ fn survey_does_not_file_again_what_the_verifier_rejected() {
         json!([{ "modifierName": { "name": "auth" }, "arguments": [] }]);
     fs::write(&art, a.to_string()).expect("write");
     let first = with_forge(&dir, &["survey", "--propose"]);
-    assert!(first.out.contains("Filed 1 new proposal."), "{}", first.out);
+    assert!(
+        first
+            .out
+            .starts_with("Filed 1 proposal, all assumptions: Vat 1."),
+        "{}",
+        first.out
+    );
     assert_eq!(with_forge(&dir, &["proposals", "reject", "p1"]).code, 0);
     let again = with_forge(&dir, &["survey", "--propose"]);
     assert!(
@@ -1673,9 +1793,11 @@ fn mcp_call(dir: &Path, bin: bool, name: &str, args: Value) -> (String, bool) {
     let msg = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": { "name": name, "arguments": args } });
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_vibloom"));
-    cmd.arg("mcp")
+    // The server acts for an agent whatever its environment says.
+    clean(&mut cmd)
+        .env("VIBLOOM_ROLE", "verifier")
+        .arg("mcp")
         .current_dir(dir)
-        .env_remove("VIBLOOM_ROLE")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped());
     if bin {
@@ -1731,7 +1853,7 @@ fn a_risk_accepted_by_the_verifier_stays_visible_and_lets_the_check_pass() {
         "--reason",
         "only USDC is listed, and it takes no fee",
     ];
-    assert!(cli(&dir, &accept).err.contains("only the verifier"));
+    assert!(cli(&dir, &accept).err.contains("a decision for the person"));
     let no_reason = vibloom(&dir, &accept[..4], "", true);
     assert!(
         no_reason.err.contains("--accept needs --reason"),
@@ -1948,4 +2070,281 @@ fn survey_names_contracts_and_research_stays_short() {
     );
     let (missing, is_error) = mcp_call(&dir, true, "survey", json!({}));
     assert!(is_error, "{missing}");
+}
+
+#[test]
+fn a_person_at_a_terminal_decides_and_an_agent_does_not() {
+    let dir = project();
+    with_runner(&dir);
+    let add = ["add", "the oracle is fresh"];
+    // No configuration: a person at a terminal is the verifier.
+    assert_eq!(vibloom_env(&dir, &add, "", &[]).code, 0);
+    let mut n = 0;
+    for env in [
+        &[("CLAUDECODE", "1")][..],
+        &[("CODEX_THREAD_ID", "019a")],
+        &[("CODEX_SANDBOX", "seatbelt")],
+        &[("CURSOR_AGENT", "1")],
+        &[("GEMINI_CLI", "1")],
+        &[("VIBLOOM_ROLE", "builder")],
+    ] {
+        n += 1;
+        let title = format!("agent claim {n}");
+        let r = vibloom_env(&dir, &["add", &title], "", env);
+        assert_eq!(r.code, 2, "{env:?}");
+        assert!(
+            r.err.contains("a decision for the person")
+                && r.err.contains(&format!("{} is", env[0].0))
+                && r.err
+                    .ends_with(&format!("own terminal: vibloom add 'agent claim {n}'")),
+            "{}",
+            r.err
+        );
+    }
+    // Said outright, the variable wins over detection.
+    let told = vibloom_env(
+        &dir,
+        &["add", "told"],
+        "",
+        &[("CLAUDECODE", "1"), ("VIBLOOM_ROLE", "verifier")],
+    );
+    assert_eq!(told.code, 0, "{}", told.err);
+}
+
+#[test]
+fn connecting_claude_writes_the_agents_role_down() {
+    let dir = project();
+    fs::create_dir_all(dir.join(".claude")).expect("dir");
+    fs::write(
+        dir.join(".claude/settings.json"),
+        r#"{"env": {"FOO": "bar"}, "model": "x"}"#,
+    )
+    .expect("write");
+    fs::write(
+        dir.join(".mcp.json"),
+        r#"{"mcpServers": {"other": {"command": "o"}}}"#,
+    )
+    .expect("write");
+    assert_eq!(cli(&dir, &["init", "--agent", "claude"]).code, 0);
+    let settings: Value = serde_json::from_str(
+        &fs::read_to_string(dir.join(".claude/settings.json")).expect("settings"),
+    )
+    .expect("json");
+    assert_eq!(
+        settings["env"],
+        json!({ "FOO": "bar", "VIBLOOM_ROLE": "builder" })
+    );
+    assert_eq!(settings["model"], "x");
+    let mcp: Value = serde_json::from_str(&fs::read_to_string(dir.join(".mcp.json")).expect("mcp"))
+        .expect("json");
+    assert_eq!(mcp["mcpServers"]["other"], json!({ "command": "o" }));
+    assert_eq!(
+        mcp["mcpServers"]["vibloom"],
+        json!({ "command": "vibloom", "args": ["mcp"], "env": { "VIBLOOM_ROLE": "builder" } })
+    );
+}
+
+#[test]
+fn says_where_things_stand_and_the_one_next_step() {
+    let empty = std::env::temp_dir().join(format!("vibloom-it-empty-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&empty);
+    fs::create_dir_all(&empty).expect("dir");
+    let start = vibloom(&empty, &[], "", true);
+    assert_eq!(start.code, 0);
+    assert_eq!(start.out.lines().count(), 6, "{}", start.out);
+    assert!(start.out.contains("vibloom init"), "{}", start.out);
+
+    let dir = project();
+    fs::write(dir.join("foundry.toml"), "").expect("write");
+    let no_map = vibloom(&dir, &[], "", true);
+    assert!(no_map.out.ends_with("Next: `vibloom init` finds the invariant tests and writes the map. `vibloom help` lists every command."), "{}", no_map.out);
+
+    // A map whose tests find no invariant: say so and where to start.
+    fs::write(dir.join("test/C.t.sol"), "contract CT { }").expect("write");
+    let init = cli(&dir, &["init"]);
+    assert!(
+        init.out.contains(
+            "No tests in the map yet, so nothing here can be proven.\nNext: `vibloom survey`"
+        ),
+        "{}",
+        init.out
+    );
+
+    let dir = project();
+    let init = cli(&dir, &["init"]);
+    assert!(
+        init.out
+            .ends_with("Next: `vibloom check` runs the tests and records what holds."),
+        "{}",
+        init.out
+    );
+    edit_map(&dir, |m| m["runner"] = json!(["sh", "runner.sh"]));
+    vibloom(
+        &dir,
+        &["add", "only add moves total", "--on", "inv.sum"],
+        "",
+        true,
+    );
+    cli(&dir, &["check"]);
+    let broken = vibloom(&dir, &[], "", true);
+    assert_eq!(
+        broken.out,
+        "2 nodes in .vibloom/roots.json; 1 test run recorded here.\n\
+         Proven: nothing yet (no invariant holds in a recorded run).\n\
+         Only claimed: 1 not yet reviewed (hypothetical: nobody has adopted it).\n\
+         Needs attention: 2.\n  \
+         - inv.sum BROKEN: failure: drift\n  \
+         - asm.only-add-moves-total UNSUPPORTED: because of inv.sum\n\
+         Next: `vibloom status` shows every node and why."
+    );
+    fs::write(dir.join("src/C.sol"), "contract C { }").expect("write");
+    assert!(vibloom(&dir, &[], "", true).out.ends_with(
+        "Next: `vibloom check` runs the tests again; files changed since the last run."
+    ));
+    cli(&dir, &["check"]);
+    let open = vibloom(&dir, &[], "", true);
+    assert!(
+        open.out
+            .contains("Proven: 1 invariant holds in the latest run.\n  - invariant_sum"),
+        "{}",
+        open.out
+    );
+    assert!(open.out.ends_with("Next: decide asm.only-add-moves-total: `vibloom edit asm.only-add-moves-total --stance adopted` if it is true, `--stance off` if not."), "{}", open.out);
+    vibloom(
+        &dir,
+        &["edit", "asm.only-add-moves-total", "--stance", "adopted"],
+        "",
+        true,
+    );
+    assert!(
+        vibloom(&dir, &[], "", true)
+            .out
+            .ends_with("Next: nothing to do; `vibloom check` runs the tests.")
+    );
+    let propose = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": "propose",
+        "arguments": { "kind": "assumption", "title": "x", "evidence": ["src/C.sol:1"] } } });
+    vibloom(&dir, &["mcp"], &format!("{propose}\n"), false);
+    assert!(
+        vibloom(&dir, &[], "", true).out.ends_with(
+            "Next: `vibloom proposals` - 1 proposal waiting for you to accept or reject."
+        )
+    );
+
+    // Sound, but nothing written down beyond the tests: say how to start.
+    let bare = project();
+    with_runner(&bare);
+    fs::write(bare.join("src/C.sol"), "contract C { }").expect("write");
+    cli(&bare, &["check"]);
+    assert!(
+        vibloom(&bare, &[], "", true).out.ends_with(
+            "Next: nothing to do; `vibloom check` runs the tests. Write down what the code takes as given with `vibloom add \"<title>\"`."
+        )
+    );
+
+    let help = cli(&dir, &["help"]);
+    assert_eq!(help.code, 0);
+    let everyday = help.out.find("Everyday:").expect("everyday");
+    let more = help.out.find("More:").expect("more");
+    assert!(everyday < more);
+    let typo = cli(&dir, &["stauts"]);
+    assert_eq!(typo.code, 2);
+    assert!(
+        typo.err
+            .starts_with("No command stauts. Did you mean status?"),
+        "{}",
+        typo.err
+    );
+}
+
+#[test]
+fn proposals_are_listed_by_contract_and_decided_in_bulk() {
+    let dir = project();
+    with_runner(&dir);
+    let lines: String = [
+        (
+            "Vat: whoever passes auth is trusted with file",
+            "src/vat.sol:3",
+        ),
+        ("Vat: Vat trusts calls into Gem", "src/vat.sol:9"),
+        (
+            "Dog: whoever passes auth is trusted with bark",
+            "src/dog.sol:2",
+        ),
+        ("the oracle is fresh", "docs/oracle.md#freshness"),
+    ]
+    .iter()
+    .enumerate()
+    .map(|(i, (t, e))| {
+        format!(
+            "{}\n",
+            json!({ "id": format!("p{}", i + 1), "at": "t", "kind": "assumption", "title": t,
+                    "evidence": [e], "by": "vibloom survey" })
+        )
+    })
+    .collect();
+    fs::write(dir.join(".vibloom/proposals.jsonl"), lines).expect("write");
+    let listed = cli(&dir, &["proposals"]);
+    assert!(
+        listed.out.starts_with(
+            "4 pending proposals (4 filed by `vibloom survey`). Nothing in them counts until you accept it.\n\n\
+             Dog (1)\n  assumption\n    p3  whoever passes auth is trusted with bark\n\n\
+             Vat (2)\n  assumption\n    p1  whoever passes auth is trusted with file\n    p2  Vat trusts calls into Gem\n\n\
+             Not about one contract (1)\n  assumption\n    p4  the oracle is fresh\n"
+        ),
+        "{}",
+        listed.out
+    );
+    assert!(!listed.out.contains("from:"), "{}", listed.out);
+    assert!(
+        cli(&dir, &["proposals", "--full"])
+            .out
+            .contains("from: src/vat.sol:3")
+    );
+    let one = cli(&dir, &["proposals", "p4"]);
+    assert!(
+        one.out.contains("from: docs/oracle.md#freshness"),
+        "{}",
+        one.out
+    );
+    assert!(
+        cli(&dir, &["proposals", "p9"])
+            .err
+            .starts_with("No pending proposal p9. Did you mean p1")
+    );
+    let wrong = vibloom(
+        &dir,
+        &["proposals", "accept", "--all", "--contract", "Vta"],
+        "",
+        true,
+    );
+    assert!(wrong.err.contains("Did you mean Vat?"), "{}", wrong.err);
+    // An agent cannot take them all at once either.
+    assert_eq!(cli(&dir, &["proposals", "accept", "--all"]).code, 2);
+
+    let vat = vibloom(
+        &dir,
+        &[
+            "proposals",
+            "accept",
+            "--all",
+            "--contract",
+            "Vat",
+            "--on",
+            "inv.sum",
+        ],
+        "",
+        true,
+    );
+    assert_eq!(vat.code, 0, "{}", vat.err);
+    assert!(
+        vat.out.ends_with(
+            "Created 2 nodes in the map; 2 start hypothetical (not yet reviewed) until you adopt each with `vibloom edit <id> --stance adopted` or switch them off.\n\
+             Each rests on inv.sum: if inv.sum fails, each is at risk."
+        ),
+        "{}",
+        vat.out
+    );
+    let rest = vibloom(&dir, &["proposals", "reject", "--all"], "", true);
+    assert_eq!(rest.out, "Rejected p3.\nRejected p4.");
+    assert_eq!(cli(&dir, &["proposals"]).out, "No pending proposals.");
 }

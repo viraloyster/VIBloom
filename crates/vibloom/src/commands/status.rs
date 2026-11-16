@@ -2,7 +2,9 @@ use crate::cli::{Args, Fallible, Io};
 use crate::derive::{NodeView, label, needs_attention, shown, summary_line, troubled, why};
 use crate::guard::GuardChange;
 use crate::log::RunEntry;
+use crate::map::RootsMap;
 use crate::paths::relative_to;
+use crate::runner::{Failures, failures};
 use crate::store::{load_log, load_map, views};
 use serde_json::{Value, json};
 use std::path::Path;
@@ -24,7 +26,7 @@ pub fn table(vs: &[NodeView], strict: bool) -> String {
     let open = not_reviewed(vs);
     if !open.is_empty() {
         out.push(String::new());
-        out.push("Not yet reviewed (as the verifier, adopt it or switch it off):".into());
+        out.push("Not yet reviewed (yours to decide: adopt it or switch it off):".into());
         out.extend(open.iter().map(|(id, _)| {
             format!("- {id}: vibloom edit {id} --stance adopted   (or --stance off)")
         }));
@@ -64,6 +66,20 @@ fn accepted_risks(vs: &[NodeView]) -> Vec<String> {
         .collect()
 }
 
+// An escape from "a red suite is red" stays in sight for as long as it is
+// in the map.
+fn ignoring(map: &RootsMap, f: Option<&Failures>) -> Option<String> {
+    if map.ignore_failures.is_empty() {
+        return None;
+    }
+    let n = f.map_or(0, |f| f.ignored.len());
+    Some(format!(
+        "\nIgnoring {n} failing {} by rule (in the latest run; ignore_failures: {}).",
+        if n == 1 { "test" } else { "tests" },
+        map.ignore_failures.join(", ")
+    ))
+}
+
 /// What `--base` found, for the report.
 pub(crate) struct GuardReport {
     pub(crate) base: String,
@@ -79,6 +95,9 @@ pub(crate) struct Report<'a> {
     pub(crate) views: &'a [NodeView],
     pub(crate) guard: Option<&'a GuardReport>,
     pub(crate) run: Option<&'a RunEntry>,
+    /// The failing tests of the run (`check`) or of the latest one (`status`).
+    pub(crate) failures: Option<&'a Failures>,
+    pub(crate) ignore_failures: &'a [String],
     pub(crate) log_problems: &'a [String],
     pub(crate) tool_error: Option<&'a str>,
 }
@@ -158,6 +177,12 @@ pub(crate) fn to_json(r: &Report) -> Value {
             "changes": g.changes,
         })),
         "run": r.run.map(|e| json!({ "seq": e.seq, "command": e.command, "error": e.error })),
+        "failures": r.failures.map(|f| json!({
+            "failed": f.failed,
+            "untracked": f.untracked,
+            "ignored": f.ignored,
+        })),
+        "ignore_failures": r.ignore_failures,
         "log_problems": r.log_problems,
         "tool_error": r.tool_error,
     })
@@ -171,6 +196,8 @@ pub(crate) fn error_json(e: &str) -> String {
         views: &[],
         guard: None,
         run: None,
+        failures: None,
+        ignore_failures: &[],
         log_problems: &[],
         tool_error: Some(e),
     })
@@ -178,9 +205,12 @@ pub(crate) fn error_json(e: &str) -> String {
 }
 
 pub(crate) fn status(root: &Path, io: &mut Io, as_json: bool, strict: bool) -> Fallible<i32> {
-    let strict = strict || load_map(root)?.strict;
+    let map = load_map(root)?;
+    let strict = strict || map.strict;
     let vs = views(root)?;
-    let problems = load_log(root).problems;
+    let log = load_log(root);
+    let problems = log.problems;
+    let fails = log.entries.last().map(|e| failures(e, &map));
     // A damaged record is the guard failing at its job, not a verdict.
     let exit = if !problems.is_empty() {
         2
@@ -201,6 +231,8 @@ pub(crate) fn status(root: &Path, io: &mut Io, as_json: bool, strict: bool) -> F
                 views: &vs,
                 guard: None,
                 run: None,
+                failures: fails.as_ref(),
+                ignore_failures: &map.ignore_failures,
                 log_problems: &problems,
                 tool_error: (!problems.is_empty())
                     .then_some("the local run log failed verification"),
@@ -209,6 +241,9 @@ pub(crate) fn status(root: &Path, io: &mut Io, as_json: bool, strict: bool) -> F
         );
     } else {
         (io.out)(&table(&vs, strict));
+        if let Some(line) = ignoring(&map, fails.as_ref()) {
+            (io.out)(&line);
+        }
     }
     Ok(exit)
 }

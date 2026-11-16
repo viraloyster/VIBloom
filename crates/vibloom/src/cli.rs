@@ -22,6 +22,10 @@ pub use crate::store::{
 pub struct Io<'a> {
     pub cwd: PathBuf,
     pub role: Role,
+    /// Why the role is what it is, said when a command is refused for it.
+    pub role_why: String,
+    /// The command line as typed, for a refusal to hand to the person.
+    pub line: String,
     pub stdin: &'a mut dyn FnMut() -> String,
     pub out: &'a mut dyn FnMut(&str),
     pub err: &'a mut dyn FnMut(&str),
@@ -54,65 +58,94 @@ impl<'a> Args<'a> {
     }
 }
 
-pub const USAGE: &str = "vibloom: assumptions, invariants and intentions for a code project.
+pub const USAGE: &str = "vibloom: a map of what a code project assumes and what must always hold,
+checked against its tests on every run. `vibloom` alone says where things stand.
 
-  vibloom init [--stack S] [--agent claude|codex]
-                             create .vibloom/roots.json for this project (foundry, hardhat,
-                             cargo or pytest; detected when not given), install the commit
-                             check and, with --agent, connect that agent
-  vibloom setup claude|codex connect an agent to an existing map (verifier)
-  vibloom install-hook       install the commit check in another clone
-  vibloom add <kind> \"<title>\" [--file F --test N [--contract C]] [--watch P] [--on ID]
-                             add an assumption, invariant or intention (verifier)
-                             also: [--detail D] [--evidence E] [--id ID]
-                             [--hypothetical | --adopted]; an assumption starts
-                             hypothetical, an invariant or intention adopted
-  vibloom edit <id> [--title T] [--detail D] [--stance S] [--on ID] [--not-on ID]
-                    [--watch P] [--unwatch P] [--evidence E] [--drop-evidence E]
-                    [--accept ID --reason R] [--unaccept ID]
-                             change a node (verifier); --accept lets it rest on a
-                             dependency that is off, for the reason given
-  vibloom remove <id>        take a node out of the map (verifier)
-  vibloom scan [--tighten]   add invariant tests the map does not list yet (verifier); with
-                             --tighten, narrow what existing invariants watch to the files
-                             their tests import, as forge's syntax trees show them
-  vibloom survey [<Contract>...] [--propose]
-                             Foundry: what the code says (who may call what, upgrades,
-                             external calls) and the assumptions and invariants that follow,
-                             for every contract or only those named; --propose files the
-                             assumptions as proposals
-  vibloom research           the brief an agent works from to find and propose nodes: the
-                             notes, a summary of the survey and how to work
-  vibloom status [--json] [--strict]
-                             the derived state of every node
-  vibloom run [-- args]      run the tests, record the run locally, show what changed
-  vibloom check [--base ref [--allow-guard-changes]] [--strict] [--json | --format github]
-                [-- args]    run the tests and decide from that run alone (for CI); with
-                             --base, also refuse guard changes against the map on ref
-  vibloom context [file]     what an agent should know before touching a file
-  vibloom gaps               Foundry: state-changing functions no test names, and handler
-                             functions whose every call reverted
-  vibloom verify             check the local run log's hash chain
-  vibloom repair             set aside everything after a broken link in the log (verifier)
-  vibloom precommit          refuse a commit that changes guarded files or leaves a node
-                             broken or untested since its files changed (any agent, any editor)
-  vibloom proposals          list what agents proposed and nobody decided yet
-  vibloom proposals accept <id>... [--on ID]... | reject <id>...
-                             move proposals into the map, or turn them down (verifier)
-  vibloom mcp                serve the map to any MCP client over stdio
+Everyday:
+  vibloom init [--agent claude|codex]   write the map from the invariant tests found here
+  vibloom check                         run the tests and decide from that run (exit 1: look)
+  vibloom status                        every node and its state, what needs attention first
+  vibloom add \"<title>\" [--on ID]       write down an assumption; --on X: it rests on X,
+                                        so if X fails it is at risk
+  vibloom proposals [accept|reject]     what agents or the survey proposed; you decide
+  vibloom survey [<Contract>...]        Foundry: who may call what, and what to write down
 
-Optional, for Claude Code:
-  vibloom hooks              print the hooks configuration for .claude/settings.json
-  vibloom hook <event>       called by those hooks: pre-tool, post-tool or stop
+More:
+  Map editing
+    vibloom add assumption|invariant|intention \"<title>\" [--on ID]... [--file F --test N
+                [--contract C]] [--watch P]... [--evidence E]... [--detail D] [--id ID]
+                [--hypothetical | --adopted] [--unprotected]
+    vibloom edit <id> [--title T] [--detail D] [--stance adopted|hypothetical|off]
+                [--on ID] [--not-on ID] [--watch P] [--unwatch P] [--evidence E]
+                [--drop-evidence E] [--accept ID --reason R] [--unaccept ID]
+    vibloom remove <id>                 take a node out (refused while others rest on it)
+    vibloom scan [--tighten]            add invariant tests the map does not list yet
+    vibloom proposals <id> | --full | --contract C      one proposal, or all with evidence
+    vibloom proposals accept <id>... | --all [--contract C] [--on ID]...
+    vibloom proposals reject <id>... | --all [--contract C]
+    vibloom survey --propose            file the survey's assumptions as proposals
+  Agents
+    vibloom setup claude|codex          connect an agent to an existing map
+    vibloom context [file]              what an agent should know before touching a file
+    vibloom research                    the brief an agent works from to propose nodes
+    vibloom gaps                        Foundry: functions no test names
+    vibloom run [-- args]               run the tests (args go to the runner) and record them
+    vibloom mcp                         serve the map to any MCP client over stdio
+    vibloom hooks | hook <event>        Claude Code hooks: print them, or run one
+  CI
+    vibloom check --base <ref> [--allow-guard-changes] [--strict] [--json | --format github]
+    vibloom status --json [--strict]
+    vibloom install-hook                install the commit check in this clone
+    vibloom precommit                   the commit check itself
+  Repair
+    vibloom verify                      check the local run log's hash chain
+    vibloom repair                      set aside everything after a broken link
 
-Set VIBLOOM_ROLE=verifier for the one agent or person allowed to change
-protected tests and the map.
+Who decides: a person at a terminal changes the map; an AI agent (detected by
+the variables Claude Code, Codex, Cursor and Gemini CLI set, or VIBLOOM_ROLE=builder)
+only proposes. VIBLOOM_ROLE=verifier or builder overrides the detection.
 
 Exit codes: 0 nothing needs attention, 1 something does (a verdict), 2 vibloom
 could not do its job (no map, bad arguments, git error, the runner failed).";
 
+const COMMANDS: [&str; 22] = [
+    "init",
+    "check",
+    "status",
+    "add",
+    "proposals",
+    "survey",
+    "edit",
+    "remove",
+    "scan",
+    "setup",
+    "context",
+    "research",
+    "gaps",
+    "run",
+    "mcp",
+    "hooks",
+    "hook",
+    "install-hook",
+    "precommit",
+    "verify",
+    "repair",
+    "help",
+];
+
 pub fn main(argv: &[String], io: &mut Io) -> i32 {
     let cmd = argv.first().map_or("", String::as_str);
+    io.line = std::iter::once("vibloom".to_string())
+        .chain(argv.iter().map(|a| {
+            if a.is_empty() || a.contains(|c: char| c.is_whitespace() || "\"'$`;&|<>()".contains(c))
+            {
+                format!("'{}'", a.replace('\'', "'\\''"))
+            } else {
+                a.clone()
+            }
+        }))
+        .collect::<Vec<_>>()
+        .join(" ");
     match dispatch(argv, io) {
         Ok(code) => code,
         // A hook keeps the agent's protocol: exit 2 there would block the tool.
@@ -140,13 +173,16 @@ pub fn main(argv: &[String], io: &mut Io) -> i32 {
 fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
     let (cmd, rest) = match argv.split_first() {
         Some((c, r)) => (c.as_str(), r),
-        None => {
-            (io.out)(USAGE);
-            return Ok(2);
-        }
+        None => return commands::guide::guide(io),
     };
     if cmd == "sync" {
         return Err("`vibloom sync` is gone: the run log is local since 0.8.0, so there is nothing to merge. CI re-runs the tests with `vibloom check --base`.".into());
+    }
+    if !COMMANDS.contains(&cmd) && !matches!(cmd, "--help" | "-h" | "--version" | "-V") {
+        return Err(format!(
+            "{} `vibloom help` lists the commands.",
+            crate::suggest::unknown("command", cmd, COMMANDS)
+        ));
     }
     // Our options come first; only what follows "--" goes to the runner, so a
     // mistyped option is never run as a test filter.
@@ -167,7 +203,7 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
             "--reason",
             "--unaccept",
         ],
-        "proposals" => &["--on"],
+        "proposals" => &["--on", "--contract"],
         "add" => &[
             "--id",
             "--file",
@@ -186,6 +222,7 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
         "scan" => &["--tighten"],
         "add" => &["--hypothetical", "--adopted", "--unprotected"],
         "survey" => &["--propose"],
+        "proposals" => &["--all", "--full"],
         _ => &[],
     };
     let mut opts: Vec<(&str, &str)> = vec![];
@@ -333,7 +370,7 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
         "context" => commands::status::context(&root, io, &args),
         "verify" => commands::status::verify(&root, io),
         "precommit" => commands::precommit::precommit(&root, io),
-        "proposals" => commands::proposals::proposals(&root, &args.words, &args.all("--on"), io),
-        other => Err(format!("Unknown command {other}.\n\n{USAGE}")),
+        "proposals" => commands::proposals::proposals(&root, &args, io),
+        other => Err(format!("Unknown command {other}.")),
     }
 }

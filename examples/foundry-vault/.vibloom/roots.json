@@ -25,7 +25,10 @@
         "src/Vault.sol",
         "test/handlers/VaultHandler.sol"
       ],
-      "protected": true
+      "protected": true,
+      "depends_on": [
+        "asm.handler-is-the-only-actor"
+      ]
     },
     {
       "id": "inv.shares-are-backed",
@@ -41,16 +44,16 @@
         "src/Vault.sol",
         "test/handlers/VaultHandler.sol"
       ],
-      "protected": true
+      "protected": true,
+      "depends_on": [
+        "asm.rounding-favours-the-vault"
+      ]
     },
     {
       "id": "asm.handler-is-the-only-actor",
       "kind": "assumption",
       "title": "Only the handler's deposits and withdrawals move assets in the test",
       "stance": "hypothetical",
-      "depends_on": [
-        "inv.assets-match-flows"
-      ],
       "protected": false
     },
     {
@@ -58,9 +61,6 @@
       "kind": "assumption",
       "title": "Rounding in withdraw always favours the vault",
       "stance": "hypothetical",
-      "depends_on": [
-        "inv.shares-are-backed"
-      ],
       "protected": false
     },
     {

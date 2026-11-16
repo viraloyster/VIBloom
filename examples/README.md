@@ -14,18 +14,29 @@ the real test runners.
 
 Try it in `foundry-vault`: comment out `totalAssets -= assets;` in
 `src/Vault.sol` and run `vibloom check`. The invariant on the vault's books
-breaks, the assumption that rests on it loses its support and the intention
-above them is at risk:
+breaks, the plain unit test fails too (a failing test fails the check whether
+or not a node rests on it), and the intention above the invariant is at risk:
 
 ```
-5 nodes, 3 need attention, 2 not yet reviewed.
-BROKEN                    inv.assets-match-flows          The vault's assets equal everything deposited minus everything withdrawn
-UNSUPPORTED (unreviewed)  asm.handler-is-the-only-actor   Only the handler's deposits and withdrawals move assets in the test
-AT RISK                   int.no-overdraw                 Nobody can take out more than their shares are worth
-holds                     inv.shares-are-backed           Shares never exist without assets behind them
-hypothetical              asm.rounding-favours-the-vault  Rounding in withdraw always favours the vault
+$ vibloom check
+Run 1: 3 test results recorded, 2 failed.
+1 failing test no node rests on, which still fails the check: VaultTest.test_depositThenWithdrawReturnsEverything.
+Fix it, or tie it to a node; a test known to be red can be listed in "ignore_failures" in the map.
+Changed:
+  inv.assets-match-flows: untested -> BROKEN
+  inv.shares-are-backed: untested -> holds
+  int.no-overdraw: pending review -> AT RISK
+5 nodes, 2 need attention, 2 not yet reviewed.
+BROKEN (rests on 1 unreviewed)   inv.assets-match-flows          The vault's assets equal everything deposited minus everything withdrawn
+AT RISK (rests on 2 unreviewed)  int.no-overdraw                 Nobody can take out more than their shares are worth
+holds (rests on 1 unreviewed)    inv.shares-are-backed           Shares never exist without assets behind them
+hypothetical                     asm.handler-is-the-only-actor   Only the handler's deposits and withdrawals move assets in the test
+hypothetical                     asm.rounding-favours-the-vault  Rounding in withdraw always favours the vault
 
-Not yet reviewed (as the verifier, adopt it or switch it off):
+Not yet reviewed (yours to decide: adopt it or switch it off):
 - asm.handler-is-the-only-actor: vibloom edit asm.handler-is-the-only-actor --stance adopted   (or --stance off)
 - asm.rounding-favours-the-vault: vibloom edit asm.rounding-favours-the-vault --stance adopted   (or --stance off)
 ```
+
+To start from nothing instead, follow [docs/quickstart.md](../docs/quickstart.md)
+in a copy of `foundry-vault` with its `.vibloom/` removed.

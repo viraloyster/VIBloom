@@ -15,7 +15,7 @@ use std::path::Path;
 pub(crate) fn init(io: &mut Io, args: &Args) -> Fallible<i32> {
     if io.cwd.join(MAP_PATH).exists() {
         return Err(format!(
-            "{MAP_PATH} already exists here. To connect an agent to it: VIBLOOM_ROLE=verifier vibloom setup claude (or codex)."
+            "{MAP_PATH} already exists here. To connect an agent to it: vibloom setup claude (or codex)."
         ));
     }
     let stack =
@@ -95,14 +95,21 @@ pub(crate) fn init(io: &mut Io, args: &Args) -> Fallible<i32> {
         ),
         Err(_) => (io.out)("Not a git repository yet: run `vibloom install-hook` once it is."),
     }
-    (io.out)(
-        "Next: `vibloom check` to run the tests; `vibloom add` for assumptions and intentions.",
-    );
+    let root = io.cwd.clone();
+    let vs = crate::store::views(&root)?;
+    for line in crate::commands::guide::next(
+        &root,
+        &found.map,
+        &vs,
+        crate::store::load_log(&root).entries.len(),
+    ) {
+        (io.out)(&line);
+    }
     Ok(0)
 }
 
 pub(crate) fn rescan(root: &Path, io: &mut Io, tighten: bool) -> Fallible<i32> {
-    verifier(io.role, "changes the map")?;
+    verifier(io, "changes the map")?;
     let map = load_map(root)?;
     let src = project_plan(root, None).src;
     let mut found = scan(

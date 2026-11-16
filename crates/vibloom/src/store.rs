@@ -198,7 +198,7 @@ pub(crate) fn migrate_log(root: &Path) -> Option<String> {
         ));
     }
     Some(format!(
-        "VIBloom: the run log is local state now and a committed one is never read. Moved {LEGACY_LOG_PATH} aside to {}; `vibloom run` records the states again. Take it out of git once, as the verifier: git rm --cached {LEGACY_LOG_PATH}",
+        "VIBloom: the run log is local state now and a committed one is never read. Moved {LEGACY_LOG_PATH} aside to {}; `vibloom run` records the states again. Take it out of git once, from your own terminal: git rm --cached {LEGACY_LOG_PATH}",
         to.display()
     ))
 }

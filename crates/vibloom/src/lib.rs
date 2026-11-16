@@ -23,4 +23,5 @@ mod runner;
 pub mod scan;
 pub mod setup;
 mod store;
+mod suggest;
 pub mod survey;

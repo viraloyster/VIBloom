@@ -17,7 +17,7 @@ pub fn hooks_config() -> Value {
 }
 
 pub(crate) fn setup(root: &Path, io: &mut Io, args: &Args) -> Fallible<i32> {
-    verifier(io.role, "changes what is guarded")?;
+    verifier(io, "changes what is guarded")?;
     let agent = args.words.first().copied().unwrap_or_default();
     let (notes, guard) = setup_agent(root, agent)?;
     let mut map = load_map(root)?;
@@ -51,9 +51,23 @@ anyone's say-so.
   `.vibloom/` to make a check pass. If an invariant looks wrong, stop and say
   why.
 - To suggest an assumption, invariant or intention, use the `propose` tool of
-  the vibloom MCP server. A person decides.
+  the vibloom MCP server. A person decides: vibloom refuses an agent the
+  commands that change the map.
 <!-- vibloom:end -->
 ";
+
+// Sets VIBLOOM_ROLE=builder in an `env` object, keeping the rest. Returns
+// whether anything changed.
+fn builder_env(env: &mut Value) -> bool {
+    if !env.is_object() {
+        *env = json!({});
+    }
+    if env["VIBLOOM_ROLE"] == "builder" {
+        return false;
+    }
+    env["VIBLOOM_ROLE"] = json!("builder");
+    true
+}
 
 // Connects an agent to the guard, changing only the guard's own entries in
 // the agent's files. Returns what it did and which files to guard, so the
@@ -79,7 +93,9 @@ pub(crate) fn setup_agent(root: &Path, agent: &str) -> Fallible<(Vec<String>, Ve
                     }
                 }
             }
-            if added > 0 {
+            // The agent's role is written down, so it never rests on detection.
+            let role_set = builder_env(&mut v["env"]);
+            if added > 0 || role_set {
                 write_json(&settings, &v)?;
             }
             let mcp = root.join(".mcp.json");
@@ -87,12 +103,14 @@ pub(crate) fn setup_agent(root: &Path, agent: &str) -> Fallible<(Vec<String>, Ve
             let had = m.pointer("/mcpServers/vibloom").is_some();
             if !had {
                 m["mcpServers"]["vibloom"] = json!({ "command": "vibloom", "args": ["mcp"] });
+            }
+            if builder_env(&mut m["mcpServers"]["vibloom"]["env"]) || !had {
                 write_json(&mcp, &m)?;
             }
             Ok((
                 vec![
                     if added > 0 {
-                        "Claude Code: hooks added to .claude/settings.json.".into()
+                        "Claude Code: hooks added to .claude/settings.json, with VIBLOOM_ROLE=builder for the agent.".into()
                     } else {
                         "Claude Code: the hooks were already in .claude/settings.json.".into()
                     },

@@ -135,6 +135,17 @@ pub fn map_changes(base: &RootsMap, head: &RootsMap) -> Vec<GuardChange> {
             format!("{p} is no longer in protect"),
         ));
     }
+    for p in head
+        .ignore_failures
+        .iter()
+        .filter(|p| !base.ignore_failures.contains(p))
+    {
+        out.push(on_map(
+            "ignore_failures_added",
+            None,
+            format!("failing tests matching {p} no longer fail the check"),
+        ));
+    }
     if base.strict && !head.strict {
         out.push(on_map("strict_off", None, "strict was turned off".into()));
     }
@@ -302,6 +313,11 @@ mod tests {
         };
         assert_eq!(strict(true)[0].kind, "strict_off");
         assert!(strict(false).is_empty());
+        let ignored = changes(|m| m["ignore_failures"] = json!(["LegacyTest.*"]));
+        assert_eq!(
+            ignored,
+            vec!["failing tests matching LegacyTest.* no longer fail the check"]
+        );
     }
 
     #[test]

@@ -2,6 +2,61 @@
 
 Changes to the `vibloom` binary. The web app is not versioned.
 
+## 0.9.0
+
+Simple by default, depth on demand.
+
+### Breaking
+
+- A person at a terminal is the verifier with no configuration; an AI agent
+  is the builder. The role is `VIBLOOM_ROLE` when set (`verifier` or
+  `builder`); otherwise the builder when a variable an agent tool sets for its
+  commands is present (`CLAUDECODE` for Claude Code, `CODEX_THREAD_ID` and
+  `CODEX_SANDBOX` for Codex CLI, `CURSOR_AGENT` for Cursor, `GEMINI_CLI` for
+  Gemini CLI); otherwise the verifier. A refused command says it is a decision
+  for the person, why the command looks like an agent's, and the command line
+  for the person to run in their own terminal. The MCP server has no tool
+  that changes the map, whatever its environment.
+- `check` exits 1 when any test in its run failed, whether or not a node rests
+  on it, and names up to five of the failing tests no node rests on. The
+  map's new `"ignore_failures"` (globs on `Contract.test` or the test's file)
+  lets known-red legacy tests through; `status` lists them on their own line
+  for as long as the rule is there, the JSON carries `failures` and
+  `ignore_failures`, and `check --base` reports a new pattern as a guard
+  change (`ignore_failures_added`).
+- `vibloom` with no arguments no longer prints the usage (exit 2): it prints
+  where things stand and one next step (exit 0). `vibloom help` prints the
+  usage in two tiers.
+- `vibloom proposals` lists by contract and kind, one line each; evidence
+  shows with `vibloom proposals <id>` or `--full`. `survey --propose` prints
+  a summary of what it filed per contract instead of the full report.
+
+### Added
+
+- `vibloom` alone: what is proven, what is only claimed, what needs attention
+  (top three, with the reason) and a `Next:` line chosen by state. Outside a
+  project, a short start-here. `init` ends with the same `Next:` line.
+- `vibloom add "<title>"` with no kind adds an assumption. `add` and `edit`
+  print the id and, with `--on`, the edge in one phrase: "X rests on Y: if Y
+  fails, X is at risk".
+- An unknown id (`--on`, `edit`, `remove`, `--accept`, a proposal id), contract
+  name or command is answered with the nearest ones.
+- `vibloom proposals accept --all [--contract C]` and `reject --all
+[--contract C]` decide what the listing shows; every accept says how many
+  nodes it created and that assumptions start hypothetical.
+- `init --agent claude` and `setup claude` write `VIBLOOM_ROLE=builder` into
+  `.claude/settings.json` and the `.mcp.json` server entry. The pre-tool hook
+  also denies commands that mention the detection variables or clear the
+  environment (`env -i`, `env -u`).
+- `docs/quickstart.md`, the path a newcomer walks; `docs/guard.md` is the
+  reference, reordered, with the `depends_on` direction stated once and its
+  examples fixed.
+
+### Fixed
+
+- A node id is never cut inside a word, also when the title's first word is
+  longer than the limit.
+
 ## 0.8.0
 
 ### Breaking

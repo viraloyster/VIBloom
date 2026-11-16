@@ -7,20 +7,26 @@ use crate::map::{
 use crate::paths::{relative_to, watch_path};
 use crate::proposals::{fresh_id, with_node};
 use crate::store::{load_map, write_atomic};
+use crate::suggest::unknown;
 use serde_json::Value;
 use std::path::Path;
 
 pub(crate) fn add(root: &Path, io: &mut Io, args: &Args) -> Fallible<i32> {
-    verifier(io.role, "changes the map")?;
-    let usage = "Usage: vibloom add <assumption|invariant|intention> \"<title>\" [--file F --test N [--contract C]] [--watch P]... [--on ID]... [--detail D] [--id ID] [--hypothetical | --adopted] [--unprotected]";
-    let (Some(kind), Some(title), None) = (
-        args.words.first().and_then(|k| Kind::parse(k)),
-        args.words.get(1),
-        args.words.get(2),
-    ) else {
-        return Err(usage.into());
+    verifier(io, "changes the map")?;
+    let usage = "Usage: vibloom add [assumption|invariant|intention] \"<title>\" [--on ID]... [--file F --test N [--contract C]] [--watch P]... [--evidence E]... [--detail D] [--id ID] [--hypothetical | --adopted] [--unprotected]\nWithout a kind it adds an assumption. --on X: this node rests on X; if X fails, this is at risk.";
+    // A title alone is an assumption: the simplest thing to write down.
+    let (kind, title) = match args.words.as_slice() {
+        [title] if Kind::parse(title).is_none() => (Kind::Assumption, title),
+        [kind, title] => (
+            Kind::parse(kind).ok_or_else(|| {
+                format!("Unknown kind {kind}: use assumption, invariant or intention.\n{usage}")
+            })?,
+            title,
+        ),
+        _ => return Err(usage.into()),
     };
     let map = load_map(root)?;
+    known_ids(&map, &args.all("--on"))?;
     let test = match (args.opt("--file"), args.opt("--test")) {
         (Some(f), Some(n)) => Some(TestRef {
             file: relative_to(root, &io.cwd, f)
@@ -71,12 +77,46 @@ pub(crate) fn add(root: &Path, io: &mut Io, args: &Args) -> Fallible<i32> {
         .iter()
         .find(|n| n.id == id)
         .map_or("", |n| n.stance.as_str());
-    (io.out)(&format!("Added {id} ({stance})."));
+    (io.out)(&match stance {
+        "hypothetical" => format!(
+            "Added {id} (hypothetical: not yet reviewed; `vibloom edit {id} --stance adopted` adopts it)."
+        ),
+        s => format!("Added {id} ({s})."),
+    });
+    if let Some(line) = rests_on(&id, &args.all("--on")) {
+        (io.out)(&line);
+    }
     Ok(0)
 }
 
+/// The one way the edge is said everywhere.
+pub(crate) fn rests_on(id: &str, on: &[String]) -> Option<String> {
+    (!on.is_empty()).then(|| {
+        let deps = on.join(", ");
+        let which = if on.len() == 1 {
+            deps.as_str()
+        } else {
+            "any of them"
+        };
+        format!("{id} rests on {deps}: if {which} fails, {id} is at risk.")
+    })
+}
+
+/// Refuses ids not in the map, with the nearest ones.
+pub(crate) fn known_ids(map: &crate::map::RootsMap, ids: &[String]) -> Fallible<()> {
+    for d in ids {
+        if !map.nodes.iter().any(|n| n.id == *d) {
+            return Err(format!(
+                "{} `vibloom status` lists the ids.",
+                unknown("node", d, map.nodes.iter().map(|n| n.id.as_str()))
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn edit(root: &Path, io: &mut Io, args: &Args) -> Fallible<i32> {
-    verifier(io.role, "changes the map")?;
+    verifier(io, "changes the map")?;
     let usage = "Usage: vibloom edit <id> [--title T] [--detail D] [--stance adopted|hypothetical|off] [--on ID] [--not-on ID] [--watch P] [--unwatch P] [--evidence E] [--drop-evidence E] [--accept ID --reason R] [--unaccept ID]";
     let (Some(id), None) = (args.words.first(), args.words.get(1)) else {
         return Err(usage.into());
@@ -99,7 +139,13 @@ pub(crate) fn edit(root: &Path, io: &mut Io, args: &Args) -> Fallible<i32> {
                         "{dep} is not off. Only a dependency switched off (`vibloom edit {dep} --stance off`) can be accepted as a risk."
                     ));
                 }
-                None => return Err(format!("No node {dep} in the map.")),
+                None => {
+                    return Err(unknown(
+                        "node",
+                        dep,
+                        map.nodes.iter().map(|n| n.id.as_str()),
+                    ));
+                }
             }
             Some(Accept {
                 id: dep.clone(),
@@ -114,8 +160,10 @@ pub(crate) fn edit(root: &Path, io: &mut Io, args: &Args) -> Fallible<i32> {
             return Err("Accept one dependency at a time: --accept <id> --reason \"...\".".into());
         }
     };
+    known_ids(&map, &[(*id).to_string()])?;
+    known_ids(&map, &args.all("--on"))?;
     let Some(n) = map.nodes.iter_mut().find(|n| n.id == *id) else {
-        return Err(format!("No node {id} in the map."));
+        return Err(format!("No node {id}."));
     };
     if args.opts.is_empty() {
         return Err(format!("Nothing to change.\n{usage}"));
@@ -179,18 +227,19 @@ pub(crate) fn edit(root: &Path, io: &mut Io, args: &Args) -> Fallible<i32> {
     })?;
     write_atomic(&root.join(MAP_PATH), &serialize_map(&map))?;
     (io.out)(&format!("Changed {id}."));
+    if let Some(line) = rests_on(id, &args.all("--on")) {
+        (io.out)(&line);
+    }
     Ok(0)
 }
 
 pub(crate) fn remove(root: &Path, io: &mut Io, args: &Args) -> Fallible<i32> {
-    verifier(io.role, "changes the map")?;
+    verifier(io, "changes the map")?;
     let (Some(id), None) = (args.words.first(), args.words.get(1)) else {
         return Err("Usage: vibloom remove <id>".into());
     };
     let mut map = load_map(root)?;
-    if !map.nodes.iter().any(|n| n.id == *id) {
-        return Err(format!("No node {id} in the map."));
-    }
+    known_ids(&map, &[(*id).to_string()])?;
     let resting: Vec<&str> = map
         .nodes
         .iter()

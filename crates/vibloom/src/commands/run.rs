@@ -4,7 +4,7 @@ use crate::derive::{NodeView, label, needs_attention, troubled, unreviewed, why}
 use crate::git::{files_at, git, is_commit, prefix, show_at};
 use crate::guard::{Reader, file_changes, guarded_at_base, map_changes};
 use crate::map::{MAP_PATH, RootsMap};
-use crate::runner::{RunReport, recorded, run};
+use crate::runner::{RunReport, failures, recorded, run};
 use crate::store::{load_map, parse_map_text, views};
 use std::collections::HashMap;
 use std::fs;
@@ -107,10 +107,18 @@ pub(crate) fn check(root: &Path, io: &mut Io, o: &CheckOpts, extra: &[String]) -
     let guard_fails = guard
         .as_ref()
         .is_some_and(|g| !g.changes.is_empty() && !g.allowed);
+    // A red suite is red: a failing test no node rests on still fails, or an
+    // approved change that guts the invariants could pass while a plain unit
+    // test catches the bug.
+    let fails = failures(&report.entry, &map);
     let exit = if error.is_some() {
         2
     } else {
-        i32::from(guard_fails || vs.iter().any(|v| needs_attention(v, strict)))
+        i32::from(
+            guard_fails
+                || !fails.untracked.is_empty()
+                || vs.iter().any(|v| needs_attention(v, strict)),
+        )
     };
     if o.format == Format::Json {
         (io.out)(
@@ -120,6 +128,8 @@ pub(crate) fn check(root: &Path, io: &mut Io, o: &CheckOpts, extra: &[String]) -
                 views: vs,
                 guard: guard.as_ref(),
                 run: Some(&report.entry),
+                failures: Some(&fails),
+                ignore_failures: &map.ignore_failures,
                 log_problems: &[],
                 tool_error: error
                     .map(|e| format!("the runner produced no report: {e}"))

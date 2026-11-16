@@ -191,8 +191,9 @@ pub fn propose(
     })
 }
 
-// A title as an id: lowercase words joined by dashes, cut at a word so an id
-// never ends in half a word.
+// A title as an id: lowercase words joined by dashes, cut at a word within
+// 32 characters so an id never ends in half a word; a longer first word stays
+// whole.
 fn slug(title: &str) -> String {
     let mut s = String::new();
     for c in title.to_lowercase().chars() {
@@ -212,7 +213,6 @@ fn slug(title: &str) -> String {
         }
         out.push_str(word);
     }
-    out.truncate(32);
     if out.is_empty() { "node".into() } else { out }
 }
 
@@ -348,6 +348,19 @@ mod tests {
         let (m2, id2) = accept(&m, &p).expect("accepted again");
         assert_eq!(id2, "asm.only-add-moves-total-2");
         assert_eq!(m2.nodes.len(), 3);
+    }
+
+    #[test]
+    fn cuts_an_id_only_between_words() {
+        assert_eq!(
+            slug("The vault's assets equal everything deposited minus everything withdrawn"),
+            "the-vaults-assets-equal"
+        );
+        assert_eq!(
+            slug("Supercalifragilisticexpialidocious-and-more things"),
+            "supercalifragilisticexpialidocious"
+        );
+        assert_eq!(slug("..."), "node");
     }
 
     #[test]

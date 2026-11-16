@@ -119,6 +119,9 @@ pub struct RootsMap {
     /// Unreviewed (hypothetical) nodes count as needing attention in
     /// `status` and `check`.
     pub strict: bool,
+    /// Failing tests no node rests on that `check` lets pass: globs on
+    /// `Contract.test` or the test's file. Listed by `status`, never silent.
+    pub ignore_failures: Vec<String>,
     pub nodes: Vec<RootNode>,
 }
 
@@ -131,6 +134,7 @@ impl RootsMap {
             tests: "test/".into(),
             protect: vec![],
             strict: false,
+            ignore_failures: vec![],
             nodes: vec![],
         }
     }
@@ -215,7 +219,15 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
     unknown_keys(
         obj,
         &[
-            "version", "runner", "report", "timeout", "tests", "protect", "strict", "nodes",
+            "version",
+            "runner",
+            "report",
+            "timeout",
+            "tests",
+            "protect",
+            "strict",
+            "ignore_failures",
+            "nodes",
         ],
         "the map",
         &mut errors,
@@ -265,6 +277,15 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
             errors.push("strict must be true or false".into());
             false
         }
+    };
+    let ignore_failures = match obj.get("ignore_failures") {
+        None => vec![],
+        Some(v) => strings(v)
+            .filter(|l| l.iter().all(|p| !p.trim().is_empty()))
+            .unwrap_or_else(|| {
+                errors.push("ignore_failures must list non-empty patterns".into());
+                vec![]
+            }),
     };
     let raw_nodes = obj.get("nodes").and_then(Value::as_array);
     if raw_nodes.is_none() {
@@ -448,6 +469,7 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
             tests,
             protect,
             strict,
+            ignore_failures,
             nodes,
         }),
         _ => Err(errors),
@@ -571,6 +593,8 @@ struct MapOut<'a> {
     protect: &'a [String],
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     strict: bool,
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    ignore_failures: &'a [String],
     nodes: Vec<NodeOut<'a>>,
 }
 
@@ -584,6 +608,7 @@ pub fn serialize_map(map: &RootsMap) -> String {
         tests: &map.tests,
         protect: &map.protect,
         strict: map.strict,
+        ignore_failures: &map.ignore_failures,
         nodes: map
             .nodes
             .iter()

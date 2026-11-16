@@ -3,7 +3,7 @@ use crate::foundry::compiled;
 use crate::map::PROPOSALS_PATH;
 use crate::proposals::{Draft, propose};
 use crate::store::{append, iso_now, load_book, load_map, locked};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 /// What the code itself says, for a Foundry project: who may call what, what
@@ -20,13 +20,22 @@ pub fn survey(root: &Path, file_proposals: bool, only: &[String]) -> Fallible<St
             .collect();
         if !unknown.is_empty() {
             let names: BTreeSet<&str> = contracts.iter().map(|c| c.name.as_str()).collect();
+            let near: Vec<&str> = unknown
+                .iter()
+                .flat_map(|u| crate::suggest::nearest(u, names.iter().copied()))
+                .collect();
             return Err(format!(
-                "No contract {} in the survey. The contracts are: {}.",
+                "No contract {} in the survey.{} The contracts are: {}.",
                 unknown
                     .iter()
                     .map(|s| s.as_str())
                     .collect::<Vec<_>>()
                     .join(", "),
+                if near.is_empty() {
+                    String::new()
+                } else {
+                    format!(" Did you mean {}?", near.join(", "))
+                },
                 names.into_iter().collect::<Vec<_>>().join(", ")
             ));
         }
@@ -56,7 +65,7 @@ pub fn survey(root: &Path, file_proposals: bool, only: &[String]) -> Fallible<St
     out.push("Invariants worth a test (each needs one before it can enter the map):".into());
     out.extend(none(list(true)));
     if file_proposals {
-        let mut filed = 0;
+        let mut filed: BTreeMap<&str, usize> = BTreeMap::new();
         locked(root, || {
             for c in cands.iter().filter(|c| !c.invariant) {
                 let book = load_book(root);
@@ -88,21 +97,49 @@ pub fn survey(root: &Path, file_proposals: bool, only: &[String]) -> Fallible<St
                         &root.join(PROPOSALS_PATH),
                         &format!("{}\n", serde_json::to_string(&p).unwrap_or_default()),
                     )?;
-                    filed += 1;
+                    *filed
+                        .entry(c.title.split_once(": ").map_or("other", |(h, _)| h))
+                        .or_default() += 1;
                 }
             }
             Ok(())
         })?;
-        out.push(String::new());
-        out.push(if filed == 0 {
+        // Filing is the step before deciding: the full report is one
+        // `vibloom survey` away, and here would bury what to do next.
+        let total: usize = filed.values().sum();
+        let invariants = cands.iter().filter(|c| c.invariant).count();
+        let mut out = vec![if !cands.iter().any(|c| !c.invariant) {
+            "Found no assumptions to file.".to_string()
+        } else if total == 0 {
             "Filed no new proposals: each candidate is already pending, in the map or rejected."
                 .to_string()
         } else {
             format!(
-                "Filed {filed} new {}. Review them with `vibloom proposals`.",
-                if filed == 1 { "proposal" } else { "proposals" }
+                "Filed {total} {}, all assumptions: {}.",
+                if total == 1 { "proposal" } else { "proposals" },
+                filed
+                    .iter()
+                    .map(|(c, n)| format!("{c} {n}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             )
-        });
+        }];
+        if invariants > 0 {
+            out.push(format!(
+                "{invariants} invariant {} a test before {} can enter the map; `vibloom survey` lists them.",
+                if invariants == 1 { "candidate needs" } else { "candidates need" },
+                if invariants == 1 { "it" } else { "they" }
+            ));
+        }
+        if total > 0 {
+            out.push("See them: `vibloom proposals` (grouped by contract). Decide: `vibloom proposals accept <id>...` or `reject <id>...`, or a whole contract with `accept --all --contract <Name>`.".into());
+        }
+        return Ok(out.join("\n"));
     }
+    out.push(String::new());
+    out.push(format!(
+        "Next: `vibloom survey --propose` files these assumptions as proposals for you to decide. An invariant needs a test first (template: {}).",
+        crate::commands::guide::TEMPLATE
+    ));
     Ok(out.join("\n"))
 }

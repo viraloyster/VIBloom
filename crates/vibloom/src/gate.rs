@@ -17,7 +17,7 @@ pub fn precommit(
         for f in staged {
             if guarded_for_commit(map, f) {
                 problems.push(format!(
-                    "{f} is guarded: only VIBLOOM_ROLE=verifier may commit changes to it"
+                    "{f} is guarded: the person commits changes to it, from their own terminal"
                 ));
             }
         }
@@ -79,9 +79,9 @@ mod tests {
                 &[]
             ),
             vec![
-                "test/C.t.sol is guarded: only VIBLOOM_ROLE=verifier may commit changes to it",
-                ".vibloom/roots.json is guarded: only VIBLOOM_ROLE=verifier may commit changes to it",
-                ".vibloom/log.jsonl is guarded: only VIBLOOM_ROLE=verifier may commit changes to it"
+                "test/C.t.sol is guarded: the person commits changes to it, from their own terminal",
+                ".vibloom/roots.json is guarded: the person commits changes to it, from their own terminal",
+                ".vibloom/log.jsonl is guarded: the person commits changes to it, from their own terminal"
             ]
         );
         assert!(

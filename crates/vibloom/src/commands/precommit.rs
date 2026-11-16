@@ -28,6 +28,8 @@ pub(crate) fn precommit(root: &Path, io: &mut Io) -> Fallible<i32> {
         "VIBloom refused the commit:\n- {}",
         problems.join("\n- ")
     ));
-    (io.err)("Run `vibloom run` after changing code; only the verifier changes protected tests.");
+    (io.err)(
+        "Run `vibloom run` after changing code. Guarded files are the person's to change and commit, from their own terminal.",
+    );
     Ok(1)
 }

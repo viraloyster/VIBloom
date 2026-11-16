@@ -2,6 +2,7 @@
 
 pub(crate) mod agents;
 pub(crate) mod gaps;
+pub(crate) mod guide;
 pub(crate) mod hook;
 pub(crate) mod init;
 pub(crate) mod nodes;
@@ -13,15 +14,17 @@ pub(crate) mod run;
 pub(crate) mod status;
 pub(crate) mod survey;
 
-use crate::cli::Fallible;
+use crate::cli::{Fallible, Io};
 use crate::hooks::Role;
 
-pub(crate) fn verifier(role: Role, what: &str) -> Fallible<()> {
-    if role == Role::Verifier {
-        Ok(())
-    } else {
-        Err(format!(
-            "This {what}: only the verifier does it. Run it as VIBLOOM_ROLE=verifier."
-        ))
+/// Refuses an agent what only the person decides, and says how the person
+/// does it.
+pub(crate) fn verifier(io: &Io, what: &str) -> Fallible<()> {
+    if io.role == Role::Verifier {
+        return Ok(());
     }
+    Err(format!(
+        "This {what}, which is a decision for the person, not for the agent writing the code: whoever is judged by the checks must not be able to change them.\nvibloom treats this command as an agent's ({}).\nThe person runs it in their own terminal: {}",
+        io.role_why, io.line
+    ))
 }

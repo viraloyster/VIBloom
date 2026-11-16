@@ -1,5 +1,4 @@
 use crate::cli::{Fallible, Io};
-use crate::hooks::Role;
 use crate::log::read_log;
 use crate::store::{iso_now, locked, log_path, write_atomic};
 use std::fs;
@@ -8,11 +7,7 @@ use std::path::Path;
 // Sets aside everything from the first broken link on. The runs before it
 // still verify; the rest was never trusted and is kept apart, not deleted.
 pub(crate) fn repair(root: &Path, io: &mut Io) -> Fallible<i32> {
-    if io.role != Role::Verifier {
-        return Err(
-            "Only the verifier repairs the record: run it as VIBLOOM_ROLE=verifier.".into(),
-        );
-    }
+    crate::commands::verifier(io, "sets part of the run log aside")?;
     locked(root, || {
         let path = log_path(root);
         let text = fs::read_to_string(&path).unwrap_or_default();

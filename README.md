@@ -1,127 +1,108 @@
 # VIBloom
 
-**A map of what a project assumes, what must always hold and what each change
-intends, checked by code against every test run.**
+**Keeps an AI coding agent from making the tests pass by weakening them.**
 
-When people or AI agents change a project, the reasons it works stay in
-someone's head: the assumptions it rests on, the invariants it must keep, the
-intention behind each change. VIBloom writes them down as roots, links each
-one to the test or experiment that settles it, and derives from the runs
-whether it still stands. An agent can read the map and propose changes to it;
-it can never set a state.
+Ask an agent to make a failing suite green and the quickest way is often to
+change the test, lower the fuzz runs or delete the invariant. `vibloom` is a
+small local program that writes down what your project must always hold
+(its invariant tests) and what it takes as given (assumptions), guards those
+tests and that list against the agent, and decides from a fresh test run
+whether each one still stands. The agent can propose; only a person at their
+own terminal changes what counts. In CI, `vibloom check --base` refuses any
+change that weakens the guard until a person approves it.
 
-AI is optional. VIBloom works the same without it, and when it is used it can
-come from any provider. Whatever an AI proposes enters as hypothetical and
-passes the same checks as anything written by hand.
+## Quickstart (Foundry)
+
+Download `vibloom` for your platform from the
+[releases](https://github.com/viraloyster/VIBloom/releases), or
+`cargo install --locked --git https://github.com/viraloyster/VIBloom vibloom`. Then, in the project:
+
+```bash
+vibloom init              # find the invariant tests, guard them, write .vibloom/roots.json
+vibloom check             # run forge test; exit 1 when anything needs attention
+vibloom add "The handler covers every way assets enter or leave the vault"
+vibloom                   # where things stand, and the one next step
+vibloom setup claude      # or: vibloom setup codex
+```
+
+`add` writes down an assumption, not yet reviewed until you adopt it. `setup
+claude` adds the hooks and tools to the project and marks the agent as the
+builder; without it, an agent is still recognised by the variables Claude
+Code, Codex, Cursor and Gemini CLI set.
+
+## What a failure looks like
+
+In [examples/foundry-vault](examples/foundry-vault/), with `totalAssets -= assets;`
+commented out of `withdraw`:
+
+```
+$ vibloom check
+Run 2: 3 test results recorded, 2 failed.
+1 failing test no node rests on, which still fails the check: VaultTest.test_depositThenWithdrawReturnsEverything.
+Fix it, or tie it to a node; a test known to be red can be listed in "ignore_failures" in the map.
+Changed:
+  inv.assets-match-flows: pending review -> BROKEN
+  inv.shares-are-backed: pending review -> holds
+  int.nobody-can-take-out-more-than: pending review -> AT RISK
+4 nodes, 2 need attention, 0 not yet reviewed.
+BROKEN   inv.assets-match-flows             invariant_assetsMatchFlows
+AT RISK  int.nobody-can-take-out-more-than  Nobody can take out more than their shares are worth
+holds    inv.shares-are-backed              invariant_sharesAreBacked
+adopted  asm.the-handler-covers-every-way   The handler covers every way assets enter or leave the vault
+```
+
+An agent sent to fix it cannot edit the invariant's test or the map:
+
+```
+$ CLAUDECODE=1 vibloom edit inv.assets-match-flows --stance off
+This changes the map, which is a decision for the person, not for the agent writing the code: whoever is judged by the checks must not be able to change them.
+vibloom treats this command as an agent's (CLAUDECODE is set: Claude Code is running this command).
+The person runs it in their own terminal: vibloom edit inv.assets-match-flows --stance off
+```
+
+## Read on
+
+- [docs/quickstart.md](docs/quickstart.md): the path from nothing to a useful
+  map, in one page.
+- [docs/guard.md](docs/guard.md): the reference: every command, the map, the
+  states, CI, agents, the limits.
+- [examples/](examples/): a Foundry vault and a pytest ledger set up with the
+  guard. Runners other than Foundry work through JUnit XML (cargo-nextest,
+  pytest, Jest, mocha, Go).
+
+## Limits
+
+- **A local check is a speed bump.** An agent with full control of its
+  machine can unset variables or skip hooks. The boundary it cannot cross is
+  a protected branch that requires `vibloom check --base` in CI and a code
+  owner's review of guarded files. See
+  [Where the rules are enforced](docs/guard.md#where-the-rules-are-enforced).
+- **It knows only what the map says.** Passing tests do not prove a global
+  property, and the guard does not discover a dependency nobody wrote down.
+- **Two report formats**: Foundry's JSON and JUnit XML.
+
+No model and no API key are involved: the guard is deterministic, and Claude
+Code or Codex run on the plan they already use.
+
+## Also here: the chemistry app
+
+The same idea, applied to science: a web app that turns a chemistry question
+into a tree of the assumptions it rests on and tests them with Oregonator
+simulations of the Belousov-Zhabotinsky reaction. It runs at
+https://viraloyster.github.io/VIBloom/ (or locally with
+`npm ci && npm run dev`); AI is optional and any provider works with your own
+key. The model and its validation are in [docs/science.md](docs/science.md)
+and [docs/validation.md](docs/validation.md); the code in
+[docs/architecture.md](docs/architecture.md). Its verdicts come from a
+simulation, not a laboratory.
 
 Started during the Meta Global AI Developer Hackathon (November 2026); the
 hackathon version is described in [HACKATHON.md](HACKATHON.md).
 
-## Two domains
-
-Both keep a log of what was checked and derive every state from it, so a
-broken premise marks everything resting on it.
-
-### Code (first)
-
-`crates/vibloom`, a single Rust binary called `vibloom`:
-
-- `.vibloom/roots.json`: assumptions, invariants linked to tests, intentions,
-  watched files and what each node rests on.
-- A local run log (in the git folder, never committed): every test run, with
-  one digest per node of the files it watches. CI never reads it; it runs the
-  tests again.
-- Derived states: holds, BROKEN, pending review (a watched file changed),
-  UNSUPPORTED, AT RISK, untested, skipped, MISSING, VACUOUS (every fuzzed call
-  reverted), TEST CHANGED (a protected test or what it leans on differs from
-  the last commit), off. A node can accept a dependency that is off, with a
-  reason, and the risk stays listed. Only a test that ran
-  and passed against the current files counts as holding; every other state
-  of a tested node fails the check. Hypothetical nodes, and what rests on them,
-  are counted as not yet reviewed, and fail the check only with `--strict`.
-- A commit check (`vibloom precommit`), a CI check (`vibloom check --base`)
-  that refuses guard changes against the base branch's map until a person
-  approves them, with JSON and GitHub annotations, and context for any agent
-  (`vibloom context <file>`). Invariants watch what their tests import, as
-  forge's syntax trees show it.
-- An MCP server (`vibloom mcp`) and optional Claude Code hooks. Agents can
-  propose nodes, each with its evidence; a person accepts or rejects them.
-- For Foundry, from code and notes to a map: `vibloom survey` reads who may
-  call what and what the code leans on, `--propose` files assumptions with the
-  lines they come from, and `vibloom research` gives an agent the brief to find
-  the rest. `vibloom gaps` shows what the tests never name.
-- `vibloom edit` and `vibloom remove` change the map. No network, no stored
-  key: the builder cannot sign or send a transaction.
-- Runners: Foundry (`forge test --json`) and any runner that writes JUnit XML
-  (cargo-nextest, pytest, Jest, mocha, Go).
-
-No model is involved: the guard is deterministic and does not depend on any
-particular agent. See [docs/guard.md](docs/guard.md).
-
-### Chemistry
-
-The web app (`apps/web`) turns a chemistry question into a tree of the
-assumptions it rests on and tests them with Oregonator simulations of the
-Belousov-Zhabotinsky reaction, built from a real recipe:
-
-- Roots are added by hand or, with an AI connected, grown from the question.
-- Before each run a prediction is recorded, by a person or the AI. It counts
-  as blind only if the project holds no result of the same experiment.
-- A stiff solver runs both models; code decides every verdict.
-- A contradicted prediction must be explained, with a test that tells two
-  explanations apart, before a lesson is recorded. The lesson keeps the
-  conditions it was learned under and stops counting when they change.
-- The recipe map runs the engine on recipes around the current one and shows
-  which of the tree's own checks fail there.
-- The Process view reads the log: who took each step, what was recorded and
-  whether it reproduced here.
-
-The solver agrees with SciPy (Radau) on Oregonator periods to a relative 5e-4
-([docs/validation.md](docs/validation.md)). The chemistry is described in
-[docs/science.md](docs/science.md).
-
-## Run it
-
-- **On a code project:** download `vibloom` from the
-  [releases](https://github.com/viraloyster/VIBloom/releases) or build it with
-  `cargo install --locked --git https://github.com/viraloyster/VIBloom vibloom`.
-  Then, in the project:
-
-  ```bash
-  vibloom init --agent claude   # or codex; detects Foundry, Hardhat, Cargo or pytest
-  vibloom check                 # run the tests and record the run
-  ```
-
-  No API key is needed: the guard is a local program, and Claude Code or
-  Codex run on the plan they already use.
-
-  See [docs/guard.md](docs/guard.md) and the two projects in
-  [examples/](examples/).
-
-- **The web app:** https://viraloyster.github.io/VIBloom/, or locally with
-  `npm ci && npm run dev`. To use an AI, choose a provider in Settings
-  (Anthropic, OpenAI, xAI, Gemini, OpenRouter or a local server) and enter
-  your own key. The key stays in the tab (or on the device, if you ask) and is
-  sent only to that provider.
-
-## Limits
-
-- **Simulation, not laboratory.** Chemistry verdicts come from the
-  Oregonator, a semi-quantitative model of the BZ reaction. The solver is
-  validated against SciPy; the model is not validated against measured
-  periods of a real beaker.
-- **Outside chemistry, the web app computes on assumed numbers.** It accepts
-  any goal and evaluates the comparisons in the tree, but it has no
-  experiments outside chemistry.
-- **Two report formats.** The guard reads Foundry's JSON and JUnit XML.
-- **The guard is a local check.** An agent with full control of its machine
-  can skip local hooks; the boundary it cannot cross is a protected branch
-  that requires `vibloom check` in CI. See [docs/guard.md](docs/guard.md).
-
 ## Repository
 
 ```
-crates/vibloom    VIBloom for code (Rust): roots map, run log, commit check, MCP
+crates/vibloom    the guard (Rust): roots map, run log, commit check, hooks, MCP
 apps/web          static app: the idea tree for chemistry
 packages/ideas    the tree: protocol, engine rules, optional AI client
 packages/chem     stiff solver, Oregonator models, recipe conversion, classifier
@@ -129,7 +110,7 @@ packages/engine   canonical JSON and hashing
 packages/contracts shared types and boundary validation
 tools/reference   SciPy reference data generator
 examples/         a Foundry vault and a pytest ledger set up with the guard
-docs/             architecture, guard, science, validation
+docs/             quickstart, guard reference, architecture, science, validation
 ```
 
 ## License
