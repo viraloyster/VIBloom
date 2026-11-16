@@ -91,7 +91,18 @@ pub fn load_map(root: &Path) -> Fallible<RootsMap> {
         .map_err(|e| format!("cannot read {MAP_PATH}: {e}"))?;
     let raw: Value =
         serde_json::from_str(&text).map_err(|e| format!("{MAP_PATH} is not valid JSON: {e}"))?;
-    parse_map(&raw).map_err(|errs| format!("{MAP_PATH} has problems:\n- {}", errs.join("\n- ")))
+    let mut map = parse_map(&raw)
+        .map_err(|errs| format!("{MAP_PATH} has problems:\n- {}", errs.join("\n- ")))?;
+    // A folder written by hand without its "/" is still a folder: read as one
+    // file it would never change.
+    for n in &mut map.nodes {
+        for w in &mut n.watch {
+            if !w.ends_with('/') && root.join(&*w).is_dir() {
+                w.push('/');
+            }
+        }
+    }
+    Ok(map)
 }
 
 pub fn load_log(root: &Path) -> ReadLog {
@@ -399,6 +410,37 @@ pub fn run(root: &Path, extra: &[String]) -> Fallible<RunReport> {
     Ok(RunReport { entry, views })
 }
 
+/// The line that says what a run recorded. Failures are counted too: a test
+/// no node rests on can fail without any node needing attention, and that
+/// must not read as a clean run.
+pub fn recorded(entry: &RunEntry, map: &RootsMap) -> String {
+    let n = entry.outcomes.len();
+    let failed: Vec<_> = entry
+        .outcomes
+        .iter()
+        .filter(|o| o.status == crate::forge::Status::Fail)
+        .collect();
+    let mut line = format!(
+        "Run {}: {n} test {} recorded",
+        entry.seq,
+        if n == 1 { "result" } else { "results" }
+    );
+    if !failed.is_empty() {
+        let loose = failed
+            .iter()
+            .filter(|o| !map.nodes.iter().any(|nd| crate::derive::matches(nd, o)))
+            .count();
+        line.push_str(&format!(", {} failed", failed.len()));
+        if loose > 0 {
+            line.push_str(&format!(
+                " ({loose} tied to no node, so no state shows them)"
+            ));
+        }
+    }
+    line.push('.');
+    line
+}
+
 pub fn table(vs: &[NodeView]) -> String {
     if vs.is_empty() {
         return "The map has no nodes yet. Run `vibloom scan` or edit .vibloom/roots.json.".into();
@@ -588,6 +630,24 @@ fn units(root: &Path, sources: &[String], out_dir: &str) -> Vec<crate::survey::U
     out
 }
 
+// Whether a source of the project has an artifact without a syntax tree.
+fn lacks_ast(root: &Path, sources: &[String], out_dir: &str) -> bool {
+    let mut dirs = BTreeMap::new();
+    artifact_dirs(&root.join(out_dir), &mut dirs);
+    sources.iter().any(|file| {
+        let base = file.rsplit('/').next().unwrap_or(file);
+        dirs.get(base).into_iter().flatten().any(|dir| {
+            fs::read_dir(dir).into_iter().flatten().any(|e| {
+                e.ok().is_some_and(|e| {
+                    let p = e.path();
+                    p.extension().is_some_and(|x| x == "json")
+                        && read_artifact(&p).is_some_and(|a| a.ast.is_none())
+                })
+            })
+        })
+    })
+}
+
 struct FoundryDirs {
     src: String,
     out: String,
@@ -628,24 +688,40 @@ fn compiled(
             "`vibloom {command}` reads Solidity through Foundry; this project uses another runner."
         ));
     }
-    let built = run_child(
-        "forge",
-        &["build".into(), "--ast".into()],
-        root,
-        map.timeout,
-    )?;
+    let build = |force: bool| {
+        let mut args = vec!["build".to_string(), "--ast".into()];
+        if force {
+            args.push("--force".into());
+        }
+        run_child("forge", &args, root, map.timeout)
+    };
+    let mut built = build(false)?;
     let dirs = foundry_dirs(root);
     let mut sources = Vec::new();
     files_under(root, &dirs.src, &mut sources);
     sources.retain(|f| f.ends_with(".sol") && !is_test_code(f, &map.tests, &dirs.script));
+    // `forge test` recompiles a changed file without its syntax tree, and a
+    // later `forge build --ast` sees nothing to do: the tree must be forced.
+    if lacks_ast(root, &sources, &dirs.out) {
+        built = build(true)?;
+    }
     let own: BTreeSet<String> = sources.iter().cloned().collect();
     let contracts = crate::survey::read(&units(root, &sources, &dirs.out), &|f| own.contains(f));
     if contracts.is_empty() {
-        let lines: Vec<&str> = built.stderr.trim().lines().collect();
+        let said = if built.stderr.trim().is_empty() {
+            &built.stdout
+        } else {
+            &built.stderr
+        };
+        let lines: Vec<&str> = said.trim().lines().collect();
         return Err(format!(
             "No compiled contract with a syntax tree under {}/. `forge build --ast` said:\n{}",
             dirs.src,
-            lines[lines.len().saturating_sub(6)..].join("\n")
+            if lines.is_empty() {
+                "nothing".to_string()
+            } else {
+                lines[lines.len().saturating_sub(6)..].join("\n")
+            }
         ));
     }
     Ok((contracts, dirs))
@@ -668,11 +744,18 @@ pub fn survey(root: &Path, file_proposals: bool) -> Fallible<String> {
             .collect()
     };
     out.push(String::new());
+    let none = |l: Vec<String>| {
+        if l.is_empty() {
+            vec!["(none found)".to_string()]
+        } else {
+            l
+        }
+    };
     out.push("Assumptions the code leans on:".into());
-    out.extend(list(false));
+    out.extend(none(list(false)));
     out.push(String::new());
     out.push("Invariants worth a test (each needs one before it can enter the map):".into());
-    out.extend(list(true));
+    out.extend(none(list(true)));
     if file_proposals {
         let mut filed = 0;
         locked(root, || {
@@ -689,7 +772,18 @@ pub fn survey(root: &Path, file_proposals: bool) -> Fallible<String> {
                     node_id: Some(c.id.clone()),
                     by: Some("vibloom survey".into()),
                 };
-                // One already pending or in the map is not filed twice.
+                // One already pending or in the map is not filed twice, and
+                // one the verifier turned down is not filed again.
+                let rejected = book.decisions.iter().any(|d| {
+                    d.decision == "reject"
+                        && book
+                            .proposals
+                            .iter()
+                            .any(|p| p.id == d.decide && p.title == c.title)
+                });
+                if rejected {
+                    continue;
+                }
                 if let Ok(p) = propose(&map, &book, draft, iso_now()) {
                     append(
                         root,
@@ -702,9 +796,15 @@ pub fn survey(root: &Path, file_proposals: bool) -> Fallible<String> {
             Ok(())
         })?;
         out.push(String::new());
-        out.push(format!(
-            "Filed {filed} new proposals. Review them with `vibloom proposals`."
-        ));
+        out.push(if filed == 0 {
+            "Filed no new proposals: each candidate is already pending, in the map or rejected."
+                .to_string()
+        } else {
+            format!(
+                "Filed {filed} new {}. Review them with `vibloom proposals`.",
+                if filed == 1 { "proposal" } else { "proposals" }
+            )
+        });
     }
     Ok(out.join("\n"))
 }
@@ -963,9 +1063,13 @@ fn hook(kind: &str, stdin: &str, role: Role, cwd: &Path) -> Fallible<HookOutput>
     let map = match load_map(&root) {
         Ok(m) => m,
         Err(e) => {
-            return Ok(HookOutput {
-                stderr: Some(e),
-                stdout: None,
+            return Ok(match kind {
+                "pre-tool" => crate::hooks::pre_tool_unreadable(&input, role, &e),
+                "stop" => crate::hooks::stop_unreadable(&input, &e),
+                _ => HookOutput {
+                    stderr: Some(e),
+                    stdout: None,
+                },
             });
         }
     };
@@ -1071,6 +1175,7 @@ pub const USAGE: &str = "vibloom: assumptions, invariants and intentions for a c
   vibloom install-hook       install the commit check in another clone
   vibloom add <kind> \"<title>\" [--file F --test N [--contract C]] [--watch P] [--on ID]
                              add an assumption, invariant or intention (verifier)
+                             also: [--detail D] [--evidence E] [--id ID] [--hypothetical]
   vibloom edit <id> [--title T] [--detail D] [--stance S] [--on ID] [--not-on ID]
                     [--watch P] [--unwatch P] [--evidence E] [--drop-evidence E]
                              change a node (verifier)
@@ -1249,7 +1354,9 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
         }
         "init" => {
             if io.cwd.join(MAP_PATH).exists() {
-                return Err(format!("{MAP_PATH} already exists here."));
+                return Err(format!(
+                    "{MAP_PATH} already exists here. To connect an agent to it: VIBLOOM_ROLE=verifier vibloom setup claude (or codex)."
+                ));
             }
             let stack = match opt("--stack") {
                 None => None,
@@ -1385,10 +1492,7 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
             };
             let mut watch = Vec::new();
             for w in all("--watch") {
-                let dir = w.ends_with('/');
-                let r = relative_to(&root, &io.cwd, &w)
-                    .ok_or_else(|| format!("{w} is outside the project."))?;
-                watch.push(if dir { format!("{r}/") } else { r });
+                watch.push(watch_path(&root, &io.cwd, &w)?);
             }
             // A tested node with nothing to watch would never go stale: it
             // watches the sources and the tests unless told otherwise.
@@ -1494,11 +1598,7 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
                 ));
             }
             let report = run(&root, &[])?;
-            (io.out)(&format!(
-                "Run {}: {} test results recorded.",
-                report.entry.seq,
-                report.entry.outcomes.len()
-            ));
+            (io.out)(&recorded(&report.entry, &load_map(&root)?));
             (io.out)(&table(&report.views));
             Ok(i32::from(
                 report.views.iter().any(troubled) || report.entry.error.is_some(),
@@ -1526,11 +1626,7 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
                     report.entry.seq
                 ));
             }
-            (io.out)(&format!(
-                "Run {}: {} test results recorded.",
-                report.entry.seq,
-                report.entry.outcomes.len()
-            ));
+            (io.out)(&recorded(&report.entry, &load_map(&root)?));
             let moved: Vec<String> = report
                 .views
                 .iter()
@@ -1598,7 +1694,25 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
                 let gone = all(drop);
                 list.retain(|x| !gone.contains(x));
             };
-            change(&mut n.watch, "--watch", "--unwatch");
+            // Paths are written as the map writes them, so `--watch ./src`
+            // and `--unwatch src/` name the same folder.
+            let mut watch_args = Vec::new();
+            for (k, v) in &opts {
+                if *k == "--watch" || *k == "--unwatch" {
+                    watch_args.push((*k, watch_path(&root, &io.cwd, v)?));
+                }
+            }
+            for (k, w) in &watch_args {
+                if *k == "--watch" && !n.watch.contains(w) {
+                    n.watch.push(w.clone());
+                }
+            }
+            n.watch.retain(|x| {
+                !watch_args.iter().any(|(k, w)| {
+                    *k == "--unwatch"
+                        && (w == x || w.trim_end_matches('/') == x.trim_end_matches('/'))
+                })
+            });
             change(&mut n.depends_on, "--on", "--not-on");
             change(&mut n.evidence, "--evidence", "--drop-evidence");
             let checked: Value =
@@ -1640,7 +1754,13 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
             Ok(0)
         }
         "context" => {
-            let file = words.first().and_then(|f| relative_to(&root, &io.cwd, f));
+            let file = match words.first() {
+                None => None,
+                Some(f) => Some(
+                    relative_to(&root, &io.cwd, f)
+                        .ok_or_else(|| format!("{f} is outside the project."))?,
+                ),
+            };
             (io.out)(&context(&views(&root)?, file.as_deref()));
             Ok(0)
         }
@@ -1654,6 +1774,9 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
             Ok(0)
         }
         "precommit" => {
+            if git(&root, &["rev-parse", "--git-dir"]).is_err() {
+                return Err("Not a git repository: the commit check reads what a commit stages, so it runs only inside one.".into());
+            }
             let staged: Vec<String> = git(
                 &root,
                 // Without rename detection, so a moved file shows its old path too.
@@ -1698,6 +1821,17 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
         "proposals" => proposals(&root, &words, &all("--on"), io),
         other => Err(format!("Unknown command {other}.\n\n{USAGE}")),
     }
+}
+
+// A path to watch, as the map writes it: relative to the root, and ending in
+// "/" when it is a folder.
+fn watch_path(root: &Path, cwd: &Path, w: &str) -> Fallible<String> {
+    let r = relative_to(root, cwd, w).ok_or_else(|| format!("{w} is outside the project."))?;
+    Ok(if w.ends_with('/') || root.join(&r).is_dir() {
+        format!("{r}/")
+    } else {
+        r
+    })
 }
 
 const HOOK_LINE: &str = "vibloom precommit";
@@ -1936,7 +2070,11 @@ fn proposals(root: &Path, rest: &[&str], on: &[String], io: &mut Io) -> Fallible
                 }
                 (io.out)(&line);
                 if let Some(d) = &p.detail {
-                    (io.out)(&format!("    {d}"));
+                    // Indented on every line, so a detail cannot pass for a proposal.
+                    (io.out)(&format!(
+                        "    {}",
+                        d.lines().collect::<Vec<_>>().join("\n    ")
+                    ));
                 }
                 if let Some(t) = &p.test {
                     (io.out)(&format!("    test: {} {}", t.file, t.name));
@@ -1955,8 +2093,15 @@ fn proposals(root: &Path, rest: &[&str], on: &[String], io: &mut Io) -> Fallible
                     rest[1..].join(" ")
                 ));
             }
+            // Named twice, a proposal is still decided once.
+            let mut ids: Vec<&str> = Vec::new();
+            for id in &rest[1..] {
+                if !ids.contains(id) {
+                    ids.push(id);
+                }
+            }
             locked(root, || {
-                for id in &rest[1..] {
+                for id in &ids {
                     let book = load_book(root);
                     let Some(p) = book.pending().into_iter().find(|p| p.id == *id).cloned() else {
                         return Err(format!("No pending proposal {id}."));
@@ -1989,7 +2134,12 @@ fn proposals(root: &Path, rest: &[&str], on: &[String], io: &mut Io) -> Fallible
                         &format!("{}\n", serde_json::to_string(&d).unwrap_or_default()),
                     )?;
                     (io.out)(&match node {
-                        Some(n) => format!("Accepted {id} as {n}."),
+                        Some(n) => match p.node_id.as_deref().filter(|asked| *asked != n) {
+                            Some(asked) => {
+                                format!("Accepted {id} as {n} ({asked} is already in use).")
+                            }
+                            None => format!("Accepted {id} as {n}."),
+                        },
                         None => format!("Rejected {id}."),
                     });
                 }

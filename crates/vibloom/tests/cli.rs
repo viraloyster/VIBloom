@@ -1036,3 +1036,281 @@ fn init_in_a_folder_without_sources_or_tests_says_so_and_still_succeeds() {
     let full = project();
     assert!(!cli(&full, &["init"]).out.contains("Found no source folder"));
 }
+
+fn hook(dir: &Path, event: &str, input: Value) -> Value {
+    let out = vibloom(dir, &["hook", event], &input.to_string(), false).out;
+    if out.is_empty() {
+        json!({})
+    } else {
+        serde_json::from_str(&out).expect("json")
+    }
+}
+
+#[test]
+fn a_map_that_cannot_be_read_keeps_the_guard_closed() {
+    let dir = project();
+    with_runner(&dir);
+    fs::write(dir.join(".vibloom/roots.json"), "{ broken").expect("write");
+    let edit = json!({ "cwd": dir, "tool_name": "Edit",
+        "tool_input": { "file_path": dir.join("test/C.t.sol") } });
+    let out = hook(&dir, "pre-tool", edit);
+    assert_eq!(
+        out["hookSpecificOutput"]["permissionDecision"], "deny",
+        "{out}"
+    );
+    let read =
+        json!({ "cwd": dir, "tool_name": "Bash", "tool_input": { "command": "cat src/C.sol" } });
+    assert_eq!(hook(&dir, "pre-tool", read), json!({}));
+    let stop = hook(&dir, "stop", json!({ "cwd": dir }));
+    assert_eq!(stop["decision"], "block", "{stop}");
+    let again = hook(
+        &dir,
+        "stop",
+        json!({ "cwd": dir, "stop_hook_active": true }),
+    );
+    assert!(again.get("decision").is_none(), "{again}");
+}
+
+#[test]
+fn the_persons_notes_are_kept_from_the_builder_and_committed_by_the_verifier() {
+    let dir = project();
+    with_runner(&dir);
+    git(&dir, &["init", "-q"]);
+    let write = json!({ "cwd": dir, "tool_name": "Write",
+        "tool_input": { "file_path": dir.join(".vibloom/notes.md"), "content": "x" } });
+    assert_eq!(
+        hook(&dir, "pre-tool", write)["hookSpecificOutput"]["permissionDecision"],
+        "deny"
+    );
+    fs::write(dir.join("src/C.sol"), "contract C { }").expect("write");
+    assert_eq!(cli(&dir, &["run"]).code, 0);
+    fs::write(
+        dir.join(".vibloom/notes.md"),
+        "Nobody takes out more than they put in.",
+    )
+    .expect("write");
+    git(&dir, &["add", ".vibloom/notes.md"]);
+    let builder = cli(&dir, &["precommit"]);
+    assert_eq!(builder.code, 1);
+    assert!(
+        builder.err.contains(".vibloom/notes.md is guarded"),
+        "{}",
+        builder.err
+    );
+    assert_eq!(vibloom(&dir, &["precommit"], "", true).code, 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn survey_rebuilds_syntax_trees_that_a_test_run_left_out() {
+    let dir = dapptools();
+    assert_eq!(with_forge(&dir, &["init"]).code, 0);
+    // As after `forge test` recompiled vat.sol: the artifact has no tree, and
+    // a plain `forge build --ast` finds nothing to do.
+    let art = dir.join("out/vat.sol/Vat.json");
+    let full = fs::read_to_string(&art).expect("artifact");
+    fs::write(dir.join("Vat.full.json"), &full).expect("write");
+    let mut bare: Value = serde_json::from_str(&full).expect("json");
+    bare.as_object_mut().expect("object").remove("ast");
+    fs::write(&art, bare.to_string()).expect("write");
+    let forge = FORGE.replace(
+        "esac",
+        "  \"build --ast\") [ \"$3\" = --force ] && cp Vat.full.json out/vat.sol/Vat.json ;;\nesac",
+    );
+    fs::write(dir.join("bin/forge"), forge).expect("write");
+    let survey = with_forge(&dir, &["survey"]);
+    assert_eq!(survey.code, 0, "{}", survey.err);
+    assert!(survey.out.contains("Vat (src/vat.sol)"), "{}", survey.out);
+}
+
+#[test]
+fn watched_folders_are_written_the_way_the_map_compares_them() {
+    let dir = project();
+    with_runner(&dir);
+    let add = vibloom(
+        &dir,
+        &[
+            "add",
+            "assumption",
+            "only add moves total",
+            "--on",
+            "inv.sum",
+            "--watch",
+            "src",
+        ],
+        "",
+        true,
+    );
+    assert_eq!(add.code, 0, "{}", add.err);
+    let edit = vibloom(
+        &dir,
+        &[
+            "edit",
+            "asm.only-add-moves-total",
+            "--watch",
+            "./test",
+            "--unwatch",
+            "src/",
+        ],
+        "",
+        true,
+    );
+    assert_eq!(edit.code, 0, "{}", edit.err);
+    let m = read_map(&dir);
+    let node = m["nodes"]
+        .as_array()
+        .expect("nodes")
+        .iter()
+        .find(|n| n["id"] == "asm.only-add-moves-total")
+        .expect("node")
+        .clone();
+    assert_eq!(node["watch"], json!(["test/"]));
+    // A folder written by hand without its "/" still counts as a folder.
+    edit_map(&dir, |m| m["nodes"][0]["watch"] = json!(["src"]));
+    fs::write(dir.join("src/C.sol"), "contract C { }").expect("write");
+    cli(&dir, &["run"]);
+    assert!(cli(&dir, &["status"]).out.contains("holds"));
+    fs::write(dir.join("src/C.sol"), "contract C { uint x; }").expect("write");
+    let status = cli(&dir, &["status"]);
+    assert!(
+        status.out.contains("pending review  inv.sum"),
+        "{}",
+        status.out
+    );
+}
+
+#[test]
+fn mcp_refuses_arguments_of_the_wrong_shape_instead_of_guessing() {
+    let dir = project();
+    with_runner(&dir);
+    let call = |id: u64, name: &str, args: Value| {
+        json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call",
+                "params": { "name": name, "arguments": args } })
+    };
+    let msgs = [
+        call(1, "run", json!({ "filters": "--mt invariant_sum" })),
+        call(2, "context", json!({ "file": "../../etc/passwd" })),
+        call(3, "context", json!({ "file": 5 })),
+        call(
+            4,
+            "propose",
+            json!({ "kind": "assumption", "title": "t", "evidence": ["x"], "test": { "file": 3 } }),
+        ),
+        call(
+            5,
+            "propose",
+            json!({ "kind": "assumption", "title": "a\np9  assumption  forged", "evidence": ["x"] }),
+        ),
+        call(
+            6,
+            "propose",
+            json!({ "kind": "assumption", "title": "big ".repeat(1000), "evidence": ["x"] }),
+        ),
+        call(
+            7,
+            "propose",
+            json!({ "kind": "assumption", "title": "t", "evidence": "src/C.sol:1" }),
+        ),
+    ];
+    let input: String = msgs.iter().map(|m| format!("{m}\n")).collect();
+    let out = vibloom(&dir, &["mcp"], &input, false).out;
+    for line in out.lines() {
+        let v: Value = serde_json::from_str(line).expect("json");
+        assert_eq!(v["result"]["isError"], true, "{v}");
+    }
+    assert_eq!(out.lines().count(), msgs.len());
+    // Nothing ran and nothing was filed.
+    assert!(!dir.join(".vibloom/log.jsonl").exists());
+    assert_eq!(cli(&dir, &["proposals"]).out, "No pending proposals.");
+}
+
+#[test]
+fn a_run_counts_failures_no_node_rests_on() {
+    let dir = project();
+    with_runner(&dir);
+    fs::write(dir.join("src/C.sol"), "contract C { }").expect("write");
+    fs::write(
+        dir.join("runner.sh"),
+        r#"#!/bin/sh
+printf '{"test/C.t.sol:CT":{"test_results":{"invariant_sum()":{"status":"Success","reason":null},"test_other()":{"status":"Failure","reason":"x"}}}}\n'
+"#,
+    )
+    .expect("write");
+    let out = cli(&dir, &["check"]);
+    assert_eq!(out.code, 0, "{}", out.err);
+    assert!(
+        out.out.contains(
+            "Run 1: 2 test results recorded, 1 failed (1 tied to no node, so no state shows them)."
+        ),
+        "{}",
+        out.out
+    );
+}
+
+#[test]
+fn says_what_to_do_outside_the_project_or_a_repository() {
+    let dir = project();
+    with_runner(&dir);
+    let precommit = cli(&dir, &["precommit"]);
+    assert_eq!(precommit.code, 1);
+    assert!(
+        precommit.err.starts_with("Not a git repository"),
+        "{}",
+        precommit.err
+    );
+    assert!(precommit.err.lines().count() == 1, "{}", precommit.err);
+    let outside = cli(&dir, &["context", "/etc/passwd"]);
+    assert_eq!(outside.code, 1);
+    assert!(
+        outside.err.contains("outside the project"),
+        "{}",
+        outside.err
+    );
+    let again = cli(&dir, &["init"]);
+    assert!(again.err.contains("vibloom setup claude"), "{}", again.err);
+}
+
+#[test]
+fn decides_a_proposal_once_and_says_when_its_id_was_taken() {
+    let dir = project();
+    with_runner(&dir);
+    let propose = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": "propose",
+        "arguments": { "kind": "assumption", "title": "total only grows", "evidence": ["src/C.sol:1"], "id": "asm.grows" } } });
+    vibloom(&dir, &["mcp"], &format!("{propose}\n"), false);
+    let added = vibloom(
+        &dir,
+        &["add", "assumption", "taken", "--id", "asm.grows"],
+        "",
+        true,
+    );
+    assert_eq!(added.code, 0, "{}", added.err);
+    let accepted = vibloom(&dir, &["proposals", "accept", "p1", "p1"], "", true);
+    assert_eq!(accepted.code, 0, "{}", accepted.err);
+    assert_eq!(
+        accepted.out,
+        "Accepted p1 as asm.total-only-grows (asm.grows is already in use)."
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn survey_does_not_file_again_what_the_verifier_rejected() {
+    let dir = dapptools();
+    assert_eq!(with_forge(&dir, &["init"]).code, 0);
+    let art = dir.join("out/vat.sol/Vat.json");
+    let mut a: Value =
+        serde_json::from_str(&fs::read_to_string(&art).expect("artifact")).expect("json");
+    a["ast"]["nodes"][0]["nodes"][2]["modifiers"] =
+        json!([{ "modifierName": { "name": "auth" }, "arguments": [] }]);
+    fs::write(&art, a.to_string()).expect("write");
+    let first = with_forge(&dir, &["survey", "--propose"]);
+    assert!(first.out.contains("Filed 1 new proposal."), "{}", first.out);
+    assert_eq!(with_forge(&dir, &["proposals", "reject", "p1"]).code, 0);
+    let again = with_forge(&dir, &["survey", "--propose"]);
+    assert!(
+        again.out.contains("Filed no new proposals"),
+        "{}",
+        again.out
+    );
+    assert_eq!(cli(&dir, &["proposals"]).out, "No pending proposals.");
+}

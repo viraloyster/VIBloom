@@ -144,7 +144,8 @@ from a blank page. The steps, in order:
 
 1. **Notes.** Write what the system is meant to guarantee, in your own words,
    in `.vibloom/notes.md`. Nothing reads it but the research brief below; it is
-   yours.
+   yours: an agent cannot edit it, and it is committed as the verifier
+   (`VIBLOOM_ROLE=verifier git commit`).
 2. **Survey.** `vibloom survey` runs `forge build --ast` and reads the
    compiler's syntax trees. For each contract it reports who may call each
    state-changing function (the gates), the other modifiers, the state

@@ -56,14 +56,55 @@ fn tools() -> Value {
     ])
 }
 
-fn strings(v: Option<&Value>) -> Vec<String> {
-    v.and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(|x| x.as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default()
+// A list of strings, or an error naming the argument: an argument of the
+// wrong shape is refused, never read as empty.
+fn strings(args: &Value, key: &str) -> Result<Vec<String>, String> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(vec![]),
+        Some(Value::Array(a)) => a
+            .iter()
+            .map(|x| x.as_str().map(str::to_string))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| format!("{key} must be a list of strings")),
+        Some(_) => Err(format!("{key} must be a list of strings")),
+    }
+}
+
+fn text(args: &Value, key: &str) -> Result<Option<String>, String> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) => Ok(Some(s.clone())),
+        Some(_) => Err(format!("{key} must be a string")),
+    }
+}
+
+// What a person reviews should fit on a screen; an agent cannot bury the
+// list under one proposal.
+const MAX_TITLE: usize = 200;
+const MAX_TEXT: usize = 2000;
+const MAX_ITEMS: usize = 50;
+
+fn bounded(d: &Draft) -> Result<(), String> {
+    let lists = [&d.evidence, &d.depends_on, &d.watch];
+    if d.title.chars().count() > MAX_TITLE {
+        return Err(format!("title is longer than {MAX_TITLE} characters"));
+    }
+    if d.detail
+        .as_ref()
+        .is_some_and(|x| x.chars().count() > MAX_TEXT)
+        || lists
+            .iter()
+            .any(|l| l.iter().any(|x| x.chars().count() > MAX_TEXT / 4))
+    {
+        return Err(format!(
+            "detail is limited to {MAX_TEXT} characters and each list entry to {}",
+            MAX_TEXT / 4
+        ));
+    }
+    if lists.iter().any(|l| l.len() > MAX_ITEMS) {
+        return Err(format!("each list takes at most {MAX_ITEMS} entries"));
+    }
+    Ok(())
 }
 
 // Only flag/value pairs from forge's test filters: an agent must not be able to
@@ -90,10 +131,13 @@ fn call(cwd: &Path, name: &str, args: &Value) -> Result<String, String> {
     match name {
         "status" => Ok(table(&views(&root)?)),
         "context" => {
-            let file = args
-                .get("file")
-                .and_then(Value::as_str)
-                .and_then(|f| relative_to(&root, cwd, f));
+            let file = match text(args, "file")? {
+                None => None,
+                Some(f) => Some(
+                    relative_to(&root, cwd, &f)
+                        .ok_or_else(|| format!("{f} is outside the project."))?,
+                ),
+            };
             Ok(context(&views(&root)?, file.as_deref()))
         }
         "gaps" => crate::cli::gaps(&root),
@@ -107,7 +151,7 @@ fn call(cwd: &Path, name: &str, args: &Value) -> Result<String, String> {
             }
         }
         "run" => {
-            let filters = checked_filters(&strings(args.get("filters")))?;
+            let filters = checked_filters(&strings(args, "filters")?)?;
             // Filters are forge's; with another runner only the whole suite runs.
             if !filters.is_empty() && load_map(&root)?.report.is_some() {
                 return Err(
@@ -117,9 +161,8 @@ fn call(cwd: &Path, name: &str, args: &Value) -> Result<String, String> {
             }
             let report = run(&root, &filters)?;
             let mut text = format!(
-                "Run {}: {} test results recorded.\n",
-                report.entry.seq,
-                report.entry.outcomes.len()
+                "{}\n",
+                crate::cli::recorded(&report.entry, &load_map(&root)?)
             );
             if let Some(e) = &report.entry.error {
                 text.push_str(&format!("The runner failed: {e}\n"));
@@ -135,21 +178,28 @@ fn call(cwd: &Path, name: &str, args: &Value) -> Result<String, String> {
         }
         "propose" => {
             let map = load_map(&root)?;
-            let s = |k: &str| args.get(k).and_then(Value::as_str).map(str::to_string);
-            let test = args
-                .get("test")
-                .and_then(|t| serde_json::from_value::<TestRef>(t.clone()).ok());
-            let draft = Draft {
-                kind: s("kind").unwrap_or_default(),
-                title: s("title").unwrap_or_default(),
-                detail: s("detail"),
-                depends_on: strings(args.get("depends_on")),
-                watch: strings(args.get("watch")),
-                evidence: strings(args.get("evidence")),
-                node_id: s("id"),
-                test,
-                by: s("by"),
+            if !args.is_object() {
+                return Err("the arguments must be an object with kind, title and evidence".into());
+            }
+            let test = match args.get("test") {
+                None | Some(Value::Null) => None,
+                Some(t) => Some(serde_json::from_value::<TestRef>(t.clone()).map_err(|_| {
+                    "test must be an object with a file and a name (and optionally a contract)"
+                        .to_string()
+                })?),
             };
+            let draft = Draft {
+                kind: text(args, "kind")?.unwrap_or_default(),
+                title: text(args, "title")?.unwrap_or_default(),
+                detail: text(args, "detail")?,
+                depends_on: strings(args, "depends_on")?,
+                watch: strings(args, "watch")?,
+                evidence: strings(args, "evidence")?,
+                node_id: text(args, "id")?,
+                test,
+                by: text(args, "by")?,
+            };
+            bounded(&draft)?;
             // Read and appended under the lock, so two agents never get one id.
             let p = locked(&root, || {
                 let book = Book::read(

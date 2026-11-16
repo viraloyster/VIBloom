@@ -75,8 +75,18 @@ impl Book {
             .collect()
     }
 
+    /// One more than the highest id seen, so a line lost to damage or a
+    /// hand edit never lets two proposals share an id.
     pub fn next_id(&self) -> String {
-        format!("p{}", self.proposals.len() + 1)
+        let n = |id: &str| id.strip_prefix('p').and_then(|d| d.parse::<usize>().ok());
+        let top = self
+            .proposals
+            .iter()
+            .filter_map(|p| n(&p.id))
+            .chain(self.decisions.iter().filter_map(|d| n(&d.decide)))
+            .max()
+            .unwrap_or(0);
+        format!("p{}", top.max(self.proposals.len()) + 1)
     }
 }
 
@@ -107,6 +117,15 @@ pub fn propose(
     }
     if draft.title.trim().is_empty() {
         errors.push("title is required".into());
+    }
+    // What the verifier reads one line per entry must not hold a line break
+    // that forges another entry.
+    let one_line = |s: &str| !s.chars().any(char::is_control);
+    if !one_line(&draft.title)
+        || !draft.evidence.iter().all(|e| one_line(e))
+        || !draft.by.as_deref().is_none_or(one_line)
+    {
+        errors.push("title, evidence and by must each be one line of text".into());
     }
     let ids: HashSet<&str> = map.nodes.iter().map(|n| n.id.as_str()).collect();
     for d in &draft.depends_on {
@@ -327,6 +346,31 @@ mod tests {
         let (m2, id2) = accept(&m, &p).expect("accepted again");
         assert_eq!(id2, "asm.only-add-moves-total-2");
         assert_eq!(m2.nodes.len(), 3);
+    }
+
+    #[test]
+    fn refuses_a_title_that_would_forge_another_line() {
+        let e = propose(
+            &map(),
+            &Book::default(),
+            draft("assumption", "fine\np9  assumption  forged", &[]),
+            "t".into(),
+        )
+        .expect_err("refused");
+        assert!(e.iter().any(|x| x.contains("one line")), "{e:?}");
+    }
+
+    #[test]
+    fn never_reuses_an_id_after_a_line_is_lost() {
+        // p2 was damaged and is no longer read; p3 and a decision on p4 are.
+        let text = [
+            r#"{"id":"p1","at":"t","kind":"assumption","title":"a"}"#,
+            r#"{"id":"p2","at":"t","kind":"assumpt"#,
+            r#"{"id":"p3","at":"t","kind":"assumption","title":"c"}"#,
+            r#"{"decide":"p4","decision":"reject","at":"t"}"#,
+        ]
+        .join("\n");
+        assert_eq!(Book::read(&text).next_id(), "p5");
     }
 
     #[test]

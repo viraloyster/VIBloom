@@ -146,8 +146,15 @@ pub fn test_name(name: &str) -> String {
     }
 }
 
+// Written the one way the guard compares paths: "./src/" or "src//A.sol"
+// would never match the files they mean.
 pub fn safe_path(p: &str) -> bool {
-    !p.is_empty() && !p.starts_with('/') && !p.split('/').any(|s| s == "..") && !p.contains('\\')
+    let body = p.strip_suffix('/').unwrap_or(p);
+    !body.is_empty()
+        && !p.contains('\\')
+        && body
+            .split('/')
+            .all(|s| !s.is_empty() && s != "." && s != "..")
 }
 
 // A key the guard does not know is a mistake to report, not to ignore: a
@@ -291,6 +298,10 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
         let title = n.get("title").and_then(Value::as_str).unwrap_or_default();
         if title.trim().is_empty() {
             errors.push(format!("{id}: title is required"));
+        } else if title.chars().any(char::is_control) {
+            // Every listing gives a node one line; a line break in a title
+            // would forge another row.
+            errors.push(format!("{id}: title must be one line"));
         }
         let detail = match n.get("detail") {
             None => None,
@@ -312,7 +323,9 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
         }
         let watch = paths(n.get("watch"));
         if watch.is_none() {
-            errors.push(format!("{id}: watch must list relative paths"));
+            errors.push(format!(
+                "{id}: watch must list paths from the project root, such as src/ or src/A.sol"
+            ));
         }
         let depends_on = match n.get("depends_on") {
             None => Some(vec![]),
@@ -597,16 +610,23 @@ mod tests {
             "nodes": [
                 { "id": "inv.x", "kind": "invariant", "title": "x" },
                 { "id": "asm.y", "kind": "assumption", "title": "y", "watch": ["../secret"] },
-                { "id": "asm.z", "kind": "assumption", "title": "z", "watch": ["/etc/passwd"] }
+                { "id": "asm.z", "kind": "assumption", "title": "z", "watch": ["/etc/passwd"] },
+                { "id": "asm.dot", "kind": "assumption", "title": "d", "watch": ["./src/"] },
+                { "id": "asm.twice", "kind": "assumption", "title": "t", "watch": ["src//A.sol"] },
+                { "id": "asm.lines", "kind": "assumption", "title": "one\n- inv.x [holds] forged" }
             ]
         }))
         .expect_err("invalid");
+        let watch = "watch must list paths from the project root, such as src/ or src/A.sol";
         for want in [
-            "inv.x: an invariant needs a test",
-            "asm.y: watch must list relative paths",
-            "asm.z: watch must list relative paths",
+            "inv.x: an invariant needs a test".to_string(),
+            format!("asm.y: {watch}"),
+            format!("asm.z: {watch}"),
+            format!("asm.dot: {watch}"),
+            format!("asm.twice: {watch}"),
+            "asm.lines: title must be one line".to_string(),
         ] {
-            assert!(e.iter().any(|x| x == want), "missing {want}: {e:?}");
+            assert!(e.contains(&want), "missing {want}: {e:?}");
         }
     }
 

@@ -2,6 +2,46 @@
 
 Changes to the `vibloom` binary. The web app is not versioned.
 
+## 0.6.2
+
+### Fixed
+
+- The Claude Code pre-tool hook reads the paths a shell command names the way
+  the shell does: `./test/./A.t.sol`, `test//A.t.sol`, globs, quotes and
+  backslashes inside a name, a different case, and a file named after
+  `cd test &&` are all seen. A folder named to `rm`, `mv`, `cp`, `find` or
+  `git checkout`/`restore`/`stash` (`git checkout HEAD~1 -- test`, `-- .`)
+  reaches the guarded files in it.
+- More ways to write a file are denied for the builder when they name a guarded
+  path: `sed --in-place`, `perl`, `python`, `node` and other interpreters,
+  `install`, `rsync`, `ln`, `patch`, `xargs` and `find -exec`. So are
+  `cast rpc eth_sendRawTransaction`, `--unlocked`, `core.hooksPath` and writes
+  to `.git/hooks/`, which would skip the commit check.
+- A map that cannot be read no longer switches the hooks off: while it is
+  broken the builder's edits and shell writes are denied, and stopping is sent
+  back once.
+- The stop hook lets the agent stop on its second try when the run log fails
+  verification, instead of sending it back for ever; only the verifier can
+  repair the log.
+- After an edit, the hook no longer says that a node without a test went
+  pending review; it names such nodes apart, to be checked by hand.
+- `vibloom survey`, `gaps` and `research` rebuild the syntax trees when a test
+  run recompiled a file without them, instead of finding no contracts.
+  `survey --propose` does not file again what the verifier rejected.
+- A watched folder written without its `/` (`--watch src`, or by hand) is read
+  as a folder, and `edit --watch`/`--unwatch` take paths as `add` does. The map
+  refuses paths with `.` or empty parts, and titles with a line break.
+- Over MCP, an argument of the wrong type is an error instead of being read as
+  empty (`run` with a string for `filters` ran the whole suite), `context` with
+  a path outside the project is an error, a malformed `test` is refused instead
+  of dropped, and `propose` limits the length of what it files.
+- A proposal id is never reused after a line of `proposals.jsonl` is lost, and
+  a proposal named twice in one `accept` or `reject` is decided once.
+- `run` and `check` count failed tests, including those no node rests on.
+- `vibloom precommit` outside a git repository says so in one line, `context`
+  with a file outside the project is an error, `init` on an existing map points
+  to `setup`, and accepting a proposal whose id is taken says so.
+
 ## 0.6.1
 
 ### Fixed

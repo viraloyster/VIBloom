@@ -67,7 +67,7 @@ pub struct NodeView {
     pub sources: Vec<String>,
 }
 
-fn matches(n: &RootNode, o: &Outcome) -> bool {
+pub(crate) fn matches(n: &RootNode, o: &Outcome) -> bool {
     n.test.as_ref().is_some_and(|t| {
         // A JUnit report may name no file; then the classname and name decide.
         (o.file.is_empty() || o.file == t.file)
