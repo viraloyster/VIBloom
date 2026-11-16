@@ -31,7 +31,8 @@ premise marks everything resting on it.
 - `.vibloom/log.jsonl`: every test run, hash-chained, with the hash of the
   watched files at that run.
 - Derived states: holds, BROKEN, pending review (a watched file changed),
-  unsupported, at risk, untested, skipped, MISSING, off. Only a test that ran
+  UNSUPPORTED, AT RISK, untested, skipped, MISSING, VACUOUS (every fuzzed call
+  reverted), off. Only a test that ran
   and passed against the current files counts as holding; every other state
   of a tested node fails the check.
 - A commit check (`vibloom precommit`), a CI check (`vibloom check`) that also

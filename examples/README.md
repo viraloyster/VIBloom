@@ -15,9 +15,10 @@ breaks, the assumption that rests on it loses its support and the intention
 above them is at risk:
 
 ```
+5 nodes, 3 need attention.
 BROKEN        inv.assets-match-flows          The vault's assets equal everything deposited minus everything withdrawn
-holds         inv.shares-are-backed           Shares never exist without assets behind them
 UNSUPPORTED   asm.handler-is-the-only-actor   Only the handler's deposits and withdrawals move assets in the test
-hypothetical  asm.rounding-favours-the-vault  Rounding in withdraw always favours the vault
 AT RISK       int.no-overdraw                 Nobody can take out more than their shares are worth
+holds         inv.shares-are-backed           Shares never exist without assets behind them
+hypothetical  asm.rounding-favours-the-vault  Rounding in withdraw always favours the vault
 ```

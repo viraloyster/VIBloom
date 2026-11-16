@@ -29,7 +29,10 @@ the map, installs the commit check in this clone's git hooks and, with
 when the project is the repository root; in a folder of a larger repository
 it prints a hint, and `vibloom install-hook` adds the check when you want it.
 The installed hook changes into the project folder first, and `vibloom
-precommit` passes when a commit stages nothing of the project. No API key is involved anywhere: the guard is
+precommit` passes when a commit stages nothing of the project. An existing
+pre-commit hook of another tool is never overwritten: `install-hook` prints
+the line to add to it. If `vibloom` is not on `PATH`, the hook refuses the
+commit and says so. No API key is involved anywhere: the guard is
 a local program and the agent runs on whatever plan it already uses.
 
 - `--agent claude` adds the hooks to `.claude/settings.json` and the tools to
@@ -63,7 +66,10 @@ vibloom add invariant "shares never exceed assets" --file test/Vault.t.sol --con
 
 `--watch` (repeatable) sets what a node watches; a node with a test watches
 the source and test folders when none is given. `--evidence` (repeatable)
-records where the node comes from. Or edit the map directly.
+records where the node comes from. `--detail` adds a longer text, `--id` picks
+the node's id, and `--unprotected` leaves an invariant's test editable by the
+builder. A node added by hand is adopted unless `--hypothetical` is given. Or
+edit the map directly.
 
 Two more commands change a node that is already there, as the verifier:
 
@@ -73,8 +79,9 @@ vibloom remove asm.only-add-changes-total
 ```
 
 `edit` takes `--title`, `--detail`, `--stance`, `--on` and `--not-on`,
-`--watch` and `--unwatch`, `--evidence` and `--drop-evidence`; the result must
-still be a valid map. `remove` is refused while other nodes rest on the node;
+`--watch` and `--unwatch`, `--evidence` and `--drop-evidence` (at least one
+option is required; an empty `--detail` clears it); the result must still be a
+valid map. `remove` is refused while other nodes rest on the node;
 point them elsewhere first, or switch it off with `edit --stance off`. Its
 recorded runs stay in the log.
 
@@ -143,9 +150,14 @@ from a blank page. The steps, in order:
    state-changing function (the gates), the other modifiers, the state
    variables and which functions write them, what gates an upgrade, the calls
    into other contracts and the low-level calls. It then lists assumption
-   candidates and invariant candidates. Test code is left out: `*.t.sol`,
-   `*.s.sol`, the tests and script folders and any folder named `test`,
-   `tests`, `mock` or `mocks`.
+   candidates and invariant candidates. Only files under Foundry's source
+   folder are read as the project's own, and only contracts are reported, not
+   interfaces or libraries; an abstract contract is reported only when no
+   other contract of the project builds on it. Functions are the state-changing
+   ones in the compiled ABI (`nonpayable` and `payable`), plus `fallback` and
+   `receive`. Test code is left out: `*.t.sol`, `*.s.sol`, the map's tests
+   folder, Foundry's script folder and any folder named `test`, `tests`,
+   `mock` or `mocks`, in any case.
 
    A contract is read with everything it inherits, in other files too: the
    files it imports are loaded, base contracts are found by name through the
@@ -166,9 +178,9 @@ from a blank page. The steps, in order:
 
 3. **Propose.** `vibloom survey --propose` files the assumption candidates as
    proposals, each with the `file:line` it comes from and a suggested node id.
-   One already pending, or already in the map, is not filed twice. Invariant
-   candidates are only listed: an invariant needs a test before it can enter
-   the map.
+   A proposal with the same title as one already pending, or as a node in the
+   map, is not filed twice. Invariant candidates are only listed: an invariant
+   needs a test before it can enter the map.
 4. **Decide.** `vibloom proposals` lists what is pending, with the test and
    where each proposal comes from. As the verifier, accept or reject several at
    once:
@@ -188,6 +200,21 @@ from a blank page. The steps, in order:
    `--block` that it records; and it proposes each finding with its evidence.
 6. **Refine.** `vibloom edit` and `vibloom remove` fix what was accepted.
 
+The candidates, each with the lines it comes from:
+
+- Assumptions: whoever passes each gate is trusted with the functions it
+  guards; the functions that decide who passes a gate whose check reads the
+  contract's own state; the role admin of an inherited `AccessControl` and the
+  ownership transfer of an inherited `Ownable`, when the code did not show who
+  writes them; an initializer nobody has to authorize, called first by the
+  deployer; the gate of an upgrade; each contract it calls into, as trusted to
+  behave as its interface says; each kind of low-level call.
+- Invariants (listed only): every restricted function reverts for a caller
+  that should not get through; the contract's books stay consistent whatever
+  the open functions do (an inherited function that checks the caller is not
+  counted as open); the supply of an ERC-20 equals the sum of the balances; a
+  paused contract stops what a pause is meant to stop.
+
 How the survey reads a function's gate:
 
 - A modifier on the function is its gate when its code checks the caller,
@@ -197,7 +224,8 @@ How the survey reads a function's gate:
   Only a modifier whose code was not found is judged by its name (`only...`,
   `auth`, names with `role`, `owner`, `admin`).
 - A function with no gate that checks the caller in its body is reported as
-  `anyone, checks the caller at :LINE`. A caller check is a `require` or
+  `anyone, checks the caller at :LINE`; with a gate, the lines are added
+  after the gate's name. A caller check is a `require` or
   `assert`, or an `if` that reverts, whose condition uses the caller
   (`msg.sender`, `tx.origin`, `_msgSender()` or a local alias of it) outside a
   `<` or `>` comparison and not only against the zero address. The caller
@@ -216,9 +244,14 @@ How the survey reads a function's gate:
   `_authorizeUpgrade` that the contract overrides).
 - State variables are the project's own, with namespaced (ERC-7201) storage
   read as `Struct.field`. A variable is written by an entry point when code
-  it runs writes it, also through a library that takes it as a `storage`
-  parameter (`set.add(x)`); a constructor or an initial value is
-  `set at deployment`. Inline assembly with `sstore` or `tstore` is flagged
+  it runs assigns it, applies `++`, `--` or `delete` to it, or calls `push`
+  or `pop` on it, also through a library that takes it as a `storage`
+  parameter (`set.add(x)`). Each variable is shown as `constant`,
+  `immutable`, `written by ...`, `written inside ... (run by inherited code)`,
+  `set at deployment, never after` (a constructor or an initial value is the
+  only writer) or `never written by this contract's own code`; a variable
+  with writers that is also set in a constructor adds `, set at deployment`.
+  Inline assembly with `sstore` or `tstore` is flagged
   `writes storage in assembly`, and its `call`, `delegatecall` and
   `staticcall` are reported as low-level calls `(assembly)`.
 - Calls and low-level calls made by library and free functions that the
@@ -244,6 +277,25 @@ Every fact the survey gives is read from the code, so it can be wrong about
 what the code means but not invent a line that is not there. Nothing it files
 counts until the verifier accepts it.
 
+What the survey does not see:
+
+- `selfdestruct` is not reported.
+- Ether sent with `.transfer` or `.send` is not reported as a call; calls
+  with `{value: ...}` options are.
+- Storage written through inline assembly is flagged, but not tied to a state
+  variable, so a slot a library defines and writes (`sstore` in a library
+  function) never appears among a variable's writers.
+- The lists of writers over-approximate: a function is listed when any path
+  in its code can write the variable, whether or not it runs.
+- `set at deployment` is said of an implementation behind a proxy too; the
+  survey does not know a proxy's storage is not the implementation's, so for
+  an upgradeable contract it says nothing about who set the value in the
+  proxy.
+- Where an address comes from (fixed, set by an admin, given by the caller) is
+  not read, and neither is whether a hand-written initializer guard works.
+- Anything outside the project's source folder, unverified or not compiled by
+  `forge build --ast`, and the chain itself.
+
 ### Evidence
 
 A node and a proposal carry an `evidence` list: where each one comes from, as
@@ -254,7 +306,8 @@ such as `asm.oracle-is-fresh`.
 
 ### Network and keys
 
-`vibloom` never touches the network and stores no key. The agent's own `cast`
+`vibloom` itself never touches the network and stores no key (`forge` may
+download a compiler when `survey` or `gaps` builds the project). The agent's own `cast`
 reads use the `ETH_RPC_URL` of the person's environment. The Claude Code
 pre-tool hook (see below) denies the commands that would send a transaction.
 
@@ -299,8 +352,9 @@ pre-tool hook (see below) denies the commands that would send a transaction.
 }
 ```
 
-- **assumption**: something taken as given. `hypothetical` (the default, for
-  anything an agent proposes), `adopted` or `off`.
+- **assumption**: something taken as given. `hypothetical` (the default in the
+  map, and for anything an agent proposes), `adopted` or `off`. Invariants and
+  intentions are `adopted` unless the map says otherwise.
 - **invariant**: a property that must always hold, tied to a test. Protected by
   default.
 - **intention**: what a change or a piece of the system is meant to achieve.
@@ -413,15 +467,15 @@ does.
 vibloom init [--agent claude|codex]   # create the map, install the commit check, connect an agent
 vibloom setup claude|codex   # connect an agent to an existing map (verifier)
 vibloom install-hook    # install the commit check in another clone
-vibloom add <kind> "<title>" ...   # add a node (verifier); see Start
+vibloom add <kind> "<title>" [--file F --test N] [--watch P] [--on ID] [--detail D] [--id ID] [--hypothetical] [--unprotected]   # add a node (verifier); see Start
 vibloom edit <id> [--title T] [--detail D] [--stance S] [--on ID] [--not-on ID] [--watch P] [--unwatch P] [--evidence E] [--drop-evidence E]   # change a node (verifier)
 vibloom remove <id>     # take a node out; refused while others rest on it (verifier)
-vibloom scan            # add invariant tests the map does not list yet (verifier)
+vibloom scan            # add invariant tests the map does not list yet, and guard the handlers they import (verifier)
 vibloom survey [--propose]   # Foundry: who may call what, upgrades, external calls; --propose files assumptions
 vibloom research        # the brief an agent works from to find and propose nodes
 vibloom status [--json] # derived state of every node, troubled first; exit 1 if any needs attention
 vibloom run -- --mt X   # run the tests (what follows -- goes to the runner), record, show what changed
-vibloom check           # run, then exit 1 if any node needs attention: for CI
+vibloom check [--base ref]   # run, then exit 1 if any node needs attention: for CI
 vibloom sync --base origin/main   # take the base's run log and record the tests on top of it
 vibloom context [file]  # what an agent should know before touching a file
 vibloom gaps            # Foundry: contracts and functions no test names, handler functions that always reverted
@@ -432,10 +486,12 @@ vibloom proposals       # what agents proposed and nobody decided yet
 VIBLOOM_ROLE=verifier vibloom proposals accept p1 p2 [--on ID]...   # or reject p1 p2
 vibloom mcp             # serve the map to any MCP client over stdio
 vibloom hooks           # optional: print the Claude Code hooks configuration
+vibloom hook pre-tool|post-tool|stop   # optional: what those hooks call, with the hook's JSON on stdin
 ```
 
-`status` starts with `N nodes, K need attention.` and lists the troubled nodes
-first. Output piped to a reader that stops early (`| head`) exits quietly.
+`status`, `run` and `check` print `N nodes, K need attention.` and then the
+nodes, those needing attention first (in map order), and `run` and `check`
+list what changed state before the table. Output piped to a reader that stops early (`| head`) exits quietly.
 
 From this repository: `cargo run -p vibloom -- <command>`.
 
@@ -577,7 +633,7 @@ things:
   or to `.vibloom/` is denied unless `VIBLOOM_ROLE=verifier`. Shell commands
   that plainly write to those paths (redirection, `sed -i`, `mv`, `rm`, `cp`,
   `tee`, `git checkout`, `git restore`...) are denied too, and so are commands
-  that set `VIBLOOM_ROLE` or commit with `--no-verify`.
+  that mention `VIBLOOM_ROLE` or commit with `--no-verify` (or `-n`).
   Commands that would sign or send a transaction are denied for the builder:
   `cast send`, `cast publish`, `cast mktx`, `cast wallet`, `forge create`,
   `forge script ... --broadcast` and any `--private-key`, `--mnemonic`,
@@ -589,10 +645,11 @@ things:
   back with the list and the rule "fix the code, not the invariant". After an
   edit to a watched file, the agent is told which nodes are now pending
   review, once per file between runs.
-- **Before the agent stops**: if any node needs attention, or the log fails
-  verification, the agent is sent back once. Claude Code marks the second
-  attempt, which the guard lets through so the session cannot loop; the state
-  stays visible in `vibloom status`.
+- **Before the agent stops**: if any node needs attention, the agent is sent
+  back once. Claude Code marks the second attempt, which the guard lets
+  through so the session cannot loop; the state stays visible in `vibloom
+status`. If the log fails verification, the agent is sent back every time,
+  with the problems.
 
 Other agents with a hook or plugin system can get the same behaviour by calling
 `vibloom hook pre-tool`, `post-tool` and `stop` with the same JSON input, or by
@@ -629,10 +686,11 @@ The fuzzer finds the drift, and the guard carries it up the map:
 ```
 $ vibloom check
 Run 1: 3 test results recorded.
+4 nodes, 3 need attention.
 BROKEN       inv.total-matches-added   total always equals the sum of what add() added
-holds        inv.total-bounded         total never overflows a sane bound
 UNSUPPORTED  asm.only-add-moves-total  Only add() changes total
 AT RISK      int.accounting-is-exact   Accounting is exact: every unit of total is traceable
+holds        inv.total-bounded         total never overflows a sane bound
 ```
 
 An agent asked to make the suite pass has two ways out. Editing the invariant
