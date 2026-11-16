@@ -2,6 +2,62 @@
 
 Changes to the `vibloom` binary. The web app is not versioned.
 
+## 0.8.0
+
+### Breaking
+
+- The run log is local state. It lives in `<git dir>/vibloom/log.jsonl`
+  (`<git dir>/vibloom/<folder>/` for a project in a folder of a larger
+  repository), or `.vibloom/local/log.jsonl` without git, which `init` lists
+  in `.vibloom/.gitignore`. It is never staged or committed, and a committed
+  `.vibloom/log.jsonl` is now a guarded file like the rest of `.vibloom/`. An
+  existing one is moved aside into the local folder (`log.committed.jsonl`) by
+  the first command that finds it, never read, and the command says once to
+  run `git rm --cached .vibloom/log.jsonl` as the verifier. A fresh clone has
+  no states until `vibloom check` or `run` runs the tests.
+- Log entries hold one digest per node of its watched files instead of every
+  file's hash; `state.json` next to the log keeps the latest run's file hashes
+  so reasons still name the changed files. Entries written by 0.7.0 still
+  verify and are read.
+- `vibloom sync` is removed (it prints why), and `check --base` no longer
+  compares logs. It loads the map as it is on the base and refuses guard
+  changes: nodes removed, tests changed or removed, `protected` turned off,
+  stances set to `off`, `accepts` added, `depends_on` edges removed, `strict`
+  turned off, `runner`, `report`, `timeout` or `tests` changed, entries taken
+  out of `protect`, and any change to the files the base's map guards
+  (protected tests, the helpers they import, the `protect` list). Each change
+  is listed on one line and the check exits 1 until it runs with
+  `--allow-guard-changes`, which CI sets once a person approved. Adding nodes,
+  evidence or new protected tests passes. `docs/guard.md` has a GitHub Actions
+  job that sets it from a label.
+- `check` decides from the run it just made, never from a recorded one.
+- Exit codes: 0 nothing needs attention, 1 a verdict, 2 vibloom could not do
+  its job (no map or an unreadable one, bad arguments, a git error, a role
+  refused, a damaged local log, a runner that did not start, timed out or
+  wrote no report). They used to be 1 for both. `run` now exits 1 when a node
+  needs attention, like `status`. The hooks keep their protocol.
+- `status --json` has a new, documented shape (`format: 1`), shared with
+  `check --json`: summary counts, each node with its state, reason and files,
+  the unreviewed nodes, accepted risks, guard changes with `--base`, and
+  `tool_error` when the exit is 2.
+- The summary line is `N nodes, K need attention, M not yet reviewed.`.
+
+### Added
+
+- Not yet reviewed: hypothetical nodes are counted, a node resting on them
+  shows `adopted (rests on 2 unreviewed)`, and `status` lists them with the
+  command that adopts each or switches it off. `--strict` on `status` and
+  `check`, or `"strict": true` in the map, counts them as needing attention.
+- `check --format github` prints GitHub Actions annotations for nodes that
+  need attention (on the test's line), guard changes and unreviewed nodes.
+- For Foundry, `init` and `scan` read each invariant test's imports from
+  forge's syntax trees (`forge build --ast`), remapped paths included: test
+  code reached goes to `protect`, and the project files reached become the
+  invariant's `watch` instead of the whole source and test folders. Without
+  the trees they fall back to relative imports in the text and say which was
+  used. `scan` lists the watches it would narrow on an existing map and
+  narrows them with `--tighten`.
+
 ## 0.7.0
 
 ### Added

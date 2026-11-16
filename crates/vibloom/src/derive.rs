@@ -2,12 +2,21 @@
 //! verified log and the files as they are now. Nothing else can set one.
 
 use crate::forge::{Fuzz, Outcome, Status};
+use crate::hash::files_digest;
 use crate::log::RunEntry;
 use crate::map::{Kind, RootNode, RootsMap, Stance, covers, watched_by};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 pub type Files = BTreeMap<String, Option<String>>;
+
+/// The hash of every watched file at the start of the latest run, kept next
+/// to the log: it only names which files changed, the log's digests decide.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Snapshot {
+    pub seq: u64,
+    pub files: Files,
+}
 
 /// What the node's own test says.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -84,6 +93,10 @@ pub struct NodeView {
     pub sources: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub accepts: Vec<AcceptedRisk>,
+    /// The hypothetical nodes it rests on, directly or through others:
+    /// nobody has decided them yet.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unreviewed: Vec<String>,
 }
 
 pub(crate) fn matches(n: &RootNode, o: &Outcome) -> bool {
@@ -96,7 +109,7 @@ pub(crate) fn matches(n: &RootNode, o: &Outcome) -> bool {
 }
 
 // Files a node watches, as found in a hash table (the current tree or a run).
-fn files_of(n: &RootNode, table: &Files) -> BTreeMap<String, Option<String>> {
+fn files_of(n: &RootNode, table: &Files) -> Files {
     let mut out = BTreeMap::new();
     for w in watched_by(n) {
         if w.ends_with('/') {
@@ -112,13 +125,15 @@ fn files_of(n: &RootNode, table: &Files) -> BTreeMap<String, Option<String>> {
     out
 }
 
-fn changed_since(n: &RootNode, run: &RunEntry, current: &Files) -> Vec<String> {
-    let then = files_of(n, &run.files);
-    let now = files_of(n, current);
+/// What a run records for a node: one digest of the files it watches.
+pub(crate) fn node_digest(n: &RootNode, table: &Files) -> String {
+    files_digest(&files_of(n, table))
+}
+
+fn diff(then: &Files, now: &Files) -> Vec<String> {
     let mut out = BTreeSet::new();
-    for (f, h) in &now {
-        // A file the run did not record is treated as changed: its state then is unknown.
-        if !run.files.contains_key(f) || then.get(f) != Some(h) {
+    for (f, h) in now {
+        if then.get(f) != Some(h) {
             out.insert(f.clone());
         }
     }
@@ -128,6 +143,33 @@ fn changed_since(n: &RootNode, run: &RunEntry, current: &Files) -> Vec<String> {
         }
     }
     out.into_iter().collect()
+}
+
+fn changed_since(
+    n: &RootNode,
+    run: &RunEntry,
+    current: &Files,
+    snap: Option<&Snapshot>,
+) -> Vec<String> {
+    let now = files_of(n, current);
+    // An entry from 0.7.0 or earlier holds every file's hash.
+    if run.digests.is_empty() && !run.files.is_empty() {
+        let then = files_of(n, &run.files);
+        let mut out: BTreeSet<String> = diff(&then, &now).into_iter().collect();
+        // A file the run did not record is treated as changed: its state then is unknown.
+        out.extend(now.keys().filter(|f| !run.files.contains_key(*f)).cloned());
+        return out.into_iter().collect();
+    }
+    let then = run.digests.get(&n.id);
+    if then == Some(&files_digest(&now)) {
+        return vec![];
+    }
+    // The snapshot names the files only when it shows the node's files as
+    // the run saw them; otherwise the node's watch is all that can be said.
+    match snap.map(|s| files_of(n, &s.files)) {
+        Some(at) if then == Some(&files_digest(&at)) => diff(&at, &now),
+        _ => watched_by(n),
+    }
 }
 
 struct Own {
@@ -142,6 +184,7 @@ pub fn derive(
     map: &RootsMap,
     entries: &[RunEntry],
     current: &Files,
+    snapshot: Option<&Snapshot>,
     uncommitted: &Uncommitted,
 ) -> Vec<NodeView> {
     let mut own: HashMap<&str, Own> = HashMap::new();
@@ -201,7 +244,7 @@ pub fn derive(
             );
             continue;
         }
-        let changed = changed_since(n, entry, current);
+        let changed = changed_since(n, entry, current, snapshot);
         // A failure stays a failure until a new run says otherwise; a pass only
         // counts while the files it ran against are unchanged.
         let vacuous = outcome
@@ -312,11 +355,38 @@ pub fn derive(
         (support, because)
     }
 
+    // The hypothetical nodes below each node, through any path.
+    fn below(
+        id: &str,
+        by_id: &HashMap<&str, &RootNode>,
+        out: &mut BTreeSet<String>,
+        seen: &mut BTreeSet<String>,
+    ) {
+        for d in by_id
+            .get(id)
+            .map(|n| n.depends_on.as_slice())
+            .unwrap_or_default()
+        {
+            if !seen.insert(d.clone()) {
+                continue;
+            }
+            if by_id
+                .get(d.as_str())
+                .is_some_and(|n| n.stance == Stance::Hypothetical)
+            {
+                out.insert(d.clone());
+            }
+            below(d, by_id, out, seen);
+        }
+    }
+
     map.nodes
         .iter()
         .map(|n| {
             let o = own.get(n.id.as_str());
             let (support, because) = resolve(&n.id, &by_id, &own, &mut memo);
+            let mut unreviewed = BTreeSet::new();
+            below(&n.id, &by_id, &mut unreviewed, &mut BTreeSet::new());
             NodeView {
                 id: n.id.clone(),
                 kind: n.kind,
@@ -346,6 +416,7 @@ pub fn derive(
                             .is_some_and(|d| d.stance == Stance::Off),
                     })
                     .collect(),
+                unreviewed: unreviewed.into_iter().collect(),
             }
         })
         .collect()
@@ -387,14 +458,69 @@ pub fn label(v: &NodeView) -> &'static str {
     }
 }
 
-/// The label as listings show it: with the risks the node accepts, so an
-/// accepted weakness is never shown as plain sound.
+/// Whether nobody has decided the node yet: it is hypothetical.
+pub fn unreviewed(v: &NodeView) -> bool {
+    v.stance == Stance::Hypothetical
+}
+
+/// What `status` and `check` count: trouble, and with `strict` also what
+/// is unreviewed or rests on something unreviewed.
+pub fn needs_attention(v: &NodeView, strict: bool) -> bool {
+    troubled(v)
+        || (strict && v.stance != Stance::Off && (unreviewed(v) || !v.unreviewed.is_empty()))
+}
+
+/// The label as listings show it: with the risks the node accepts and the
+/// unreviewed nodes it rests on, so neither is ever shown as plain sound.
 pub fn shown(v: &NodeView) -> String {
-    let n = v.accepts.iter().filter(|a| a.in_effect).count();
-    match n {
-        0 => label(v).to_string(),
-        1 => format!("{} (accepts 1 risk)", label(v)),
-        n => format!("{} (accepts {n} risks)", label(v)),
+    let mut notes = Vec::new();
+    match v.accepts.iter().filter(|a| a.in_effect).count() {
+        0 => {}
+        1 => notes.push("accepts 1 risk".to_string()),
+        n => notes.push(format!("accepts {n} risks")),
+    }
+    if v.stance != Stance::Off && !v.unreviewed.is_empty() {
+        notes.push(format!("rests on {} unreviewed", v.unreviewed.len()));
+    }
+    // A hypothetical node with a test shows its run's result as its label.
+    if unreviewed(v) && label(v) != "hypothetical" {
+        notes.push("unreviewed".to_string());
+    }
+    if notes.is_empty() {
+        label(v).to_string()
+    } else {
+        format!("{} ({})", label(v), notes.join(", "))
+    }
+}
+
+/// "N nodes, K need attention, M not yet reviewed."
+pub fn summary_line(vs: &[NodeView], strict: bool) -> String {
+    let bad = vs.iter().filter(|v| needs_attention(v, strict)).count();
+    let open = vs.iter().filter(|v| unreviewed(v)).count();
+    format!(
+        "{} nodes, {bad} {} attention, {open} not yet reviewed.",
+        vs.len(),
+        if bad == 1 { "needs" } else { "need" }
+    )
+}
+
+/// Why a node needs attention, in one line, or None when nothing is wrong.
+pub fn why(v: &NodeView) -> Option<String> {
+    if !v.changed.is_empty() {
+        let run = v.run.map_or_else(|| "?".to_string(), |r| r.to_string());
+        Some(format!("changed since run {run}: {}", v.changed.join(", ")))
+    } else if let Some(r) = &v.reason {
+        Some(if v.evidence == Evidence::TestChanged {
+            r.clone()
+        } else {
+            format!("failure: {r}")
+        })
+    } else if !v.because.is_empty() {
+        Some(format!("because of {}", v.because.join(", ")))
+    } else if v.evidence == Evidence::Untested {
+        Some("its test did not run".into())
+    } else {
+        None
     }
 }
 
@@ -451,14 +577,27 @@ mod tests {
                     outcome("invariant_sum", sum),
                     outcome("invariant_bound", bound),
                 ],
-                files: recorded,
+                digests: digests(&recorded),
                 error: None,
             },
         )
     }
 
+    fn digests(recorded: &Files) -> BTreeMap<String, String> {
+        map()
+            .nodes
+            .iter()
+            .filter(|n| n.test.is_some())
+            .map(|n| (n.id.clone(), node_digest(n, recorded)))
+            .collect()
+    }
+
     fn clean(map: &RootsMap, entries: &[RunEntry], current: &Files) -> Vec<NodeView> {
-        derive(map, entries, current, &Uncommitted::new())
+        let snap = entries.last().map(|e| Snapshot {
+            seq: e.seq,
+            files: files(),
+        });
+        derive(map, entries, current, snap.as_ref(), &Uncommitted::new())
     }
 
     fn by_id(vs: Vec<NodeView>) -> HashMap<String, NodeView> {
@@ -554,7 +693,7 @@ mod tests {
                     at: "2026-11-13T00:00:00.000Z".into(),
                     command: command.iter().map(|s| (*s).to_string()).collect(),
                     outcomes,
-                    files: files(),
+                    digests: digests(&files()),
                     error: None,
                 },
             )
@@ -644,11 +783,9 @@ mod tests {
                 ]
             }))
             .expect("valid");
-            by_id(clean(
-                &m,
-                &[entry(None, sum, Status::Pass, files())],
-                &files(),
-            ))
+            let mut e = entry(None, sum, Status::Pass, files());
+            e.digests = BTreeMap::from([("inv.sum".into(), node_digest(&m.nodes[0], &files()))]);
+            by_id(clean(&m, &[e], &files()))
         };
         let v = with("off", Status::Fail);
         assert!(!troubled(&v["int.x"]), "{:?}", v["int.x"]);
@@ -669,7 +806,7 @@ mod tests {
         let e = entry(None, Status::Pass, Status::Pass, files());
         let changed =
             Uncommitted::from([("inv.sum".to_string(), vec!["test/C.t.sol".to_string()])]);
-        let v = by_id(derive(&map(), &[e], &files(), &changed));
+        let v = by_id(derive(&map(), &[e], &files(), None, &changed));
         assert_eq!(label(&v["inv.sum"]), "TEST CHANGED");
         assert!(troubled(&v["inv.sum"]));
         assert_eq!(
@@ -678,5 +815,72 @@ mod tests {
         );
         assert_eq!(v["asm.only-add"].support, Support::Pending);
         assert_eq!(label(&v["inv.bound"]), "holds");
+    }
+
+    #[test]
+    fn names_the_changed_files_from_the_snapshot_or_else_the_watch() {
+        let e = entry(None, Status::Pass, Status::Pass, files());
+        let mut edited = files();
+        edited.insert("src/Lib.sol".into(), Some("edited".into()));
+        let snap = Snapshot {
+            seq: 1,
+            files: files(),
+        };
+        let v = by_id(derive(
+            &map(),
+            std::slice::from_ref(&e),
+            &edited,
+            Some(&snap),
+            &Uncommitted::new(),
+        ));
+        assert_eq!(v["inv.sum"].changed, vec!["src/Lib.sol"]);
+        // Without a snapshot that matches the run, only the watch is known.
+        let v = by_id(derive(&map(), &[e], &edited, None, &Uncommitted::new()));
+        assert_eq!(v["inv.sum"].evidence, Evidence::Stale);
+        assert_eq!(v["inv.sum"].changed, vec!["src/", "test/C.t.sol"]);
+    }
+
+    #[test]
+    fn reads_a_run_recorded_with_every_file_hash() {
+        let mut e = entry(None, Status::Pass, Status::Pass, files());
+        e.digests.clear();
+        e.files = files();
+        assert_eq!(
+            by_id(derive(
+                &map(),
+                std::slice::from_ref(&e),
+                &files(),
+                None,
+                &Uncommitted::new()
+            ))["inv.sum"]
+                .evidence,
+            Evidence::Holds
+        );
+        let mut edited = files();
+        edited.insert("src/C.sol".into(), Some("edited".into()));
+        assert_eq!(
+            by_id(derive(&map(), &[e], &edited, None, &Uncommitted::new()))["inv.sum"].changed,
+            vec!["src/C.sol"]
+        );
+    }
+
+    #[test]
+    fn shows_what_rests_on_nodes_nobody_reviewed() {
+        let v = by_id(clean(
+            &map(),
+            &[entry(None, Status::Pass, Status::Pass, files())],
+            &files(),
+        ));
+        // asm.only-add is hypothetical; int.exact rests on it.
+        assert!(!troubled(&v["int.exact"]));
+        assert_eq!(v["int.exact"].unreviewed, vec!["asm.only-add"]);
+        assert_eq!(shown(&v["int.exact"]), "adopted (rests on 1 unreviewed)");
+        assert_eq!(shown(&v["asm.only-add"]), "hypothetical");
+        assert!(!needs_attention(&v["int.exact"], false));
+        assert!(needs_attention(&v["int.exact"], true));
+        assert!(needs_attention(&v["asm.only-add"], true));
+        assert!(!needs_attention(&v["inv.bound"], true));
+        // Off is a decision: neither it nor what it shows counts as unreviewed.
+        assert!(!needs_attention(&v["asm.off"], true));
     }
 }

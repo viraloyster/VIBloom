@@ -7,7 +7,11 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
 pub const MAP_PATH: &str = ".vibloom/roots.json";
-pub const LOG_PATH: &str = ".vibloom/log.jsonl";
+/// Where 0.7.0 and earlier kept the run log, committed with the map. It is
+/// local state now; a log found here is moved on first use.
+pub const LEGACY_LOG_PATH: &str = ".vibloom/log.jsonl";
+/// Without git, the local state lives here, ignored by `.vibloom/.gitignore`.
+pub const LOCAL_DIR: &str = ".vibloom/local";
 pub const PROPOSALS_PATH: &str = ".vibloom/proposals.jsonl";
 pub const DEFAULT_RUNNER: [&str; 3] = ["forge", "test", "--json"];
 pub const DEFAULT_TIMEOUT: u64 = 3600;
@@ -112,6 +116,9 @@ pub struct RootsMap {
     pub tests: String,
     /// Paths only the verifier may edit, besides protected tests and .vibloom/.
     pub protect: Vec<String>,
+    /// Unreviewed (hypothetical) nodes count as needing attention in
+    /// `status` and `check`.
+    pub strict: bool,
     pub nodes: Vec<RootNode>,
 }
 
@@ -123,6 +130,7 @@ impl RootsMap {
             timeout: DEFAULT_TIMEOUT,
             tests: "test/".into(),
             protect: vec![],
+            strict: false,
             nodes: vec![],
         }
     }
@@ -207,7 +215,7 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
     unknown_keys(
         obj,
         &[
-            "version", "runner", "report", "timeout", "tests", "protect", "nodes",
+            "version", "runner", "report", "timeout", "tests", "protect", "strict", "nodes",
         ],
         "the map",
         &mut errors,
@@ -250,6 +258,14 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
     if protect.is_none() {
         errors.push("protect must list relative paths".into());
     }
+    let strict = match obj.get("strict") {
+        None => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => {
+            errors.push("strict must be true or false".into());
+            false
+        }
+    };
     let raw_nodes = obj.get("nodes").and_then(Value::as_array);
     if raw_nodes.is_none() {
         errors.push("nodes must be a list".into());
@@ -431,6 +447,7 @@ pub fn parse_map(raw: &Value) -> Result<RootsMap, Vec<String>> {
             timeout: timeout.unwrap_or(DEFAULT_TIMEOUT),
             tests,
             protect,
+            strict,
             nodes,
         }),
         _ => Err(errors),
@@ -552,6 +569,8 @@ struct MapOut<'a> {
     timeout: Option<u64>,
     tests: &'a str,
     protect: &'a [String],
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    strict: bool,
     nodes: Vec<NodeOut<'a>>,
 }
 
@@ -564,6 +583,7 @@ pub fn serialize_map(map: &RootsMap) -> String {
         timeout: (map.timeout != DEFAULT_TIMEOUT).then_some(map.timeout),
         tests: &map.tests,
         protect: &map.protect,
+        strict: map.strict,
         nodes: map
             .nodes
             .iter()
@@ -700,6 +720,7 @@ mod tests {
             "version": 1,
             "protect": ["foundry.toml"],
             "report": "target/nextest/ci/junit.xml",
+            "strict": true,
             "nodes": [inv("inv.a", json!({ "watch": ["src/"], "detail": "why" }))]
         }))
         .expect("valid");

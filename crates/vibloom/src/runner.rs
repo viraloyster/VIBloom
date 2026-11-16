@@ -1,32 +1,46 @@
-//! Running the tests and recording the run in the log.
+//! Running the tests and recording the run in the local log.
 
 use crate::cli::Fallible;
-use crate::derive::{NodeView, derive};
+use crate::derive::{Evidence, NodeView, Snapshot, derive, matches, node_digest};
 use crate::forge::{Outcome, RunnerOutputError, parse_forge};
 use crate::git::uncommitted;
 use crate::junit::parse_junit;
 use crate::log::{RunBody, RunEntry, next_entry, to_line};
-use crate::map::{LOG_PATH, RootsMap};
+use crate::map::RootsMap;
 use crate::proc::run_child;
-use crate::store::{append, hash_watched, iso_now, load_log, load_map, locked};
+use crate::store::{
+    append, hash_watched, iso_now, load_log, load_map, locked, log_path, write_snapshot,
+};
 use std::path::Path;
 
 pub struct RunReport {
     pub entry: RunEntry,
+    /// From every recorded run, as `status` reads them.
     pub views: Vec<NodeView>,
+    /// From this run alone: what `check` decides on, so nothing recorded
+    /// before, here or anywhere else, can make a node hold.
+    pub fresh: Vec<NodeView>,
 }
+
+const LOG_BROKEN: &str = "The local run log failed verification";
 
 pub fn run(root: &Path, extra: &[String]) -> Fallible<RunReport> {
     let map = load_map(root)?;
     let log = load_log(root);
     if !log.problems.is_empty() {
         return Err(format!(
-            "{LOG_PATH} failed verification:\n- {}\nA verifier can set the broken part aside with `vibloom repair`.",
+            "{LOG_BROKEN}:\n- {}\nA verifier can set the broken part aside with `vibloom repair`.",
             log.problems.join("\n- ")
         ));
     }
     // Hashed before the run: these are the files the tests ran against.
     let files = hash_watched(root, &map);
+    let digests = map
+        .nodes
+        .iter()
+        .filter(|n| n.test.is_some())
+        .map(|n| (n.id.clone(), node_digest(n, &files)))
+        .collect();
     let mut command = map.runner.clone();
     command.extend(extra.iter().cloned());
     let (exe, args) = command.split_first().ok_or("the runner is empty")?;
@@ -78,10 +92,7 @@ pub fn run(root: &Path, extra: &[String]) -> Fallible<RunReport> {
     let (entry, mut entries) = locked(root, || {
         let log = load_log(root);
         if !log.problems.is_empty() {
-            return Err(format!(
-                "{LOG_PATH} failed verification:\n- {}",
-                log.problems.join("\n- ")
-            ));
+            return Err(format!("{LOG_BROKEN}:\n- {}", log.problems.join("\n- ")));
         }
         let entry = next_entry(
             log.entries.last(),
@@ -89,21 +100,64 @@ pub fn run(root: &Path, extra: &[String]) -> Fallible<RunReport> {
                 at: iso_now(),
                 command,
                 outcomes,
-                files,
+                digests,
                 error,
             },
         );
-        append(root, LOG_PATH, &to_line(&entry))?;
+        append(&log_path(root), &to_line(&entry))?;
+        write_snapshot(
+            root,
+            &Snapshot {
+                seq: entry.seq,
+                files: files.clone(),
+            },
+        )?;
         Ok((entry, log.entries))
     })?;
     entries.push(entry.clone());
-    let views = derive(
+    let snap = Snapshot {
+        seq: entry.seq,
+        files,
+    };
+    let current = hash_watched(root, &map);
+    let changed = uncommitted(root, &map, false);
+    let views = derive(&map, &entries, &current, Some(&snap), &changed);
+    let mut fresh = derive(
         &map,
-        &entries,
-        &hash_watched(root, &map),
-        &uncommitted(root, &map, false),
+        std::slice::from_ref(&entry),
+        &current,
+        Some(&snap),
+        &changed,
     );
-    Ok(RunReport { entry, views })
+    // The whole suite ran without a test that an earlier run had: it is gone,
+    // which says more than "untested".
+    if entry.error.is_none() && entry.command == map.runner {
+        for v in fresh
+            .iter_mut()
+            .filter(|v| v.evidence == Evidence::Untested)
+        {
+            let Some(n) = map.nodes.iter().find(|n| n.id == v.id) else {
+                continue;
+            };
+            if let Some(e) = entries
+                .iter()
+                .rev()
+                .find(|e| e.outcomes.iter().any(|o| matches(n, o)))
+                .filter(|e| e.seq != entry.seq)
+            {
+                v.evidence = Evidence::Missing;
+                v.reason = Some(format!(
+                    "its test last ran in run {} and was not in run {}",
+                    e.seq, entry.seq
+                ));
+            }
+        }
+    }
+    Ok(RunReport {
+        entry,
+        views,
+        fresh,
+    })
 }
 
 /// The line that says what a run recorded. Failures are counted too: a test

@@ -1,13 +1,14 @@
 //! The record on disk: finding the root, reading and writing the map, the
-//! log and the proposals, the lock, and hashing what the nodes watch.
+//! local log and the proposals, the lock, and hashing what the nodes watch.
 
 use crate::cli::Fallible;
-use crate::derive::{Files, NodeView, derive};
+use crate::derive::{Files, NodeView, Snapshot, derive};
 use crate::git::{git, uncommitted};
 use crate::hash::sha256_hex;
 use crate::log::{ReadLog, read_log};
-use crate::map::{LOG_PATH, MAP_PATH, PROPOSALS_PATH, RootsMap, parse_map, watched_by};
-use crate::paths::real;
+use crate::map::{
+    LEGACY_LOG_PATH, LOCAL_DIR, MAP_PATH, PROPOSALS_PATH, RootsMap, parse_map, watched_by,
+};
 use crate::proposals::Book;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -68,13 +69,16 @@ pub fn find_root(start: &Path) -> Option<PathBuf> {
     None
 }
 
+pub(crate) fn parse_map_text(text: &str) -> Fallible<RootsMap> {
+    let raw: Value =
+        serde_json::from_str(text).map_err(|e| format!("{MAP_PATH} is not valid JSON: {e}"))?;
+    parse_map(&raw).map_err(|errs| format!("{MAP_PATH} has problems:\n- {}", errs.join("\n- ")))
+}
+
 pub fn load_map(root: &Path) -> Fallible<RootsMap> {
     let text = fs::read_to_string(root.join(MAP_PATH))
         .map_err(|e| format!("cannot read {MAP_PATH}: {e}"))?;
-    let raw: Value =
-        serde_json::from_str(&text).map_err(|e| format!("{MAP_PATH} is not valid JSON: {e}"))?;
-    let mut map = parse_map(&raw)
-        .map_err(|errs| format!("{MAP_PATH} has problems:\n- {}", errs.join("\n- ")))?;
+    let mut map = parse_map_text(&text)?;
     // A folder written by hand without its "/" is still a folder: read as one
     // file it would never change.
     for n in &mut map.nodes {
@@ -87,27 +91,116 @@ pub fn load_map(root: &Path) -> Fallible<RootsMap> {
     Ok(map)
 }
 
-pub fn load_log(root: &Path) -> ReadLog {
-    read_log(&fs::read_to_string(root.join(LOG_PATH)).unwrap_or_default())
-}
-
 pub(crate) fn load_book(root: &Path) -> Book {
     Book::read(&fs::read_to_string(root.join(PROPOSALS_PATH)).unwrap_or_default())
 }
 
-// Where the guard keeps what must never be staged or committed (its lock,
-// what it already told the agent): the repository's git folder, or a folder
-// of its own in the temp folder when there is no repository.
+// What must never be staged or committed (the run log, its snapshot, the
+// lock, what the agent was already told) lives in the repository's git
+// folder, one folder per project, or in `.vibloom/local/` without git.
 pub(crate) fn state_dir(root: &Path) -> PathBuf {
-    git(root, &["rev-parse", "--absolute-git-dir"]).map_or_else(
-        |_| {
-            let id = sha256_hex(real(root).to_string_lossy().as_bytes());
-            let dir = std::env::temp_dir().join(format!("vibloom-{}", &id[..16]));
-            let _ = fs::create_dir_all(&dir);
-            dir
-        },
-        |d| PathBuf::from(d.trim()),
+    let dir = match git(root, &["rev-parse", "--absolute-git-dir", "--show-prefix"]) {
+        Ok(out) => {
+            let mut lines = out.lines();
+            let git_dir = PathBuf::from(lines.next().unwrap_or_default().trim());
+            let prefix = lines
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .trim_end_matches('/');
+            let dir = git_dir.join("vibloom");
+            if prefix.is_empty() {
+                dir
+            } else {
+                dir.join(prefix)
+            }
+        }
+        Err(_) => {
+            ignore_local(root);
+            root.join(LOCAL_DIR)
+        }
+    };
+    let _ = fs::create_dir_all(&dir);
+    dir
+}
+
+// Without git the local folder sits inside `.vibloom/`, which is committed
+// once the project is: it is ignored from the start.
+pub(crate) fn ignore_local(root: &Path) {
+    let path = root.join(".vibloom/.gitignore");
+    let text = fs::read_to_string(&path).unwrap_or_default();
+    if !text.lines().any(|l| l.trim() == "local/") {
+        let _ = fs::create_dir_all(root.join(".vibloom"));
+        let sep = if text.is_empty() || text.ends_with('\n') {
+            ""
+        } else {
+            "\n"
+        };
+        let _ = fs::write(&path, format!("{text}{sep}local/\n"));
+    }
+}
+
+pub fn log_path(root: &Path) -> PathBuf {
+    state_dir(root).join("log.jsonl")
+}
+
+fn snapshot_path(root: &Path) -> PathBuf {
+    state_dir(root).join("state.json")
+}
+
+pub fn load_log(root: &Path) -> ReadLog {
+    read_log(&fs::read_to_string(log_path(root)).unwrap_or_default())
+}
+
+pub(crate) fn load_snapshot(root: &Path) -> Option<Snapshot> {
+    serde_json::from_str(&fs::read_to_string(snapshot_path(root)).ok()?).ok()
+}
+
+pub(crate) fn write_snapshot(root: &Path, snap: &Snapshot) -> Fallible<()> {
+    write_atomic(
+        &snapshot_path(root),
+        &serde_json::to_string(snap).unwrap_or_default(),
     )
+}
+
+/// Moves a run log committed by 0.7.0 or earlier out of the project, into
+/// the local folder, and says once what is left to do. It is kept, not read:
+/// a committed log is whatever the last committer wrote, so no state may
+/// come from it. The next run records the states again.
+pub(crate) fn migrate_log(root: &Path) -> Option<String> {
+    // Runs recorded before `git init` follow the project into the git folder.
+    let dir = state_dir(root);
+    let before_git = root.join(LOCAL_DIR);
+    if dir != before_git && !dir.join("log.jsonl").exists() {
+        for f in ["log.jsonl", "state.json"] {
+            if before_git.join(f).is_file() {
+                let _ = fs::rename(before_git.join(f), dir.join(f));
+            }
+        }
+    }
+    let old = root.join(LEGACY_LOG_PATH);
+    if !old.is_file() {
+        return None;
+    }
+    let mut to = dir.join("log.committed.jsonl");
+    if to.exists() {
+        to = dir.join(format!(
+            "log.committed-{}.jsonl",
+            iso_now().replace([':', '.'], "-")
+        ));
+    }
+    let moved =
+        fs::rename(&old, &to).or_else(|_| fs::copy(&old, &to).and_then(|_| fs::remove_file(&old)));
+    if let Err(e) = moved {
+        return Some(format!(
+            "VIBloom: could not move {LEGACY_LOG_PATH} to {}: {e}",
+            to.display()
+        ));
+    }
+    Some(format!(
+        "VIBloom: the run log is local state now and a committed one is never read. Moved {LEGACY_LOG_PATH} aside to {}; `vibloom run` records the states again. Take it out of git once, as the verifier: git rm --cached {LEGACY_LOG_PATH}",
+        to.display()
+    ))
 }
 
 /// Holds the guard's lock while `f` runs, so two processes (two agents, a hook
@@ -135,15 +228,17 @@ pub(crate) fn write_atomic(path: &Path, text: &str) -> Fallible<()> {
     fs::rename(&tmp, path).map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
-pub fn append(root: &Path, rel: &str, line: &str) -> Fallible<()> {
-    fs::create_dir_all(root.join(".vibloom")).map_err(|e| e.to_string())?;
+pub fn append(path: &Path, line: &str) -> Fallible<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
     let mut f = fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(root.join(rel))
-        .map_err(|e| format!("cannot write {rel}: {e}"))?;
+        .open(path)
+        .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     f.write_all(line.as_bytes())
-        .map_err(|e| format!("cannot write {rel}: {e}"))
+        .map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
 pub(crate) fn walk(root: &Path, dir: &str, out: &mut Vec<String>) {
@@ -228,6 +323,7 @@ pub(crate) fn views_at(root: &Path, staged: bool) -> Fallible<Vec<NodeView>> {
         &map,
         &load_log(root).entries,
         &hash_watched(root, &map),
+        load_snapshot(root).as_ref(),
         &uncommitted(root, &map, staged),
     ))
 }

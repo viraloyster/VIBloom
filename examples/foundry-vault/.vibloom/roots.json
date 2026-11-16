@@ -22,8 +22,8 @@
         "name": "invariant_assetsMatchFlows"
       },
       "watch": [
-        "src/",
-        "test/"
+        "src/Vault.sol",
+        "test/handlers/VaultHandler.sol"
       ],
       "protected": true
     },
@@ -38,8 +38,8 @@
         "name": "invariant_sharesAreBacked"
       },
       "watch": [
-        "src/",
-        "test/"
+        "src/Vault.sol",
+        "test/handlers/VaultHandler.sol"
       ],
       "protected": true
     },

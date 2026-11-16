@@ -19,8 +19,8 @@ hackathon version is described in [HACKATHON.md](HACKATHON.md).
 
 ## Two domains
 
-Both keep a hash-chained log and derive every state from it, so a broken
-premise marks everything resting on it.
+Both keep a log of what was checked and derive every state from it, so a
+broken premise marks everything resting on it.
 
 ### Code (first)
 
@@ -28,18 +28,22 @@ premise marks everything resting on it.
 
 - `.vibloom/roots.json`: assumptions, invariants linked to tests, intentions,
   watched files and what each node rests on.
-- `.vibloom/log.jsonl`: every test run, hash-chained, with the hash of the
-  watched files at that run.
+- A local run log (in the git folder, never committed): every test run, with
+  one digest per node of the files it watches. CI never reads it; it runs the
+  tests again.
 - Derived states: holds, BROKEN, pending review (a watched file changed),
   UNSUPPORTED, AT RISK, untested, skipped, MISSING, VACUOUS (every fuzzed call
   reverted), TEST CHANGED (a protected test or what it leans on differs from
   the last commit), off. A node can accept a dependency that is off, with a
   reason, and the risk stays listed. Only a test that ran
   and passed against the current files counts as holding; every other state
-  of a tested node fails the check.
-- A commit check (`vibloom precommit`), a CI check (`vibloom check`) that also
-  requires the log to extend the base branch's, and context for any agent
-  (`vibloom context <file>`).
+  of a tested node fails the check. Hypothetical nodes, and what rests on them,
+  are counted as not yet reviewed, and fail the check only with `--strict`.
+- A commit check (`vibloom precommit`), a CI check (`vibloom check --base`)
+  that refuses guard changes against the base branch's map until a person
+  approves them, with JSON and GitHub annotations, and context for any agent
+  (`vibloom context <file>`). Invariants watch what their tests import, as
+  forge's syntax trees show it.
 - An MCP server (`vibloom mcp`) and optional Claude Code hooks. Agents can
   propose nodes, each with its evidence; a person accepts or rejects them.
 - For Foundry, from code and notes to a map: `vibloom survey` reads who may

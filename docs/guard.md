@@ -3,15 +3,17 @@
 The guard (`crates/vibloom`, a single Rust binary called `vibloom`) brings VIBloom's roots to a
 code project and to the AI agents working in it. It keeps a map of what the
 project assumes, what must always hold and what each change intends, records
-every test run in a hash-chained log, and derives from those runs whether each
-node still stands. An agent reads the map; it can never set a state.
+every test run in a local log, and derives from those runs whether each node
+still stands. An agent reads the map; it can never set a state. In CI the
+tests always run again, so what decides a pull request is that run, against
+the guard as the base branch has it.
 
 It reads Foundry (`forge test --json`) and any runner that writes a JUnit XML
 report: cargo-nextest, pytest, Jest, mocha (Hardhat), Go and most others. No model is involved: the
 guard is deterministic and runs the same with or without AI, and it does not
 depend on any particular agent. Claude Code, Codex, Cursor, Aider, any other
-tool or a person editing by hand all go through the same map, the same log and
-the same commit check. Integrations for a specific agent, such as the Claude
+tool or a person editing by hand all go through the same map, the same rules
+and the same commit check. Integrations for a specific agent, such as the Claude
 Code hooks below, are optional extras on top.
 
 ## Start
@@ -20,7 +22,7 @@ In the project's root:
 
 ```bash
 vibloom init --agent claude   # or --agent codex, or both, or neither
-vibloom check                 # run the tests and record the run
+vibloom check                 # run the tests and decide from that run
 ```
 
 `init` detects Foundry, Hardhat, Cargo or pytest (`--stack` to choose), writes
@@ -50,11 +52,30 @@ commit check in another clone.
 For a Foundry project `init` asks forge for its tests (`forge test --list`), so
 an invariant inherited from a base contract is found under the contract it
 runs in. The same list gives the tests folder when the tests live inside the
-source folder (the dapptools layout, `src/test/*.t.sol`). Each invariant found becomes a protected node that watches the source
-and test folders. `init` also guards what the invariants lean on: the handlers
-and base contracts their test files import, and `foundry.toml`, where the fuzz
-and invariant runs and depth are set. Weakening a handler or lowering `runs`
-weakens an invariant without touching its test, so only the verifier may.
+source folder (the dapptools layout, `src/test/*.t.sol`). Each invariant found
+becomes a protected node. `init` also guards what the invariants lean on: the
+handlers and base contracts their test files import, and `foundry.toml`, where
+the fuzz and invariant runs and depth are set. Weakening a handler or lowering
+`runs` weakens an invariant without touching its test, so only the verifier
+may.
+
+What a test imports is read from forge itself: `init` runs `forge build --ast`
+and follows each invariant test's `ImportDirective.absolutePath` in the
+compiler's syntax trees, where remappings are resolved, so
+`import "test/handlers/H.sol"` or a remapped path is found as well as
+`./handlers/H.sol`. Of the files reached, those under the tests folder (or that
+are test code: handlers, bases, mocks) go to `protect`, and every project file
+reached, sources and handlers, becomes that invariant's `watch`; library files
+(`lib/`, `node_modules/`) are left out. An edit to a source the invariant never
+imports then leaves it alone. When the syntax trees are not there (forge
+missing or failing, another runner), `init` reads relative imports from the
+source text as before and each invariant watches the source and test folders.
+`init` and `scan` say which of the two they used.
+
+`scan` never rewrites what an existing node watches on its own: it lists the
+invariants whose watch it would narrow to their import closure, and
+`vibloom scan --tighten` does it. Only a watch that holds whole folders is
+narrowed, and files listed by hand stay.
 
 Add what the tests cannot say by hand, as the verifier:
 
@@ -65,8 +86,8 @@ vibloom add intention "accounting is exact" --on asm.only-add-changes-total
 vibloom add invariant "shares never exceed assets" --file test/Vault.t.sol --contract VaultTest --test invariant_solvency
 ```
 
-`--watch` (repeatable) sets what a node watches; a node with a test watches
-the source and test folders when none is given. `--evidence` (repeatable)
+`--watch` (repeatable) sets what a node watches; a node added with `add` and a
+test watches the source and test folders when none is given. `--evidence` (repeatable)
 records where the node comes from. `--detail` adds a longer text, `--id` picks
 the node's id, and `--unprotected` leaves an invariant's test editable by the
 builder. One rule sets the stance everywhere, for `add`, for a node written
@@ -88,7 +109,7 @@ vibloom remove asm.only-add-changes-total
 with `--reason` and `--unaccept` (at least one option is required; an empty
 `--detail` clears it); the result must still be a valid map. `remove` is refused while other nodes rest on the node;
 point them elsewhere first, or switch it off with `edit --stance off`. Its
-recorded runs stay in the log.
+recorded runs stay in the local log.
 
 ### Accepted risks
 
@@ -115,6 +136,29 @@ is switched back on, the acceptance has no effect, `status` says it can be
 removed, and whatever the dependency's state is (broken, pending, untested,
 at risk) counts again as it would without it. Only the verifier sets it: it
 lives in the map, and the MCP `propose` tool refuses it.
+
+### Not yet reviewed
+
+A `hypothetical` node is one nobody has decided yet. It does not make the
+check fail by default (a real map holds many hypotheses, and a check that is
+always red stops being read), but it is never out of sight:
+
+- the summary line counts them: `5 nodes, 0 need attention, 2 not yet reviewed.`;
+- a node that rests on hypothetical nodes, directly or through others, says so
+  in its state, `adopted (rests on 2 unreviewed)`; a hypothetical node with a
+  test of its own shows `holds (unreviewed)`;
+- `status` (and `check`) end with a `Not yet reviewed:` section listing each
+  hypothetical node with the command that decides it, as the verifier:
+  `vibloom edit <id> --stance adopted`, or `--stance off`;
+- the JSON carries the count, each node's `rests_on_unreviewed`, and the list
+  with both commands.
+
+`status --strict` and `check --strict`, or `"strict": true` in the map, make
+every hypothetical node, and every node resting on one, count as needing
+attention, for a team that wants it in CI. Strict applies to `status`,
+`run` and `check`; the commit check and the agent hooks ignore it, since only
+the verifier can adopt a node and a builder held back by that could do
+nothing about it.
 
 ## For smart contracts
 
@@ -364,6 +408,7 @@ pre-tool hook (see below) denies the commands that would send a transaction.
   "runner": ["forge", "test", "--json"],
   "tests": "test/",
   "protect": ["foundry.toml"],
+  "strict": false,
   "nodes": [
     {
       "id": "inv.total-matches-added",
@@ -413,6 +458,8 @@ pre-tool hook (see below) denies the commands that would send a transaction.
   by any test, for a person to re-read.
 - `depends_on` links form a DAG; the map is rejected if they form a cycle or
   name an unknown node, or if a path leaves the repository.
+- `strict` (false when not given) counts unreviewed nodes as needing
+  attention (see Not yet reviewed above).
 
 ## Runners
 
@@ -458,8 +505,8 @@ a mocha reporter such as `mocha-junit-reporter` set in `hardhat.config`.)
 | TEST CHANGED   | its protected test, or a guarded file the test leans on, differs from HEAD     |
 | off            | switched off by a person; a choice, not a problem                              |
 
-Every state in the table but holds and off needs attention: `status` and
-`check` exit 1, the commit check refuses and the agent is sent back. (A node
+Every state in the table but holds and off needs attention: `status`, `run`
+and `check` exit 1, the commit check refuses and the agent is sent back. (A node
 with no test of its own shows its stance, adopted or hypothetical, while what
 it rests on is sound.) A test that never ran,
 was skipped or went missing is not evidence, so a mistyped test name or a
@@ -467,11 +514,14 @@ deleted invariant can never read as passing. What rests on such a node is
 pending review.
 
 A failure stays a failure until a newer run passes. A pass only counts while
-the files it ran against are unchanged: the log stores the hash of every
-watched file at the start of each run. A file added to a watched directory, or
-not recorded by the run, counts as changed. In a git repository a watched
-directory holds what git tracks or would track there, so build output and
-caches the project ignores never count.
+the files it ran against are unchanged: each run records, for each node with a
+test, one digest of the files it watches at the start of the run. A file
+added to a watched directory, removed or edited changes the digest. Which
+files changed is read from a snapshot of the latest run's file hashes kept
+next to the log; when the snapshot does not match the run a node's evidence
+comes from, the reason names the node's watch instead. In a git repository a
+watched directory holds what git tracks or would track there, so build output
+and caches the project ignores never count.
 
 TEST CHANGED is read from git, so it covers a change made by any route, not
 only those the hooks see: a protected node's test file, the guarded handlers
@@ -494,17 +544,37 @@ error, not something ignored.
 
 ## The log
 
-`.vibloom/log.jsonl`: one entry per run, with the command, every test result,
-the watched files' hashes and any runner error. Each entry carries the hash of
-the one before. `vibloom verify` checks the chain; an edited or removed entry
-breaks it, and nothing after the break is trusted. A run whose output is not a
-report (a compilation error, a missing binary) is recorded as an error, never
-as a pass.
+The run log is local state, never committed: `<git dir>/vibloom/log.jsonl`
+(one folder per project, `<git dir>/vibloom/<folder>/` for a project in a
+folder of a larger repository), or `.vibloom/local/log.jsonl` without git,
+which `init` lists in `.vibloom/.gitignore`. Runs recorded before `git init`
+move to the git folder the first time a command runs there. Next to it,
+`state.json` holds the latest run's file hashes, which only name what changed.
+
+Each entry holds the command, every test result, one digest per node of its
+watched files and any runner error, and the hash of the entry before it.
+`vibloom verify` checks the chain. It catches accidental damage and casual
+edits; it has no key, so a log rewritten from scratch verifies as well as a
+real one. Nothing important rests on it: it is what `status`, `context`, the
+hooks and the commit check read on this machine, and `check` does not read it
+at all. A run whose output is not a report (a compilation error, a missing
+binary) is recorded as an error, never as a pass.
 
 Runs may happen at the same time (two agents, a hook and a person): each is
 chained under a lock when it finishes, so the log stays one chain. If the log
 is damaged anyway, `VIBLOOM_ROLE=verifier vibloom repair` keeps the runs
-before the break and moves the rest to `.vibloom/log.rejected-<time>.jsonl`.
+before the break and moves the rest to `log.rejected-<time>.jsonl` beside it.
+
+Because the log is local, a fresh clone has no states: every node with a test
+is untested until `vibloom check` (or `run`) runs the tests there. CI always
+runs them. The guarantee on a pull request comes from CI re-running the tests
+against the guard as the base branch has it (see below), not from any log.
+
+Upgrading from 0.7.0, a committed `.vibloom/log.jsonl` is moved aside into the
+local folder (`log.committed.jsonl`) by the first command that finds it, and
+never read: a committed log is whatever its last committer wrote. The command
+says once to take it out of git, which the verifier does with
+`git rm --cached .vibloom/log.jsonl` and a commit.
 
 ## Install
 
@@ -534,16 +604,15 @@ vibloom install-hook    # install the commit check in another clone
 vibloom add <kind> "<title>" [--file F --test N] [--watch P] [--on ID] [--detail D] [--id ID] [--hypothetical | --adopted] [--unprotected]   # add a node (verifier); see Start
 vibloom edit <id> [--title T] [--detail D] [--stance S] [--on ID] [--not-on ID] [--watch P] [--unwatch P] [--evidence E] [--drop-evidence E] [--accept ID --reason R] [--unaccept ID]   # change a node (verifier)
 vibloom remove <id>     # take a node out; refused while others rest on it (verifier)
-vibloom scan            # add invariant tests the map does not list yet, and guard the handlers they import (verifier)
+vibloom scan [--tighten]   # add invariant tests the map does not list yet, guard the handlers they import; --tighten narrows existing watches (verifier)
 vibloom survey [<Contract>...] [--propose]   # Foundry: who may call what, upgrades, external calls; --propose files assumptions
 vibloom research        # the short brief an agent works from: notes, survey summary, candidate titles, how to work
-vibloom status [--json] # derived state of every node, troubled first; exit 1 if any needs attention
+vibloom status [--json] [--strict]   # derived state of every node, troubled first
 vibloom run -- --mt X   # run the tests (what follows -- goes to the runner), record, show what changed
-vibloom check [--base ref]   # run, then exit 1 if any node needs attention: for CI
-vibloom sync --base origin/main   # take the base's run log and record the tests on top of it
+vibloom check [--base ref [--allow-guard-changes]] [--strict] [--json | --format github]   # run and decide from that run: for CI
 vibloom context [file]  # what an agent should know before touching a file
 vibloom gaps            # Foundry: contracts and functions no test names, handler functions that always reverted
-vibloom verify          # check the log's hash chain
+vibloom verify          # check the local log's hash chain
 vibloom repair          # set aside everything after a broken link (verifier)
 vibloom precommit       # the commit check, for .git/hooks/pre-commit
 vibloom proposals       # what agents proposed and nobody decided yet
@@ -553,9 +622,108 @@ vibloom hooks           # optional: print the Claude Code hooks configuration
 vibloom hook pre-tool|post-tool|stop   # optional: what those hooks call, with the hook's JSON on stdin
 ```
 
-`status`, `run` and `check` print `N nodes, K need attention.` and then the
-nodes, those needing attention first (in map order), and `run` and `check`
-list what changed state before the table. Output piped to a reader that stops early (`| head`) exits quietly.
+`status`, `run` and `check` print `N nodes, K need attention, M not yet
+reviewed.` and then the nodes, those needing attention first (in map order),
+and `run` and `check` list what changed state before the table. Output piped
+to a reader that stops early (`| head`) exits quietly. `vibloom sync` is gone
+(the log no longer travels with the branch); run it and it says so.
+
+### Exit codes
+
+Every command but the hooks:
+
+| Exit | Meaning                                                                                                                                                                            |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | nothing needs attention                                                                                                                                                            |
+| 1    | a verdict: a node needs attention, a guard change was not approved, the commit check refused, `verify` found a broken chain                                                        |
+| 2    | vibloom could not do its job: no map or an unreadable one, bad arguments, a git error, a role refused, a damaged local log, the runner did not start, timed out or wrote no report |
+
+`vibloom hook ...` keeps the agent's hook protocol: it exits 0 with its answer
+in JSON, and 1 when it fails, never 2 (which Claude Code reads as "block").
+
+### JSON
+
+`status --json` and `check --json` (or `check --format json`) print one object
+in this shape, also when the exit is 2:
+
+```json
+{
+  "format": 1,
+  "exit": 1,
+  "summary": {
+    "nodes": 5,
+    "need_attention": 1,
+    "not_yet_reviewed": 2,
+    "accepted_risks": 0,
+    "strict": false
+  },
+  "nodes": [
+    {
+      "id": "inv.assets-match-flows",
+      "kind": "invariant",
+      "title": "The vault's assets equal everything deposited minus everything withdrawn",
+      "stance": "adopted",
+      "state": "BROKEN",
+      "shown": "BROKEN",
+      "troubled": true,
+      "needs_attention": true,
+      "reason": "failure: assertion failed",
+      "files": ["test/Vault.t.sol", "src/Vault.sol", "test/handlers/VaultHandler.sol"],
+      "changed": [],
+      "rests_on_unreviewed": [],
+      "run": 3,
+      "fuzz": { "runs": 64, "calls": 2048, "reverts": 12 }
+    }
+  ],
+  "not_yet_reviewed": [
+    {
+      "id": "asm.rounding-favours-the-vault",
+      "title": "Rounding in withdraw always favours the vault",
+      "adopt": "vibloom edit asm.rounding-favours-the-vault --stance adopted",
+      "switch_off": "vibloom edit asm.rounding-favours-the-vault --stance off"
+    }
+  ],
+  "accepted_risks": [],
+  "guard": {
+    "base": "origin/main",
+    "base_has_map": true,
+    "allowed": false,
+    "changes": [
+      {
+        "kind": "file_changed",
+        "path": "test/Vault.t.sol",
+        "message": "test/Vault.t.sol: guarded file changed"
+      }
+    ]
+  },
+  "run": { "seq": 3, "command": ["forge", "test", "--json"], "error": null },
+  "log_problems": [],
+  "tool_error": null
+}
+```
+
+- `state` is the plain label of the table above; `shown` adds what the table
+  shows after it (`accepts 1 risk`, `rests on 2 unreviewed`, `unreviewed`).
+- `troubled` is the node's own trouble; `needs_attention` is what counts,
+  with `strict` applied.
+- `reason` is one line, or null; `files` lists the node's test first, then
+  what it watches; `changed` the watched files that changed since its run.
+- `guard` is null without `--base`. Each change has a `kind` (`file_changed`,
+  `file_removed`, `file_added`, `node_removed`, `test_changed`, `test_removed`,
+  `unprotected`, `switched_off`, `accepts_added`, `dependency_removed`,
+  `runner_changed`, `report_changed`, `timeout_changed`, `tests_changed`,
+  `protect_removed`, `strict_off`), a `path`, a `node` when it is about one,
+  and a `message`.
+- `run` is null for `status`. `tool_error` is null unless the exit is 2.
+  Every accepted risk is `{ "node", "dependency", "reason", "in_effect" }`.
+
+New keys may be added; the ones above keep their meaning while `format` is 1.
+
+`check --format github` prints the usual text and, after it, GitHub Actions
+workflow commands, so the findings show as annotations on the pull request:
+`::error` for each node that needs attention (on its test file, at the line
+the test is defined on) and each guard change not approved, and `::warning`
+for each unreviewed node and each approved guard change.
 
 From this repository: `cargo run -p vibloom -- <command>`.
 
@@ -573,11 +741,13 @@ Three pieces work the same whatever writes the code:
   clone's `.git/hooks/pre-commit` (git does not share hooks, so each clone
   installs its own). It refuses a commit that changes a protected test, a path
   in `protect` or the map (unless `VIBLOOM_ROLE=verifier`), that leaves any
-  node needing attention, or that comes with a run log failing verification. After changing code, run
-  `vibloom run` and commit the new log entry with it.
+  node needing attention, or that comes while the local run log fails
+  verification. After changing code, run `vibloom run`; nothing of the log is
+  committed.
 
-- **CI**: `vibloom check` runs the tests, records the run and exits 1 if any node
-  needs attention, so the same rules hold on every pull request. See below.
+- **CI**: `vibloom check --base` runs the tests, decides from that run alone
+  and refuses guard changes nobody approved, so the same rules hold on every
+  pull request. See below.
 
 ## Over MCP
 
@@ -598,7 +768,7 @@ claude mcp add vibloom -- vibloom mcp
 | `research`  | the brief to start from: notes, survey summary, how to propose with evidence                   |
 | `survey`    | Foundry: the full survey of the contracts named in `contracts`                                 |
 | `gaps`      | Foundry: contracts and functions no test names, handlers that always reverted                  |
-| `verify`    | check the log's hash chain                                                                     |
+| `verify`    | check the local log's hash chain                                                               |
 | `propose`   | propose a node with its `evidence` (required) and an optional `id`; kept apart as hypothetical |
 | `proposals` | what is still pending                                                                          |
 
@@ -613,18 +783,54 @@ propose; people and code decide.
 
 Everything above runs on the machine where the code is written, and anything
 that controls that machine can get around it: set `VIBLOOM_ROLE`, skip the git
-hook, or rewrite `.vibloom/log.jsonl` from scratch with a valid chain of its
-own. The boundary an agent cannot cross is on the server: a protected branch on
-GitHub that only accepts pull requests that pass `vibloom check` and, for
-guarded files, a review by their owner.
+hook, or write any local log it likes. The boundary an agent cannot cross is
+on the server: a protected branch on GitHub that only accepts pull requests
+that pass `vibloom check --base` and, for guarded files, a review by their
+owner.
 
 ### The check on every pull request
 
-`.github/workflows/vibloom.yml`:
+`vibloom check --base <ref>` reads the map as it is on `<ref>`
+(`git show <ref>:<project folder>/.vibloom/roots.json`, from git, never from
+the pull request's working tree) and compares the guard with it before it
+runs the tests:
+
+- **The map.** A node removed, a node's test changed or removed, `protected`
+  turned off, a stance set to `off`, an `accepts` added, a `depends_on` edge
+  removed, `strict` turned off, the `runner`, `report`, `timeout` or `tests`
+  changed, or an entry taken out of `protect`. Adding nodes, evidence, edges,
+  `protect` entries or new protected tests is not a guard change.
+- **What the base's map guards.** Each protected test of the base, the
+  helpers it imports and every path in the base's `protect` is compared with
+  its content on `<ref>`: changed, removed, or (for a file the base listed but
+  did not have, such as a `foundry.toml`) added. A new file in a guarded
+  folder is new code, not a change.
+
+Each change is listed on one line, and the check exits 1 with the sentence
+that these are guard changes and need a person's review. With
+`--allow-guard-changes` that part passes, and the result is what the tests
+say. When `<ref>` has no map yet, it says so and passes that part.
+
+Then it runs the tests on the CI machine and decides from that run alone:
+nothing recorded before, on the author's machine or anywhere, can make a node
+hold. A node whose test was not in that run is untested.
+
+A reviewer approving guard changes approves exactly what they read: a
+weakened invariant that the reviewer lets through is then what the tests
+prove. That is why the approval belongs to a person.
+
+`.github/workflows/vibloom.yml`, where a guard change passes only once a
+maintainer has put the `guard-change-approved` label on the pull request, and
+a new push takes the approval away:
 
 ```yaml
 name: vibloom
-on: pull_request
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+permissions:
+  contents: read
+  pull-requests: write
 jobs:
   guard:
     runs-on: ubuntu-latest
@@ -636,44 +842,34 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
       - name: Install VIBloom at a pinned commit
         run: cargo install --locked --git https://github.com/viraloyster/VIBloom --rev <commit> vibloom
+      - name: A new push needs a new approval
+        if: github.event.action == 'synchronize'
+        run: gh pr edit "${{ github.event.number }}" --remove-label guard-change-approved || true
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: Check
-        run: vibloom check --base "origin/${{ github.base_ref }}"
+        env:
+          APPROVED: ${{ github.event.action != 'synchronize' && contains(github.event.pull_request.labels.*.name, 'guard-change-approved') }}
+        run: |
+          allow=""
+          if [ "$APPROVED" = "true" ]; then allow="--allow-guard-changes"; fi
+          vibloom check --base "origin/${{ github.base_ref }}" --format github $allow
 ```
 
-`check --base` does two things before running the tests:
-
-- It reads the log on the base branch from git, not from the pull request, and
-  refuses the pull request if its log does not keep every base run unchanged
-  and in order. A log regenerated from scratch has a valid chain of its own but
-  fails here.
-- Then it runs the tests on the CI machine and records that run, so the result
-  that decides is the one CI produced, not one recorded on the author's machine.
-
-Pin the VIBloom commit: the check is only as trustworthy as the code that runs it.
-
-### When the base branch moves on
-
-The log is one chain, so two branches that both recorded runs cannot both
-keep them: after the first is merged, the second no longer extends the base
-and git reports a conflict in `.vibloom/log.jsonl`. On the second branch:
-
-```bash
-git merge origin/main        # or rebase; ignore the conflict in the log
-vibloom sync --base origin/main
-git add .vibloom/log.jsonl
-```
-
-`sync` takes the base's log as it is and records the tests again on top of
-it, on the merged code. The branch's earlier runs are dropped; what counts is
-the run made after the merge.
+Only people with triage or write access can label a pull request; keep that
+set to the code owners. Pin the VIBloom commit: the check is only as
+trustworthy as the code that runs it.
 
 ### Owners for guarded files
 
-`.github/CODEOWNERS`, listing the map, the log and every protected test:
+`.github/CODEOWNERS`, listing the map and every protected test and guarded
+file:
 
 ```
 /.vibloom/            @your-handle
-/test/Counter.t.sol   @your-handle
+/test/Vault.t.sol     @your-handle
+/test/handlers/       @your-handle
+/foundry.toml         @your-handle
 ```
 
 ### Branch protection
@@ -685,8 +881,8 @@ On the main branch, in the repository settings:
 - do not allow bypassing these settings.
 
 With that in place, an agent with full control of its own machine can still
-write any code, but it cannot merge a change that breaks an invariant, rewrites
-the record or edits a protected test without the owner's review.
+write any code, but it cannot merge a change that breaks an invariant, weakens
+the map or edits a protected test without the owner's review.
 
 ## Optional: Claude Code
 
@@ -753,11 +949,14 @@ The fuzzer finds the drift, and the guard carries it up the map:
 ```
 $ vibloom check
 Run 1: 3 test results recorded.
-4 nodes, 3 need attention.
-BROKEN       inv.total-matches-added   total always equals the sum of what add() added
-UNSUPPORTED  asm.only-add-moves-total  Only add() changes total
-AT RISK      int.accounting-is-exact   Accounting is exact: every unit of total is traceable
-holds        inv.total-bounded         total never overflows a sane bound
+4 nodes, 3 need attention, 1 not yet reviewed.
+BROKEN                           inv.total-matches-added   total always equals the sum of what add() added
+UNSUPPORTED (unreviewed)         asm.only-add-moves-total  Only add() changes total
+AT RISK (rests on 1 unreviewed)  int.accounting-is-exact   Accounting is exact: every unit of total is traceable
+holds                            inv.total-bounded         total never overflows a sane bound
+
+Not yet reviewed (as the verifier, adopt it or switch it off):
+- asm.only-add-moves-total: vibloom edit asm.only-add-moves-total --stance adopted   (or --stance off)
 ```
 
 An agent asked to make the suite pass has two ways out. Editing the invariant
@@ -779,13 +978,19 @@ run again; after `bad()` is removed and the suite runs, all four nodes hold.
 - The Bash check is a heuristic on the command text, not a sandbox: a script
   that writes to a protected file indirectly is not caught while it runs. In a
   git repository the node then shows TEST CHANGED until the verifier commits
-  the change, and the log's hash chain and `git diff` show what changed.
+  the change, `git diff` shows what changed, and `check --base` in CI refuses
+  it as a guard change.
 - The role comes from an environment variable; it separates honest agents, it
   does not authenticate them. Code owners and branch protection are the
   boundary that does.
-- The log's hash chain proves the log was not edited after the fact, not that it
-  was never regenerated. `check --base` against a protected branch is what
-  anchors it.
+- The local log's hash chain has no key: it shows accidental damage, not
+  forgery. Nothing that decides a pull request reads it.
+- `check --base` compares the files the base guards, as the base's map names
+  them. Its import graph for helpers is the relative imports in the text; the
+  handlers `init` found through forge's trees are compared because they are in
+  `protect`.
+- A test that fails without any node resting on it is counted in the run line
+  (`1 failed (1 tied to no node...)`) but does not fail the check.
 - Passing tests does not prove a global property. The guard knows only what the
   map says: it keeps the written assumptions and invariants from being skipped
   or weakened, and shows what is left unsupported when something changes. It

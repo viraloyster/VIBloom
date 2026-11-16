@@ -1,5 +1,6 @@
-//! The record of every run, one JSON line each, chained by hash: an entry cannot
-//! be changed or removed without breaking every hash after it.
+//! The local record of every run, one JSON line each, chained by hash. The
+//! chain catches accidental damage and casual edits; it has no key, so it
+//! proves nothing to anyone who could rewrite the whole file.
 
 use crate::forge::Outcome;
 use crate::hash::{canonical, sha256_hex};
@@ -14,7 +15,12 @@ pub struct RunEntry {
     pub at: String,
     pub command: Vec<String>,
     pub outcomes: Vec<Outcome>,
-    /// Hash of every watched file when the run started; None when it did not exist.
+    /// For each node with a test, one digest of its watched files when the
+    /// run started.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub digests: BTreeMap<String, String>,
+    /// Entries written by 0.7.0 and earlier: the hash of every watched file.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub files: BTreeMap<String, Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -27,7 +33,7 @@ pub struct RunBody {
     pub at: String,
     pub command: Vec<String>,
     pub outcomes: Vec<Outcome>,
-    pub files: BTreeMap<String, Option<String>>,
+    pub digests: BTreeMap<String, String>,
     pub error: Option<String>,
 }
 
@@ -45,7 +51,8 @@ pub fn next_entry(last: Option<&RunEntry>, body: RunBody) -> RunEntry {
         at: body.at,
         command: body.command,
         outcomes: body.outcomes,
-        files: body.files,
+        digests: body.digests,
+        files: BTreeMap::new(),
         error: body.error,
         seq: last.map_or(0, |l| l.seq) + 1,
         prev: last.map_or_else(|| GENESIS.to_string(), |l| l.hash.clone()),
@@ -106,28 +113,6 @@ pub fn read_log(text: &str) -> ReadLog {
     log
 }
 
-/// A branch may only add runs to the log it started from. Its log must keep
-/// every base entry, unchanged and in order; a regenerated log, even one whose
-/// own chain is valid, does not.
-pub fn extends_log(base: &[RunEntry], head: &[RunEntry]) -> Vec<String> {
-    if head.len() < base.len() {
-        return vec![format!(
-            "the log has {} runs, fewer than the {} on the base",
-            head.len(),
-            base.len()
-        )];
-    }
-    for (i, b) in base.iter().enumerate() {
-        if head.get(i).map(|h| &h.hash) != Some(&b.hash) {
-            return vec![format!(
-                "run {} differs from the base: the log was rewritten, not extended",
-                b.seq
-            )];
-        }
-    }
-    vec![]
-}
-
 pub fn to_line(e: &RunEntry) -> String {
     let mut s = serde_json::to_string(e).unwrap_or_default();
     s.push('\n');
@@ -151,7 +136,7 @@ mod tests {
                 reason: None,
                 fuzz: None,
             }],
-            files: BTreeMap::from([("src/A.sol".into(), Some("abc".into()))]),
+            digests: BTreeMap::from([("inv.a".into(), "abc".into())]),
             error: None,
         }
     }
@@ -202,22 +187,21 @@ mod tests {
     }
 
     #[test]
-    fn extends_only_by_appending() {
-        let es = chain();
-        assert!(extends_log(&es[..1], &es).is_empty());
-        let regenerated = next_entry(None, body(Status::Pass, "2026-11-14T00:00:00.000Z"));
-        assert!(
-            read_log(&text(std::slice::from_ref(&regenerated)))
-                .problems
-                .is_empty()
-        );
-        assert_eq!(
-            extends_log(&es[..1], &[regenerated]),
-            vec!["run 1 differs from the base: the log was rewritten, not extended"]
-        );
-        assert_eq!(
-            extends_log(&es, &es[..1]),
-            vec!["the log has 1 runs, fewer than the 2 on the base"]
-        );
+    fn a_chain_regenerated_from_scratch_still_verifies() {
+        // Said plainly in the docs: the chain has no key. Whoever rewrites the
+        // whole file writes a valid chain; only CI re-running the tests counts.
+        let forged = next_entry(None, body(Status::Pass, "2026-11-14T00:00:00.000Z"));
+        assert!(read_log(&text(&[forged])).problems.is_empty());
+    }
+
+    #[test]
+    fn reads_entries_written_before_digests() {
+        let old = r#"{"at":"x","command":["forge"],"outcomes":[],"files":{"src/A.sol":"h"},"seq":1,"prev":"genesis","hash":""}"#;
+        let mut v: Value = serde_json::from_str(old).expect("json");
+        v["hash"] = Value::from(hash_of(&v));
+        let r = read_log(&format!("{v}\n"));
+        assert!(r.problems.is_empty(), "{:?}", r.problems);
+        assert_eq!(r.entries[0].files.len(), 1);
+        assert!(r.entries[0].digests.is_empty());
     }
 }

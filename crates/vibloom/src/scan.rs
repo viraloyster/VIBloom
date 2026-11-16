@@ -53,9 +53,13 @@ fn id_for(name: &str) -> String {
     )
 }
 
-/// `watch` is what a found invariant watches besides its own test file: the
-/// project's sources and tests, so a change to either puts it up for review.
-pub fn add_found(map: &RootsMap, found: &[Found], watch: &[String]) -> (RootsMap, Vec<String>) {
+/// `watch` says what a found invariant watches besides its own test file, so
+/// a change to any of it puts the invariant up for review.
+pub fn add_found(
+    map: &RootsMap,
+    found: &[Found],
+    watch: &dyn Fn(&Found) -> Vec<String>,
+) -> (RootsMap, Vec<String>) {
     // A test the map lists without a contract stands for every contract.
     let known = |f: &Found| {
         map.nodes.iter().filter_map(|n| n.test.as_ref()).any(|t| {
@@ -90,7 +94,7 @@ pub fn add_found(map: &RootsMap, found: &[Found], watch: &[String]) -> (RootsMap
                 contract: Some(f.contract.clone()),
                 name: f.name.clone(),
             }),
-            watch: watch.to_vec(),
+            watch: watch(f),
             depends_on: vec![],
             protected: true,
             evidence: vec![],
@@ -147,7 +151,7 @@ contract CounterTest is Test {
             contract: "D".into(),
             name: "invariant_totalMatchesAdded".into(),
         });
-        let (map, added) = add_found(&start, &found, &["src/".to_string()]);
+        let (map, added) = add_found(&start, &found, &|_| vec!["src/".to_string()]);
         assert_eq!(
             added,
             vec!["inv.not-here", "inv.bounded", "inv.total-matches-added-2"]

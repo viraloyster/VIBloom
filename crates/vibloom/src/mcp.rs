@@ -133,7 +133,7 @@ fn call(cwd: &Path, name: &str, args: &Value) -> Result<String, String> {
     let root = find_root(cwd)
         .ok_or("No .vibloom/roots.json in this project. A person runs `vibloom init` first.")?;
     match name {
-        "status" => Ok(table(&views(&root)?)),
+        "status" => Ok(table(&views(&root)?, load_map(&root)?.strict)),
         "context" => {
             let file = match text(args, "file")? {
                 None => None,
@@ -228,8 +228,7 @@ fn call(cwd: &Path, name: &str, args: &Value) -> Result<String, String> {
                 );
                 let p = propose(&map, &book, draft, iso_now()).map_err(|e| e.join("\n"))?;
                 append(
-                    &root,
-                    PROPOSALS_PATH,
+                    &root.join(PROPOSALS_PATH),
                     &format!("{}\n", serde_json::to_string(&p).unwrap_or_default()),
                 )?;
                 Ok(p)

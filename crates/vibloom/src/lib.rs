@@ -9,6 +9,7 @@ pub mod forge;
 mod foundry;
 pub mod gate;
 mod git;
+pub mod guard;
 pub mod hash;
 pub mod hooks;
 pub mod junit;

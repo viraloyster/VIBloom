@@ -88,8 +88,7 @@ pub(crate) fn proposals(root: &Path, rest: &[&str], on: &[String], io: &mut Io) 
                         node: node.clone(),
                     };
                     append(
-                        root,
-                        PROPOSALS_PATH,
+                        &root.join(PROPOSALS_PATH),
                         &format!("{}\n", serde_json::to_string(&d).unwrap_or_default()),
                     )?;
                     (io.out)(&match node {

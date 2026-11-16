@@ -1,13 +1,14 @@
 use crate::cli::{Args, Fallible, Io};
 use crate::commands::agents::setup_agent;
 use crate::commands::verifier;
-use crate::foundry::{forge_invariants, forge_list, project_plan};
+use crate::foundry::{Closure, forge_invariants, forge_list, import_closures, project_plan};
 use crate::git::{git, install_hook};
 use crate::map::{MAP_PATH, RootsMap, serialize_map};
-use crate::scan::{add_found, find_invariants};
+use crate::scan::{Found, add_found, find_invariants};
 use crate::setup::{Stack, helpers, tests_dir};
-use crate::store::{load_map, walk, write_atomic};
+use crate::store::{ignore_local, load_map, walk, write_atomic};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -50,14 +51,18 @@ pub(crate) fn init(io: &mut Io, args: &Args) -> Fallible<i32> {
     if let Some(t) = tests_dir(&start.tests, &files) {
         start.tests = t;
     }
-    let found = scan(&io.cwd, &start, p.src.as_deref(), listed.as_ref());
+    let found = scan(&io.cwd, &start, p.src.as_deref(), listed.as_ref(), true);
     fs::create_dir_all(io.cwd.join(".vibloom")).map_err(|e| e.to_string())?;
     write_atomic(&io.cwd.join(MAP_PATH), &serialize_map(&found.map))?;
+    ignore_local(&io.cwd);
     (io.out)(&format!(
         "Created {MAP_PATH}: runner `{}`, {} invariant tests found.",
         p.runner.join(" "),
         found.added.len()
     ));
+    if !found.added.is_empty() {
+        (io.out)(found.graph);
+    }
     if !found.map.protect.is_empty() {
         (io.out)(&format!(
             "Guarded besides the tests: {}.",
@@ -96,12 +101,21 @@ pub(crate) fn init(io: &mut Io, args: &Args) -> Fallible<i32> {
     Ok(0)
 }
 
-pub(crate) fn rescan(root: &Path, io: &mut Io) -> Fallible<i32> {
+pub(crate) fn rescan(root: &Path, io: &mut Io, tighten: bool) -> Fallible<i32> {
     verifier(io.role, "changes the map")?;
     let map = load_map(root)?;
     let src = project_plan(root, None).src;
-    let found = scan(root, &map, src.as_deref(), forge_list(root, &map).as_ref());
-    if !found.added.is_empty() || !found.guarded.is_empty() {
+    let mut found = scan(
+        root,
+        &map,
+        src.as_deref(),
+        forge_list(root, &map).as_ref(),
+        tighten,
+    );
+    let write = !found.added.is_empty()
+        || !found.guarded.is_empty()
+        || (tighten && !found.tightened.is_empty());
+    if write {
         write_atomic(&root.join(MAP_PATH), &serialize_map(&found.map))?;
     }
     (io.out)(&if found.added.is_empty() {
@@ -112,6 +126,22 @@ pub(crate) fn rescan(root: &Path, io: &mut Io) -> Fallible<i32> {
     if !found.guarded.is_empty() {
         (io.out)(&format!("Now guarded: {}.", found.guarded.join(", ")));
     }
+    (io.out)(found.graph);
+    if !found.tightened.is_empty() {
+        let lines: Vec<String> = found
+            .tightened
+            .drain(..)
+            .map(|(id, from, to)| format!("- {id}: {} -> {}", from.join(", "), to.join(", ")))
+            .collect();
+        (io.out)(&if tighten {
+            format!("Tightened what these watch:\n{}", lines.join("\n"))
+        } else {
+            format!(
+                "Would tighten what these watch, to the files their tests import:\n{}\nRun `vibloom scan --tighten` to do it.",
+                lines.join("\n")
+            )
+        });
+    }
     Ok(0)
 }
 
@@ -120,14 +150,24 @@ pub(crate) struct Scanned {
     added: Vec<String>,
     /// Handlers and base contracts now guarded with the tests that use them.
     guarded: Vec<String>,
+    /// Existing nodes whose watch narrows to their import closure: id, from, to.
+    tightened: Vec<(String, Vec<String>, Vec<String>)>,
+    /// Which import graph was read, said to the person.
+    graph: &'static str,
 }
 
-// `listed` is forge's list of tests, when it answered.
+const FROM_TREES: &str = "Imports read from forge's syntax trees (remappings included): each invariant watches the files its test imports.";
+const FROM_TEXT: &str = "Imports read from the source text (relative imports only; forge's syntax trees were not available): each invariant watches the source and test folders.";
+
+// `listed` is forge's list of tests, when it answered. Existing nodes are
+// narrowed to their import closure only when `tighten` says so; the result
+// says what would change either way.
 pub(crate) fn scan(
     root: &Path,
     map: &RootsMap,
     src: Option<&str>,
     listed: Option<&Value>,
+    tighten: bool,
 ) -> Scanned {
     let found = listed.and_then(forge_invariants).unwrap_or_else(|| {
         let mut files = Vec::new();
@@ -138,13 +178,52 @@ pub(crate) fn scan(
             .flat_map(|f| find_invariants(f, &fs::read_to_string(root.join(f)).unwrap_or_default()))
             .collect()
     });
-    // A change to the sources or to any test file puts a found invariant up
-    // for review: its handler lives among the tests.
-    let mut watch: Vec<String> = src.map(str::to_string).into_iter().collect();
-    if !watch.contains(&map.tests) {
-        watch.push(map.tests.clone());
+    let mut test_files: Vec<String> = found.iter().map(|f| f.file.clone()).collect();
+    test_files.extend(
+        map.nodes
+            .iter()
+            .filter_map(|n| n.test.as_ref().map(|t| t.file.clone())),
+    );
+    test_files.retain(|f| f.ends_with(".sol"));
+    test_files.sort();
+    test_files.dedup();
+    let closures: Option<BTreeMap<String, Closure>> = import_closures(root, map, &test_files);
+    // Without the trees, a change to the sources or to any test file puts a
+    // found invariant up for review: its handler lives among the tests.
+    let mut broad: Vec<String> = src.map(str::to_string).into_iter().collect();
+    if !broad.contains(&map.tests) {
+        broad.push(map.tests.clone());
     }
+    let watch = |f: &Found| match closures.as_ref().and_then(|c| c.get(&f.file)) {
+        Some(c) => c.watch.clone(),
+        None => broad.clone(),
+    };
     let (mut out, added) = add_found(map, &found, &watch);
+    let mut tightened = Vec::new();
+    for n in out.nodes.iter_mut().filter(|n| !added.contains(&n.id)) {
+        let Some(c) = n
+            .test
+            .as_ref()
+            .and_then(|t| closures.as_ref().and_then(|cs| cs.get(&t.file)))
+        else {
+            continue;
+        };
+        // Only a watch that holds whole folders is narrowed; files someone
+        // listed by hand stay.
+        if !n.watch.iter().any(|w| w.ends_with('/')) {
+            continue;
+        }
+        let mut to: Vec<String> = c.watch.clone();
+        to.extend(n.watch.iter().filter(|w| !w.ends_with('/')).cloned());
+        to.sort();
+        to.dedup();
+        if to != n.watch {
+            tightened.push((n.id.clone(), n.watch.clone(), to.clone()));
+            if tighten {
+                n.watch = to;
+            }
+        }
+    }
     let tests: Vec<String> = out
         .nodes
         .iter()
@@ -152,8 +231,16 @@ pub(crate) fn scan(
         .filter_map(|n| n.test.as_ref().map(|t| t.file.clone()))
         .collect();
     let read = |f: &str| fs::read_to_string(root.join(f)).ok();
+    let mut helper_files = helpers(&tests, &map.tests, &read);
+    for t in &tests {
+        if let Some(c) = closures.as_ref().and_then(|cs| cs.get(t)) {
+            helper_files.extend(c.helpers.iter().cloned());
+        }
+    }
+    helper_files.sort();
+    helper_files.dedup();
     let mut guarded = Vec::new();
-    for h in helpers(&tests, &map.tests, &read) {
+    for h in helper_files {
         if !crate::hooks::is_guarded(&out, &h) {
             out.protect.push(h.clone());
             guarded.push(h);
@@ -163,5 +250,11 @@ pub(crate) fn scan(
         map: out,
         added,
         guarded,
+        tightened,
+        graph: if closures.is_some() {
+            FROM_TREES
+        } else {
+            FROM_TEXT
+        },
     }
 }

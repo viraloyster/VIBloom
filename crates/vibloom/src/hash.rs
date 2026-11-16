@@ -15,6 +15,16 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     out
 }
 
+/// One digest for a set of files and their hashes (None for a missing file):
+/// equal exactly when every path and every hash is.
+pub fn files_digest(files: &std::collections::BTreeMap<String, Option<String>>) -> String {
+    let mut text = String::new();
+    for (path, hash) in files {
+        let _ = writeln!(text, "{path}\t{}", hash.as_deref().unwrap_or("-"));
+    }
+    sha256_hex(text.as_bytes())
+}
+
 /// A string as `JSON.stringify` writes it: only quotes, backslashes and
 /// control characters are escaped; everything else is written as is.
 pub fn js_string(s: &str) -> String {

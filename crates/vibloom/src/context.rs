@@ -3,7 +3,7 @@
 //! nodes connected to them, the reason for anything in trouble elsewhere, and
 //! a count of the rest. On a large map that is a small part of it.
 
-use crate::derive::{NodeView, label, shown, troubled};
+use crate::derive::{NodeView, label, shown, summary_line, troubled};
 use crate::map::covers;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -145,14 +145,9 @@ pub fn context(views: &[NodeView], path: Option<&str>) -> String {
             .collect();
         connected.extend(above);
     }
-    let trouble = views.iter().filter(|v| troubled(v)).count();
     let mut out = vec![
         "VIBloom roots. States are derived from test runs; an agent cannot set them.".to_string(),
-        format!(
-            "{} nodes, {trouble} {} attention.",
-            views.len(),
-            if trouble == 1 { "needs" } else { "need" }
-        ),
+        summary_line(views, false),
     ];
     // Within a group, what needs attention comes first.
     let pick = |set: &HashSet<&str>| -> Vec<&NodeView> {
@@ -275,6 +270,7 @@ mod tests {
             test_file: None,
             sources: vec![],
             accepts: vec![],
+            unreviewed: vec![],
         }
     }
 
@@ -328,7 +324,7 @@ mod tests {
     #[test]
     fn the_overview_is_what_is_wrong_and_a_count() {
         let text = context(&map(), None);
-        assert!(text.contains("7 nodes, 1 needs attention."));
+        assert!(text.contains("7 nodes, 1 needs attention, 0 not yet reviewed."));
         assert!(text.contains("Needs attention:\n- inv.other [BROKEN]"));
         assert!(text.contains("The rest: 4 adopted, 2 holds"));
         assert!(!text.contains("inv.supply"));

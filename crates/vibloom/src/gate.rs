@@ -1,7 +1,7 @@
 //! The check before a commit. It works with any agent, any editor and no AI at
 //! all: whoever commits goes through it.
 
-use crate::derive::{Evidence, NodeView, label, troubled};
+use crate::derive::{NodeView, label, troubled, why};
 use crate::hooks::{Role, guarded_for_commit};
 use crate::map::RootsMap;
 
@@ -24,20 +24,7 @@ pub fn precommit(
     }
     problems.extend(log_problems.iter().map(|p| format!("run log: {p}")));
     for v in views.iter().filter(|v| troubled(v)) {
-        let why = if !v.changed.is_empty() {
-            let run = v.run.map_or_else(|| "?".to_string(), |r| r.to_string());
-            format!("; changed since run {run}: {}", v.changed.join(", "))
-        } else if let Some(r) = &v.reason {
-            if v.evidence == Evidence::TestChanged {
-                format!("; {r}")
-            } else {
-                format!("; failure: {r}")
-            }
-        } else if !v.because.is_empty() {
-            format!("; because of {}", v.because.join(", "))
-        } else {
-            String::new()
-        };
+        let why = why(v).map(|w| format!("; {w}")).unwrap_or_default();
         problems.push(format!("{} [{}] {}{why}", v.id, label(v), v.title));
     }
     problems
@@ -46,6 +33,7 @@ pub fn precommit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::derive::Evidence;
     use crate::hooks::tests::view;
     use crate::map::parse_map;
     use serde_json::json;
@@ -65,11 +53,7 @@ mod tests {
 
     #[test]
     fn passes_tested_code_with_its_log_and_proposals() {
-        let staged = s(&[
-            "src/C.sol",
-            ".vibloom/log.jsonl",
-            ".vibloom/proposals.jsonl",
-        ]);
+        let staged = s(&["src/C.sol", ".vibloom/proposals.jsonl"]);
         assert!(
             precommit(
                 &map(),
@@ -84,7 +68,8 @@ mod tests {
 
     #[test]
     fn refuses_guarded_files_from_anyone_but_the_verifier() {
-        let staged = s(&["test/C.t.sol", ".vibloom/roots.json"]);
+        // A committed run log is no longer the guard's: it is refused too.
+        let staged = s(&["test/C.t.sol", ".vibloom/roots.json", ".vibloom/log.jsonl"]);
         assert_eq!(
             precommit(
                 &map(),
@@ -95,7 +80,8 @@ mod tests {
             ),
             vec![
                 "test/C.t.sol is guarded: only VIBLOOM_ROLE=verifier may commit changes to it",
-                ".vibloom/roots.json is guarded: only VIBLOOM_ROLE=verifier may commit changes to it"
+                ".vibloom/roots.json is guarded: only VIBLOOM_ROLE=verifier may commit changes to it",
+                ".vibloom/log.jsonl is guarded: only VIBLOOM_ROLE=verifier may commit changes to it"
             ]
         );
         assert!(
@@ -126,7 +112,7 @@ mod tests {
         );
         assert_eq!(
             precommit(&map(), &[view(Evidence::Untested)], &[], Role::Builder, &[]),
-            vec!["inv.sum [untested] sum"]
+            vec!["inv.sum [untested] sum; its test did not run"]
         );
         let mut changed = view(Evidence::TestChanged);
         changed.reason = Some("not committed: test/C.t.sol".into());

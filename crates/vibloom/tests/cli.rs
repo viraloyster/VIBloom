@@ -164,7 +164,7 @@ fn records_a_runner_failure_as_an_error_never_a_pass() {
         m["runner"] = json!(["sh", "-c", "echo 'Compiler run failed' >&2; exit 1"])
     });
     let r = cli(&dir, &["check"]);
-    assert_eq!(r.code, 1);
+    assert_eq!(r.code, 2);
     assert!(
         r.err
             .contains("recorded with an error: the runner printed no JSON report"),
@@ -204,7 +204,7 @@ fn reads_a_junit_report_and_never_a_stale_one() {
         "{}",
         broken.out
     );
-    let log = fs::read_to_string(dir.join(".vibloom/log.jsonl")).expect("log");
+    let log = fs::read_to_string(dir.join(".vibloom/local/log.jsonl")).expect("log");
     assert!(log.contains("sum < total"), "{log}");
 
     fs::write(dir.join("src/C.sol"), "contract C { }").expect("write");
@@ -213,7 +213,7 @@ fn reads_a_junit_report_and_never_a_stale_one() {
     // The report from the last run is still on disk; it must not count again.
     edit_map(&dir, |m| m["runner"] = json!(["sh", "junit.sh", "none"]));
     let none = cli(&dir, &["check"]);
-    assert_eq!(none.code, 1);
+    assert_eq!(none.code, 2);
     assert!(
         none.err
             .contains("the runner wrote no report at out/junit.xml"),
@@ -243,40 +243,167 @@ fn the_commit_check_needs_no_agent() {
     assert!(r.err.contains("test/C.t.sol is guarded"));
 }
 
-#[test]
-fn refuses_a_branch_whose_log_was_rewritten() {
+const TWO_SUITES: &str = r#"#!/bin/sh
+if grep -q bug src/C.sol; then s=Failure; r='"drift"'; else s=Success; r=null; fi
+printf '{"test/C.t.sol:CT":{"test_results":{"invariant_sum()":{"status":"%s","reason":%s}}},"test/New.t.sol:NT":{"test_results":{"invariant_new()":{"status":"Success","reason":null}}}}\n' "$s" "$r"
+"#;
+
+// A project on main with its map committed, and a feature branch checked out.
+fn on_a_branch() -> PathBuf {
     let dir = project();
     with_runner(&dir);
     fs::write(dir.join("src/C.sol"), "contract C { }").expect("write");
-    git(&dir, &["init", "-q"]);
-    cli(&dir, &["run"]);
+    fs::write(dir.join("foundry.toml"), "[invariant]\nruns = 64\n").expect("write");
+    edit_map(&dir, |m| m["protect"] = json!(["foundry.toml"]));
+    git(&dir, &["init", "-q", "-b", "main"]);
     git(&dir, &["add", "-A"]);
-    git(&dir, &["commit", "-q", "-m", "base"]);
-    git(&dir, &["branch", "base"]);
-    cli(&dir, &["run"]);
-    assert_eq!(cli(&dir, &["check", "--base", "base"]).code, 0);
+    git(&dir, &["commit", "-qm", "base"]);
+    git(&dir, &["checkout", "-qb", "feature"]);
+    dir
+}
 
-    fs::write(dir.join(".vibloom/log.jsonl"), "").expect("write");
-    cli(&dir, &["run"]);
-    assert_eq!(cli(&dir, &["verify"]).code, 0);
-    let r = cli(&dir, &["check", "--base", "base"]);
-    assert_eq!(r.code, 1);
-    assert!(r.err.contains("rewritten, not extended"), "{}", r.err);
+#[test]
+fn check_against_the_base_refuses_a_gutted_invariant_and_a_leak() {
+    let dir = on_a_branch();
+    assert_eq!(cli(&dir, &["check", "--base", "main"]).code, 0);
+    // The attack: the invariant asserts nothing, the code leaks, the commit
+    // skips the hook, and the recorded state on this machine says "holds".
+    fs::write(
+        dir.join("test/C.t.sol"),
+        "contract CT { function invariant_sum() public { assert(true); } }",
+    )
+    .expect("write");
+    fs::write(dir.join("src/C.sol"), "contract C { /* leak 1 wei */ }").expect("write");
+    fs::write(dir.join("foundry.toml"), "[invariant]\nruns = 1\n").expect("write");
+    edit_map(&dir, |m| {
+        m["nodes"][0]["protected"] = json!(false);
+        m["timeout"] = json!(5);
+    });
+    git(&dir, &["commit", "-qam", "tidy", "--no-verify"]);
+    assert_eq!(cli(&dir, &["run"]).code, 0);
+    assert_eq!(cli(&dir, &["status"]).code, 0);
+
+    let r = cli(&dir, &["check", "--base", "main"]);
+    assert_eq!(r.code, 1, "{}\n{}", r.out, r.err);
+    for want in [
+        "Guard changes against main:",
+        "- the timeout changed from 3600 s to 5 s",
+        "- inv.sum: its test is no longer protected",
+        "- foundry.toml: guarded file changed",
+        "- test/C.t.sol: guarded file changed",
+        "they need a person's review",
+    ] {
+        assert!(r.out.contains(want), "{want}: {}", r.out);
+    }
+    let j: Value =
+        serde_json::from_str(&cli(&dir, &["check", "--base", "main", "--json"]).out).expect("json");
+    assert_eq!(j["exit"], 1);
+    assert_eq!(j["guard"]["changes"].as_array().map(Vec::len), Some(4));
+    assert_eq!(j["guard"]["changes"][3]["kind"], "file_changed");
+    assert_eq!(j["tool_error"], Value::Null);
+    let gh = cli(&dir, &["check", "--base", "main", "--format", "github"]);
     assert!(
-        cli(&dir, &["check", "--base", "nope"])
-            .err
-            .contains("nope is not a commit here")
+        gh.out.contains(
+            "::error file=test/C.t.sol,title=VIBloom guard change::test/C.t.sol: guarded file changed"
+        ),
+        "{}",
+        gh.out
     );
+    // Approved by a reviewer, the guard part passes; the tests decide.
+    let allowed = cli(&dir, &["check", "--base", "main", "--allow-guard-changes"]);
+    assert_eq!(allowed.code, 0, "{}", allowed.out);
+    assert!(
+        allowed.out.contains("a reviewer approved"),
+        "{}",
+        allowed.out
+    );
+    assert_eq!(cli(&dir, &["check", "--allow-guard-changes"]).code, 2);
+}
+
+#[test]
+fn check_against_the_base_passes_new_nodes_and_new_tests_and_runs_fresh() {
+    let dir = on_a_branch();
+    fs::write(
+        dir.join("test/New.t.sol"),
+        "contract NT { function invariant_new() public {} }",
+    )
+    .expect("write");
+    fs::write(dir.join("runner.sh"), TWO_SUITES).expect("write");
+    edit_map(&dir, |m| {
+        let nodes = m["nodes"].as_array_mut().expect("nodes");
+        nodes.push(
+            json!({ "id": "inv.new", "kind": "invariant", "title": "new",
+            "test": { "file": "test/New.t.sol", "contract": "NT", "name": "invariant_new" } }),
+        );
+        nodes.push(
+            json!({ "id": "asm.only-add", "kind": "assumption", "title": "only add",
+            "depends_on": ["inv.sum"], "evidence": ["src/C.sol:1"] }),
+        );
+    });
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "more", "--no-verify"]);
+    let r = cli(&dir, &["check", "--base", "main"]);
+    assert_eq!(r.code, 0, "{}\n{}", r.out, r.err);
+    assert!(
+        r.out.contains("The guard is as it is on main."),
+        "{}",
+        r.out
+    );
+    assert!(
+        r.out
+            .contains("3 nodes, 0 need attention, 1 not yet reviewed."),
+        "{}",
+        r.out
+    );
+
+    // A forged local log is never what check reads: it runs the tests.
+    fs::write(dir.join("src/C.sol"), "contract C { /* bug */ }").expect("write");
+    let log = log_of(&dir);
+    let forged = fs::read_to_string(&log).expect("log");
+    let broken = cli(&dir, &["check", "--base", "main"]);
+    assert_eq!(broken.code, 1, "{}", broken.out);
+    fs::write(&log, forged).expect("write");
+    assert_eq!(cli(&dir, &["check"]).code, 1);
+    // No map on the base: said, and the guard part passes.
+    let empty = Command::new("git")
+        .args(["-c", "user.name=t", "-c", "user.email=t@t", "commit-tree"])
+        .args(["4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "empty"])
+        .current_dir(&dir)
+        .output()
+        .expect("git");
+    let sha = String::from_utf8_lossy(&empty.stdout).trim().to_string();
+    git(&dir, &["branch", "empty", &sha]);
+    let none = cli(&dir, &["check", "--base", "empty"]);
+    assert!(
+        none.out.contains("empty has no .vibloom/roots.json yet"),
+        "{}",
+        none.out
+    );
+    let gone = cli(&dir, &["check", "--base", "nope", "--json"]);
+    assert_eq!(gone.code, 2);
+    let j: Value = serde_json::from_str(&gone.out).expect("json");
+    assert!(
+        j["tool_error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("nope is not a commit here"),
+        "{j}"
+    );
+}
+
+// Where the local log of a project in a git repository is.
+fn log_of(dir: &Path) -> PathBuf {
+    dir.join(".git/vibloom/log.jsonl")
 }
 
 #[test]
 fn verifies_and_extends_a_log_written_by_the_typescript_guard() {
     let dir = project();
     let fx = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ts-log");
-    fs::create_dir_all(dir.join(".vibloom")).expect("dir");
+    fs::create_dir_all(dir.join(".vibloom/local")).expect("dir");
     for (from, to) in [
         ("roots.json", ".vibloom/roots.json"),
-        ("log.jsonl", ".vibloom/log.jsonl"),
+        ("log.jsonl", ".vibloom/local/log.jsonl"),
         ("C.sol", "src/C.sol"),
         ("C.t.sol", "test/C.t.sol"),
     ] {
@@ -290,6 +417,37 @@ fn verifies_and_extends_a_log_written_by_the_typescript_guard() {
     edit_map(&dir, |m| m["runner"] = json!(["sh", "runner.sh"]));
     assert!(cli(&dir, &["run"]).out.starts_with("Run 3:"));
     assert_eq!(cli(&dir, &["verify"]).out, "3 runs, chain intact.");
+}
+
+#[test]
+fn a_committed_log_is_moved_aside_once_and_never_read() {
+    let dir = project();
+    let fx = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ts-log");
+    fs::create_dir_all(dir.join(".vibloom")).expect("dir");
+    for (from, to) in [
+        ("roots.json", ".vibloom/roots.json"),
+        ("log.jsonl", ".vibloom/log.jsonl"),
+        ("C.sol", "src/C.sol"),
+        ("C.t.sol", "test/C.t.sol"),
+    ] {
+        fs::copy(fx.join(from), dir.join(to)).expect("copy");
+    }
+    // Its passes verify, yet nothing holds: whoever committed it wrote it.
+    let first = cli(&dir, &["status"]);
+    assert_eq!(first.code, 1, "{}", first.out);
+    assert!(first.out.contains("untested"), "{}", first.out);
+    assert!(
+        first.err.contains("git rm --cached .vibloom/log.jsonl"),
+        "{}",
+        first.err
+    );
+    assert!(!dir.join(".vibloom/log.jsonl").exists());
+    assert!(dir.join(".vibloom/local/log.committed.jsonl").exists());
+    assert_eq!(cli(&dir, &["status"]).err, "");
+    assert_eq!(
+        fs::read_to_string(dir.join(".vibloom/.gitignore")).expect("ignore"),
+        "local/\n"
+    );
 }
 
 #[test]
@@ -340,7 +498,7 @@ fn serves_mcp_and_keeps_proposals_out_of_the_map_until_accepted() {
     );
     // An agent cannot accept what it proposed: deciding needs the verifier.
     let refused = cli(&dir, &["proposals", "accept", "p1"]);
-    assert_eq!(refused.code, 1);
+    assert_eq!(refused.code, 2);
     assert!(
         refused.err.contains("Only the verifier decides"),
         "{}",
@@ -355,7 +513,7 @@ fn serves_mcp_and_keeps_proposals_out_of_the_map_until_accepted() {
     assert!(
         cli(&dir, &["status"])
             .out
-            .contains("UNSUPPORTED  asm.only-add-changes-total")
+            .contains("UNSUPPORTED (unreviewed)  asm.only-add-changes-total")
     );
     assert_eq!(cli(&dir, &["proposals"]).out, "No pending proposals.");
 }
@@ -426,7 +584,7 @@ fn concurrent_runs_keep_one_chain_and_a_broken_log_can_be_repaired() {
     assert_eq!(cli(&dir, &["verify"]).out, "6 runs, chain intact.");
 
     // Someone edits run 4 by hand: runs 1 to 3 still verify, the rest do not.
-    let path = dir.join(".vibloom/log.jsonl");
+    let path = dir.join(".vibloom/local/log.jsonl");
     let text = fs::read_to_string(&path).expect("log");
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
     lines[3] = lines[3].replace("\"fail\"", "\"pass\"");
@@ -434,7 +592,7 @@ fn concurrent_runs_keep_one_chain_and_a_broken_log_can_be_repaired() {
     assert_eq!(cli(&dir, &["verify"]).code, 1);
     let stuck = cli(&dir, &["run"]);
     assert!(stuck.err.contains("vibloom repair"), "{}", stuck.err);
-    assert_eq!(cli(&dir, &["repair"]).code, 1);
+    assert_eq!(cli(&dir, &["repair"]).code, 2);
     let repaired = vibloom(&dir, &["repair"], "", true);
     assert!(
         repaired
@@ -451,16 +609,17 @@ fn concurrent_runs_keep_one_chain_and_a_broken_log_can_be_repaired() {
 fn rejects_mistyped_map_keys_and_options() {
     let dir = project();
     with_runner(&dir);
-    assert_eq!(cli(&dir, &["run"]).code, 0);
-    let before = fs::read_to_string(dir.join(".vibloom/log.jsonl")).expect("log");
+    // The invariant is broken: `run` says so in its exit code.
+    assert_eq!(cli(&dir, &["run"]).code, 1);
+    let before = fs::read_to_string(dir.join(".vibloom/local/log.jsonl")).expect("log");
 
     // A mistyped option is not handed to the runner, and records nothing.
     let bad = cli(&dir, &["run", "--mt", "x"]);
-    assert_eq!(bad.code, 1);
+    assert_eq!(bad.code, 2);
     assert!(bad.err.contains("go after `--`"), "{}", bad.err);
     assert!(cli(&dir, &["run", "--help"]).out.starts_with("vibloom:"));
     assert_eq!(
-        fs::read_to_string(dir.join(".vibloom/log.jsonl")).expect("log"),
+        fs::read_to_string(dir.join(".vibloom/local/log.jsonl")).expect("log"),
         before
     );
     assert!(
@@ -476,7 +635,7 @@ fn rejects_mistyped_map_keys_and_options() {
 
     edit_map(&dir, |m| m["nodes"][0]["wach"] = json!(["src/"]));
     let typo = cli(&dir, &["status"]);
-    assert_eq!(typo.code, 1);
+    assert_eq!(typo.code, 2);
     assert!(
         typo.err.contains("inv.sum: unknown key \"wach\""),
         "{}",
@@ -523,8 +682,18 @@ fn init_guards_what_an_invariant_test_leans_on() {
     )
     .expect("write");
     fs::write(dir.join("test/handlers/H.sol"), "contract H {}").expect("write");
-    let out = cli(&dir, &["init"]).out;
+    // No forge at all: the imports are read from the text, and it says so.
+    let o = Command::new(env!("CARGO_BIN_EXE_vibloom"))
+        .arg("init")
+        .current_dir(&dir)
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", &dir)
+        .stdin(Stdio::null())
+        .output()
+        .expect("run");
+    let out = String::from_utf8_lossy(&o.stdout).into_owned();
     assert!(out.contains("1 invariant tests found"), "{out}");
+    assert!(out.contains("Imports read from the source text"), "{out}");
     let m = read_map(&dir);
     assert_eq!(m["protect"], json!(["foundry.toml", "test/handlers/H.sol"]));
     assert_eq!(m["nodes"][0]["watch"], json!(["src/", "test/"]));
@@ -549,7 +718,7 @@ fn sets_up_another_stack_and_adds_nodes_by_hand() {
     let m = read_map(&dir);
     assert_eq!(m["report"], ".pytest_cache/vibloom-junit.xml");
     assert_eq!(m["tests"], "tests/");
-    assert_eq!(cli(&dir, &["init", "--stack", "cobol"]).code, 1);
+    assert_eq!(cli(&dir, &["init", "--stack", "cobol"]).code, 2);
 
     let add = ["add", "invariant", "a balance never goes negative"];
     let test = [
@@ -559,7 +728,7 @@ fn sets_up_another_stack_and_adds_nodes_by_hand() {
         "test_never_negative",
     ];
     let refused = cli(&dir, &[&add[..], &test[..]].concat());
-    assert_eq!(refused.code, 1);
+    assert_eq!(refused.code, 2);
     assert!(refused.err.contains("only the verifier"), "{}", refused.err);
     let no_test = vibloom(&dir, &add, "", true);
     assert!(
@@ -610,7 +779,7 @@ fn sets_up_another_stack_and_adds_nodes_by_hand() {
         "",
         true,
     );
-    assert_eq!(both.code, 1);
+    assert_eq!(both.code, 2);
     assert!(both.err.contains("not both"), "{}", both.err);
     let unknown = vibloom(
         &dir,
@@ -638,7 +807,7 @@ fn sets_up_another_stack_and_adds_nodes_by_hand() {
 fn installs_the_commit_check_once() {
     let dir = project();
     with_runner(&dir);
-    assert_eq!(cli(&dir, &["install-hook"]).code, 1);
+    assert_eq!(cli(&dir, &["install-hook"]).code, 2);
     git(&dir, &["init", "-q"]);
     assert!(
         cli(&dir, &["install-hook"])
@@ -653,47 +822,102 @@ fn installs_the_commit_check_once() {
     );
     fs::write(dir.join(".git/hooks/pre-commit"), "#!/bin/sh\nnpm test\n").expect("write");
     let other = cli(&dir, &["install-hook"]);
-    assert_eq!(other.code, 1);
+    assert_eq!(other.code, 2);
     assert!(other.err.contains("Add this line to it"), "{}", other.err);
 }
 
 #[test]
-fn sync_takes_the_base_log_when_two_branches_both_ran() {
+fn unreviewed_assumptions_are_shown_and_count_only_when_strict() {
     let dir = project();
     with_runner(&dir);
     fs::write(dir.join("src/C.sol"), "contract C { }").expect("write");
-    git(&dir, &["init", "-q", "-b", "main"]);
-    cli(&dir, &["run"]);
-    git(&dir, &["add", "-A"]);
-    git(&dir, &["commit", "-qm", "base"]);
-
-    git(&dir, &["checkout", "-qb", "feature"]);
-    cli(&dir, &["run"]);
-    git(&dir, &["commit", "-qam", "feature ran"]);
-    git(&dir, &["checkout", "-q", "main"]);
-    cli(&dir, &["run"]);
-    cli(&dir, &["run"]);
-    git(&dir, &["commit", "-qam", "main ran twice"]);
-    git(&dir, &["checkout", "-q", "feature"]);
-
-    assert_eq!(cli(&dir, &["check", "--base", "main"]).code, 1);
-    assert_eq!(cli(&dir, &["sync"]).code, 1);
-    let synced = cli(&dir, &["sync", "--base", "main"]);
-    assert_eq!(synced.code, 0, "{}", synced.err);
+    edit_map(&dir, |m| {
+        let nodes = m["nodes"].as_array_mut().expect("nodes");
+        nodes.push(
+            json!({ "id": "asm.a", "kind": "assumption", "title": "a", "depends_on": ["inv.sum"] }),
+        );
+        nodes.push(json!({ "id": "asm.b", "kind": "assumption", "title": "b" }));
+        nodes.push(json!({ "id": "int.x", "kind": "intention", "title": "x", "depends_on": ["asm.a", "asm.b"] }));
+    });
+    let r = cli(&dir, &["check"]);
+    assert_eq!(r.code, 0, "{}", r.out);
+    for want in [
+        "4 nodes, 0 need attention, 2 not yet reviewed.",
+        "adopted (rests on 2 unreviewed)  int.x",
+        "Not yet reviewed (as the verifier, adopt it or switch it off):",
+        "- asm.a: vibloom edit asm.a --stance adopted   (or --stance off)",
+    ] {
+        assert!(r.out.contains(want), "{want}: {}", r.out);
+    }
+    let strict = cli(&dir, &["check", "--strict"]);
+    assert_eq!(strict.code, 1);
     assert!(
-        synced.out.starts_with("Took the 3 runs on main"),
-        "{}",
-        synced.out
-    );
-    assert!(synced.out.contains("Run 4:"), "{}", synced.out);
-    assert_eq!(cli(&dir, &["verify"]).out, "4 runs, chain intact.");
-    assert_eq!(cli(&dir, &["check", "--base", "main"]).code, 0);
-    // Already in step with the base: nothing is replaced.
-    assert!(
-        cli(&dir, &["sync", "--base", "main"])
+        strict
             .out
-            .starts_with("The run log already extends")
+            .contains("4 nodes, 3 need attention, 2 not yet reviewed."),
+        "{}",
+        strict.out
     );
+    assert_eq!(cli(&dir, &["status", "--strict"]).code, 1);
+    edit_map(&dir, |m| m["strict"] = json!(true));
+    let j: Value = serde_json::from_str(&cli(&dir, &["status", "--json"]).out).expect("json");
+    assert_eq!(j["exit"], 1);
+    assert_eq!(
+        j["summary"],
+        json!({ "nodes": 4, "need_attention": 3, "not_yet_reviewed": 2, "accepted_risks": 0, "strict": true })
+    );
+    let x = &j["nodes"][3];
+    assert_eq!(x["id"], "int.x");
+    assert_eq!(x["state"], "adopted");
+    assert_eq!(x["shown"], "adopted (rests on 2 unreviewed)");
+    assert_eq!(x["troubled"], false);
+    assert_eq!(x["needs_attention"], true);
+    assert_eq!(x["rests_on_unreviewed"], json!(["asm.a", "asm.b"]));
+    assert_eq!(
+        j["nodes"][0]["files"],
+        json!(["test/C.t.sol", "src/", "test/"])
+    );
+    assert_eq!(
+        j["not_yet_reviewed"][0]["adopt"],
+        "vibloom edit asm.a --stance adopted"
+    );
+    assert_eq!(j["guard"], Value::Null);
+    assert_eq!(j["tool_error"], Value::Null);
+    fs::write(dir.join("src/C.sol"), "contract C { /* bug */ }").expect("write");
+    let gh = cli(&dir, &["check", "--format", "github"]);
+    assert!(
+        gh.out.contains(
+            "::error file=test/C.t.sol,line=1,title=VIBloom inv.sum [BROKEN]::invariant_sum: failure: drift"
+        ),
+        "{}",
+        gh.out
+    );
+    assert!(
+        gh.out
+            .contains("::error title=VIBloom asm.b [hypothetical]::b: not yet reviewed (strict)"),
+        "{}",
+        gh.out
+    );
+    // Tool failures are 2, with the reason in the JSON.
+    fs::remove_file(dir.join(".vibloom/roots.json")).expect("rm");
+    let none = cli(&dir, &["check", "--json"]);
+    assert_eq!(none.code, 2);
+    let j: Value = serde_json::from_str(&none.out).expect("json");
+    assert!(
+        j["tool_error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("No .vibloom/roots.json")
+    );
+}
+
+#[test]
+fn sync_is_gone_and_says_why() {
+    let dir = project();
+    with_runner(&dir);
+    let r = cli(&dir, &["sync", "--base", "main"]);
+    assert_eq!(r.code, 2);
+    assert!(r.err.contains("the run log is local"), "{}", r.err);
 }
 
 #[test]
@@ -745,7 +969,7 @@ fn stops_a_runner_that_hangs() {
     let started = std::time::Instant::now();
     let r = cli(&dir, &["check"]);
     assert!(started.elapsed().as_secs() < 10);
-    assert_eq!(r.code, 1);
+    assert_eq!(r.code, 2);
     assert!(r.err.contains("did not finish in 1 s"), "{}", r.err);
 }
 
@@ -813,7 +1037,7 @@ fn connects_claude_code_and_codex_and_guards_their_settings() {
     }
 
     // Running it again changes nothing.
-    assert_eq!(cli(&dir, &["setup", "claude"]).code, 1);
+    assert_eq!(cli(&dir, &["setup", "claude"]).code, 2);
     let again = vibloom(&dir, &["setup", "claude"], "", true).out;
     assert!(
         again.contains("already in .claude/settings.json"),
@@ -825,7 +1049,7 @@ fn connects_claude_code_and_codex_and_guards_their_settings() {
         fs::read_to_string(dir.join("AGENTS.md")).expect("agents"),
         agents
     );
-    assert_eq!(vibloom(&dir, &["setup", "cursor"], "", true).code, 1);
+    assert_eq!(vibloom(&dir, &["setup", "cursor"], "", true).code, 2);
 }
 
 #[test]
@@ -1024,6 +1248,89 @@ fn finds_forge_where_foundryup_installs_it_when_the_path_lacks_it() {
     assert!(out.contains("1 invariant tests found"), "{out}");
 }
 
+// Forge's trees say what the test imports, remapped paths included: the
+// handler is guarded and the invariant watches only what it reaches.
+#[cfg(unix)]
+#[test]
+fn init_and_scan_read_imports_from_forge_s_syntax_trees() {
+    let dir = dapptools();
+    fs::write(dir.join("foundry.toml"), "[profile.default]\n").expect("write");
+    fs::write(dir.join("src/other.sol"), "contract Other {}\n").expect("write");
+    fs::write(dir.join("src/test/H.sol"), "contract H {}\n").expect("write");
+    let artifact = |path: &str, imports: &[&str]| {
+        let nodes: Vec<Value> = imports
+            .iter()
+            .map(|i| json!({ "nodeType": "ImportDirective", "absolutePath": i }))
+            .collect();
+        json!({ "abi": [], "ast": { "absolutePath": path, "nodes": nodes } })
+    };
+    for (folder, name, a) in [
+        // "handlers/H.sol" through a remapping; no relative import names it.
+        (
+            "vat.t.sol",
+            "VatTest",
+            artifact(
+                "src/test/vat.t.sol",
+                &["lib/ds-test/src/test.sol", "src/test/H.sol", "src/vat.sol"],
+            ),
+        ),
+        ("H.sol", "H", artifact("src/test/H.sol", &["src/vat.sol"])),
+    ] {
+        fs::create_dir_all(dir.join("out").join(folder)).expect("dir");
+        fs::write(
+            dir.join("out").join(folder).join(format!("{name}.json")),
+            a.to_string(),
+        )
+        .expect("write");
+    }
+    let out = with_forge(&dir, &["init"]);
+    assert!(out.out.contains("from forge's syntax trees"), "{}", out.out);
+    let m = read_map(&dir);
+    assert_eq!(
+        m["nodes"][0]["watch"],
+        json!(["src/test/H.sol", "src/vat.sol"])
+    );
+    assert_eq!(m["protect"], json!(["foundry.toml", "src/test/H.sol"]));
+    // A change to a source the invariant never imports leaves it alone.
+    edit_map(&dir, |m| {
+        m["runner"] = json!([
+            "sh",
+            "-c",
+            "echo '{\"src/test/vat.t.sol:VatTest\":{\"test_results\":{\"invariant_debt()\":{\"status\":\"Success\",\"reason\":null}}}}'"
+        ])
+    });
+    assert_eq!(cli(&dir, &["run"]).code, 0);
+    fs::write(dir.join("src/other.sol"), "contract Other { uint x; }\n").expect("write");
+    assert_eq!(cli(&dir, &["status"]).code, 0);
+
+    // An older map that watches whole folders is only narrowed when asked.
+    edit_map(&dir, |m| {
+        m["runner"] = json!(["forge", "test", "--json"]);
+        m["nodes"][0]["watch"] = json!(["src/", "src/test/"]);
+    });
+    let plan = with_forge(&dir, &["scan"]);
+    assert!(
+        plan.out
+            .contains("Would tighten what these watch, to the files their tests import:\n- inv.debt: src/, src/test/ -> src/test/H.sol, src/vat.sol"),
+        "{}",
+        plan.out
+    );
+    assert_eq!(
+        read_map(&dir)["nodes"][0]["watch"],
+        json!(["src/", "src/test/"])
+    );
+    let done = with_forge(&dir, &["scan", "--tighten"]);
+    assert!(
+        done.out.contains("Tightened what these watch"),
+        "{}",
+        done.out
+    );
+    assert_eq!(
+        read_map(&dir)["nodes"][0]["watch"],
+        json!(["src/test/H.sol", "src/vat.sol"])
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn init_finds_tests_kept_next_to_the_sources() {
@@ -1217,7 +1524,10 @@ fn watched_folders_are_written_the_way_the_map_compares_them() {
     fs::write(dir.join("src/C.sol"), "contract C { uint x; }").expect("write");
     let status = cli(&dir, &["status"]);
     assert!(
-        status.out.contains("pending review  inv.sum"),
+        status
+            .out
+            .lines()
+            .any(|l| l.starts_with("pending review ") && l.contains(" inv.sum ")),
         "{}",
         status.out
     );
@@ -1264,7 +1574,7 @@ fn mcp_refuses_arguments_of_the_wrong_shape_instead_of_guessing() {
     }
     assert_eq!(out.lines().count(), msgs.len());
     // Nothing ran and nothing was filed.
-    assert!(!dir.join(".vibloom/log.jsonl").exists());
+    assert!(!dir.join(".vibloom/local/log.jsonl").exists());
     assert_eq!(cli(&dir, &["proposals"]).out, "No pending proposals.");
 }
 
@@ -1296,7 +1606,7 @@ fn says_what_to_do_outside_the_project_or_a_repository() {
     let dir = project();
     with_runner(&dir);
     let precommit = cli(&dir, &["precommit"]);
-    assert_eq!(precommit.code, 1);
+    assert_eq!(precommit.code, 2);
     assert!(
         precommit.err.starts_with("Not a git repository"),
         "{}",
@@ -1304,7 +1614,7 @@ fn says_what_to_do_outside_the_project_or_a_repository() {
     );
     assert!(precommit.err.lines().count() == 1, "{}", precommit.err);
     let outside = cli(&dir, &["context", "/etc/passwd"]);
-    assert_eq!(outside.code, 1);
+    assert_eq!(outside.code, 2);
     assert!(
         outside.err.contains("outside the project"),
         "{}",
@@ -1409,7 +1719,8 @@ fn a_risk_accepted_by_the_verifier_stays_visible_and_lets_the_check_pass() {
             "depends_on": ["inv.sum", "asm.token-is-standard"], "evidence": ["src/C.sol:1"] }),
         );
     });
-    assert_eq!(cli(&dir, &["run"]).code, 0);
+    // `run` reports like `status`: something needs attention.
+    assert_eq!(cli(&dir, &["run"]).code, 1);
     assert_eq!(cli(&dir, &["status"]).code, 1);
 
     let accept = [
@@ -1613,7 +1924,7 @@ fn survey_names_contracts_and_research_stays_short() {
     assert_eq!(one.code, 0, "{}", one.err);
     assert!(one.out.contains("Vat (src/vat.sol)"), "{}", one.out);
     let none = with_forge(&dir, &["survey", "Vat", "Nope"]);
-    assert_eq!(none.code, 1);
+    assert_eq!(none.code, 2);
     assert_eq!(
         none.err,
         "No contract Nope in the survey. The contracts are: Vat."

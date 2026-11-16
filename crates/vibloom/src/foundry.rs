@@ -191,6 +191,8 @@ pub(crate) struct FoundryDirs {
     pub(crate) src: String,
     pub(crate) out: String,
     pub(crate) script: String,
+    /// Where dependencies live (`lib`): never the project's own files.
+    pub(crate) libs: Vec<String>,
 }
 
 pub(crate) fn foundry_dirs(root: &Path) -> FoundryDirs {
@@ -206,10 +208,22 @@ pub(crate) fn foundry_dirs(root: &Path) -> FoundryDirs {
             .trim_matches('/')
             .to_string()
     };
+    let libs = config
+        .as_ref()
+        .and_then(|c| c.get("libs"))
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(|l| l.trim_matches('/').to_string())
+                .collect()
+        })
+        .unwrap_or_else(|| vec!["lib".to_string()]);
     FoundryDirs {
         src: dir("src", "src"),
         out: dir("out", "out"),
         script: dir("script", "script"),
+        libs,
     }
 }
 
@@ -262,4 +276,190 @@ pub(crate) fn compiled(
         ));
     }
     Ok((contracts, dirs))
+}
+
+/// What an invariant test leans on, as forge resolved its imports.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Closure {
+    /// The project files it imports, directly or through others: what it
+    /// should watch besides its own file.
+    pub(crate) watch: Vec<String>,
+    /// The test code among them (handlers, bases): guarded with the test.
+    pub(crate) helpers: Vec<String>,
+}
+
+/// For each test file, the transitive closure of its imports, read from the
+/// compiler's syntax trees, where `ImportDirective.absolutePath` has the
+/// remappings resolved. None when a test file has no syntax tree in `out/`.
+pub(crate) fn closures(
+    units: &[crate::survey::Unit],
+    test_files: &[String],
+    tests: &str,
+    dirs: &FoundryDirs,
+    exists: &dyn Fn(&str) -> bool,
+) -> Option<BTreeMap<String, Closure>> {
+    let imports: BTreeMap<&str, Vec<&str>> = units
+        .iter()
+        .map(|u| {
+            let list = u
+                .ast
+                .get("nodes")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|n| n.get("nodeType").and_then(Value::as_str) == Some("ImportDirective"))
+                .filter_map(|n| n.get("absolutePath").and_then(Value::as_str))
+                .collect();
+            (u.path.as_str(), list)
+        })
+        .collect();
+    let own = |f: &str| {
+        !f.starts_with('/')
+            && !f.split('/').any(|s| s == ".." || s == "node_modules")
+            && !dirs
+                .libs
+                .iter()
+                .any(|l| !l.is_empty() && f.starts_with(&format!("{l}/")))
+            && exists(f)
+    };
+    let mut out = BTreeMap::new();
+    for t in test_files {
+        imports.get(t.as_str())?;
+        let mut seen: BTreeSet<&str> = BTreeSet::from([t.as_str()]);
+        let mut queue = vec![t.as_str()];
+        let mut c = Closure::default();
+        while let Some(f) = queue.pop() {
+            for imp in imports.get(f).into_iter().flatten() {
+                if !seen.insert(imp) {
+                    continue;
+                }
+                queue.push(imp);
+                if !own(imp) {
+                    continue;
+                }
+                c.watch.push((*imp).to_string());
+                if imp.starts_with(tests) || is_test_code(imp, tests, &dirs.script) {
+                    c.helpers.push((*imp).to_string());
+                }
+            }
+        }
+        c.watch.sort();
+        c.helpers.sort();
+        out.insert(t.clone(), c);
+    }
+    Some(out)
+}
+
+/// Builds the project with syntax trees and reads each test file's import
+/// closure. None when forge is not the runner, the build fails or a test
+/// file has no syntax tree.
+pub(crate) fn import_closures(
+    root: &Path,
+    map: &RootsMap,
+    test_files: &[String],
+) -> Option<BTreeMap<String, Closure>> {
+    let exe = map.runner.first().map_or("forge", String::as_str);
+    if map.report.is_some()
+        || !exe
+            .rsplit(['/', '\\'])
+            .next()
+            .is_some_and(|e| e.starts_with("forge"))
+        || !root.join("foundry.toml").is_file()
+        || test_files.is_empty()
+    {
+        return None;
+    }
+    let build = |force: bool| {
+        let mut args = vec!["build".to_string(), "--ast".into()];
+        if force {
+            args.push("--force".into());
+        }
+        run_child(exe, &args, root, map.timeout).ok()
+    };
+    build(false)?;
+    let dirs = foundry_dirs(root);
+    // `forge test` leaves the trees out of what it recompiled.
+    if lacks_ast(root, test_files, &dirs.out) {
+        build(true)?;
+    }
+    let units = units(root, test_files, &dirs.out);
+    closures(&units, test_files, &map.tests, &dirs, &|f| {
+        root.join(f).is_file()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn unit(path: &str, imports: &[&str]) -> crate::survey::Unit {
+        let nodes: Vec<Value> = imports
+            .iter()
+            .map(|i| json!({ "nodeType": "ImportDirective", "absolutePath": i }))
+            .collect();
+        crate::survey::Unit {
+            path: path.into(),
+            ast: json!({ "absolutePath": path, "nodes": nodes }),
+            abis: BTreeMap::new(),
+            source: String::new(),
+        }
+    }
+
+    #[test]
+    fn follows_imports_forge_resolved_including_remapped_ones() {
+        let units = vec![
+            // A remapped import ("handlers/H.sol") and a library.
+            unit(
+                "test/Vault.t.sol",
+                &[
+                    "lib/forge-std/src/Test.sol",
+                    "test/handlers/H.sol",
+                    "src/Vault.sol",
+                ],
+            ),
+            unit("test/handlers/H.sol", &["src/Vault.sol", "test/Base.sol"]),
+            unit("test/Base.sol", &["src/Math.sol"]),
+            unit("lib/forge-std/src/Test.sol", &["lib/forge-std/src/Vm.sol"]),
+            unit("src/Vault.sol", &[]),
+            unit("src/Math.sol", &[]),
+        ];
+        let dirs = FoundryDirs {
+            src: "src".into(),
+            out: "out".into(),
+            script: "script".into(),
+            libs: vec!["lib".into()],
+        };
+        let got = closures(
+            &units,
+            &["test/Vault.t.sol".into()],
+            "test/",
+            &dirs,
+            &|_| true,
+        )
+        .expect("trees");
+        assert_eq!(
+            got["test/Vault.t.sol"],
+            Closure {
+                watch: vec![
+                    "src/Math.sol".into(),
+                    "src/Vault.sol".into(),
+                    "test/Base.sol".into(),
+                    "test/handlers/H.sol".into()
+                ],
+                helpers: vec!["test/Base.sol".into(), "test/handlers/H.sol".into()],
+            }
+        );
+        // A test file without a tree: the caller falls back to the text.
+        assert!(
+            closures(
+                &units,
+                &["test/Other.t.sol".into()],
+                "test/",
+                &dirs,
+                &|_| true
+            )
+            .is_none()
+        );
+    }
 }

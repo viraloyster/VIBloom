@@ -1,12 +1,10 @@
-//! What git says: changed and staged files, the base branch's log and the
-//! commit hook.
+//! What git says: changed and staged files, files as they are on another
+//! commit, and the commit hook.
 
 use crate::cli::Fallible;
 use crate::derive::Uncommitted;
-use crate::log::{extends_log, read_log};
-use crate::map::{LOG_PATH, RootsMap, covers};
+use crate::map::{RootsMap, covers};
 use crate::setup::helpers;
-use crate::store::load_log;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
@@ -92,6 +90,10 @@ pub fn uncommitted(root: &Path, map: &RootsMap, staged: bool) -> Uncommitted {
     for n in map.nodes.iter().filter(|n| n.protected) {
         let Some(t) = &n.test else { continue };
         let mut leans = vec![t.file.clone()];
+        // Guarded files the node watches by name: the handlers `init` found
+        // through forge's imports, remapped paths included. A watched folder
+        // says nothing about what the test leans on.
+        leans.extend(map.protect.iter().filter(|p| n.watch.contains(p)).cloned());
         leans.extend(
             helpers(std::slice::from_ref(&t.file), &map.tests, &read)
                 .into_iter()
@@ -110,38 +112,69 @@ pub fn uncommitted(root: &Path, map: &RootsMap, staged: bool) -> Uncommitted {
     out
 }
 
-// The log on the base commit, read from git rather than the working tree, so a
-// branch cannot change what it is compared against.
-pub(crate) fn check_base(root: &Path, base: &str) -> Vec<String> {
-    if git(
+// The project's folder inside the repository, "" at its top.
+pub(crate) fn prefix(root: &Path) -> Fallible<String> {
+    Ok(git(root, &["rev-parse", "--show-prefix"])?
+        .trim()
+        .to_string())
+}
+
+pub(crate) fn is_commit(root: &Path, rev: &str) -> bool {
+    git(
         root,
         &[
             "rev-parse",
             "--verify",
             "--quiet",
-            &format!("{base}^{{commit}}"),
+            &format!("{rev}^{{commit}}"),
         ],
     )
-    .is_err()
-    {
-        return vec![format!(
-            "{base} is not a commit here (in CI, fetch the base branch first)"
-        )];
+    .is_ok()
+}
+
+/// A project file as it is on `rev`, read from git and never from the working
+/// tree, so a branch cannot change what it is compared with. None when the
+/// file is not there.
+pub(crate) fn show_at(root: &Path, rev: &str, prefix: &str, file: &str) -> Option<Vec<u8>> {
+    let spec = format!("{rev}:{prefix}{file}");
+    let ok = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+    };
+    // A tree (a folder) is not a file.
+    let kind = ok(&["cat-file", "-t", &spec])?;
+    if String::from_utf8_lossy(&kind.stdout).trim() != "blob" {
+        return None;
     }
-    let shown = git(root, &["show", &format!("{base}:./{LOG_PATH}")]).unwrap_or_default();
-    let base_log = read_log(&shown);
-    if !base_log.problems.is_empty() {
-        return base_log
-            .problems
-            .iter()
-            .map(|p| format!("base log: {p}"))
-            .collect();
-    }
-    let head = load_log(root);
-    if !head.problems.is_empty() {
-        return head.problems;
-    }
-    extends_log(&base_log.entries, &head.entries)
+    ok(&["cat-file", "blob", &spec]).map(|o| o.stdout)
+}
+
+/// The project files under a folder on `rev`, relative to the project.
+pub(crate) fn files_at(root: &Path, rev: &str, prefix: &str, dir: &str) -> Vec<String> {
+    let listed = git(
+        root,
+        &[
+            "ls-tree",
+            "-r",
+            "-z",
+            "--name-only",
+            "--full-tree",
+            rev,
+            "--",
+            &format!("{prefix}{}/", dir.trim_end_matches('/')),
+        ],
+    )
+    .unwrap_or_default();
+    listed
+        .split('\0')
+        .filter_map(|f| f.strip_prefix(prefix))
+        .filter(|f| !f.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 // The files the commit stages, relative to the project.

@@ -85,8 +85,7 @@ pub fn survey(root: &Path, file_proposals: bool, only: &[String]) -> Fallible<St
                 }
                 if let Ok(p) = propose(&map, &book, draft, iso_now()) {
                     append(
-                        root,
-                        PROPOSALS_PATH,
+                        &root.join(PROPOSALS_PATH),
                         &format!("{}\n", serde_json::to_string(&p).unwrap_or_default()),
                     )?;
                     filed += 1;

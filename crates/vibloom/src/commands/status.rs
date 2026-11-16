@@ -1,11 +1,13 @@
 use crate::cli::{Args, Fallible, Io};
-use crate::derive::{NodeView, label, shown, troubled};
+use crate::derive::{NodeView, label, needs_attention, shown, summary_line, troubled, why};
+use crate::guard::GuardChange;
+use crate::log::RunEntry;
 use crate::paths::relative_to;
-use crate::store::{load_log, views};
+use crate::store::{load_log, load_map, views};
 use serde_json::{Value, json};
 use std::path::Path;
 
-pub fn table(vs: &[NodeView]) -> String {
+pub fn table(vs: &[NodeView], strict: bool) -> String {
     if vs.is_empty() {
         return "The map has no nodes yet. Run `vibloom scan` or edit .vibloom/roots.json.".into();
     }
@@ -13,17 +15,20 @@ pub fn table(vs: &[NodeView]) -> String {
     let iw = vs.iter().map(|v| v.id.len()).max().unwrap_or(0);
     // What needs attention first; on a long map it must not be looked for.
     let mut rows: Vec<&NodeView> = vs.iter().collect();
-    rows.sort_by_key(|v| !troubled(v));
-    let bad = vs.iter().filter(|v| troubled(v)).count();
-    let mut out = vec![format!(
-        "{} nodes, {bad} {} attention.",
-        vs.len(),
-        if bad == 1 { "needs" } else { "need" }
-    )];
+    rows.sort_by_key(|v| !needs_attention(v, strict));
+    let mut out = vec![summary_line(vs, strict)];
     out.extend(
         rows.iter()
             .map(|v| format!("{:w$}  {:iw$}  {}", shown(v), v.id, v.title)),
     );
+    let open = not_reviewed(vs);
+    if !open.is_empty() {
+        out.push(String::new());
+        out.push("Not yet reviewed (as the verifier, adopt it or switch it off):".into());
+        out.extend(open.iter().map(|(id, _)| {
+            format!("- {id}: vibloom edit {id} --stance adopted   (or --stance off)")
+        }));
+    }
     let risks = accepted_risks(vs);
     if !risks.is_empty() {
         out.push(String::new());
@@ -31,6 +36,13 @@ pub fn table(vs: &[NodeView]) -> String {
         out.extend(risks);
     }
     out.join("\n")
+}
+
+fn not_reviewed(vs: &[NodeView]) -> Vec<(&str, &str)> {
+    vs.iter()
+        .filter(|v| crate::derive::unreviewed(v))
+        .map(|v| (v.id.as_str(), v.title.as_str()))
+        .collect()
 }
 
 // Each risk a node accepts, with its reason, so an accepted weakness is never
@@ -52,41 +64,153 @@ fn accepted_risks(vs: &[NodeView]) -> Vec<String> {
         .collect()
 }
 
-pub(crate) fn status(root: &Path, io: &mut Io, as_json: bool) -> Fallible<i32> {
+/// What `--base` found, for the report.
+pub(crate) struct GuardReport {
+    pub(crate) base: String,
+    pub(crate) base_has_map: bool,
+    pub(crate) allowed: bool,
+    pub(crate) changes: Vec<GuardChange>,
+}
+
+/// Everything `status --json` and `check --json` print, in one shape.
+pub(crate) struct Report<'a> {
+    pub(crate) exit: i32,
+    pub(crate) strict: bool,
+    pub(crate) views: &'a [NodeView],
+    pub(crate) guard: Option<&'a GuardReport>,
+    pub(crate) run: Option<&'a RunEntry>,
+    pub(crate) log_problems: &'a [String],
+    pub(crate) tool_error: Option<&'a str>,
+}
+
+// The files a node is about: its test first, then what it watches.
+pub(crate) fn node_files(v: &NodeView) -> Vec<String> {
+    let mut out: Vec<String> = v.test_file.iter().cloned().collect();
+    out.extend(
+        v.watch
+            .iter()
+            .filter(|w| !out.contains(w))
+            .cloned()
+            .collect::<Vec<_>>(),
+    );
+    out
+}
+
+pub(crate) fn to_json(r: &Report) -> Value {
+    let vs = r.views;
+    let nodes: Vec<Value> = vs
+        .iter()
+        .map(|v| {
+            json!({
+                "id": v.id,
+                "kind": v.kind,
+                "title": v.title,
+                "stance": v.stance,
+                "state": label(v),
+                "shown": shown(v),
+                "troubled": troubled(v),
+                "needs_attention": needs_attention(v, r.strict),
+                "reason": why(v),
+                "files": node_files(v),
+                "changed": v.changed,
+                "rests_on_unreviewed": v.unreviewed,
+                "run": v.run,
+                "fuzz": v.fuzz,
+            })
+        })
+        .collect();
+    let open: Vec<Value> = not_reviewed(vs)
+        .iter()
+        .map(|(id, title)| {
+            json!({
+                "id": id,
+                "title": title,
+                "adopt": format!("vibloom edit {id} --stance adopted"),
+                "switch_off": format!("vibloom edit {id} --stance off"),
+            })
+        })
+        .collect();
+    let risks: Vec<Value> = vs
+        .iter()
+        .flat_map(|v| {
+            v.accepts.iter().map(|a| {
+                json!({ "node": v.id, "dependency": a.id, "reason": a.reason, "in_effect": a.in_effect })
+            })
+        })
+        .collect();
+    json!({
+        "format": 1,
+        "exit": r.exit,
+        "summary": {
+            "nodes": vs.len(),
+            "need_attention": vs.iter().filter(|v| needs_attention(v, r.strict)).count(),
+            "not_yet_reviewed": open.len(),
+            "accepted_risks": risks.len(),
+            "strict": r.strict,
+        },
+        "nodes": nodes,
+        "not_yet_reviewed": open,
+        "accepted_risks": risks,
+        "guard": r.guard.map(|g| json!({
+            "base": g.base,
+            "base_has_map": g.base_has_map,
+            "allowed": g.allowed,
+            "changes": g.changes,
+        })),
+        "run": r.run.map(|e| json!({ "seq": e.seq, "command": e.command, "error": e.error })),
+        "log_problems": r.log_problems,
+        "tool_error": r.tool_error,
+    })
+}
+
+/// The JSON printed when vibloom could not do its job at all (exit 2).
+pub(crate) fn error_json(e: &str) -> String {
+    to_json(&Report {
+        exit: 2,
+        strict: false,
+        views: &[],
+        guard: None,
+        run: None,
+        log_problems: &[],
+        tool_error: Some(e),
+    })
+    .to_string()
+}
+
+pub(crate) fn status(root: &Path, io: &mut Io, as_json: bool, strict: bool) -> Fallible<i32> {
+    let strict = strict || load_map(root)?.strict;
     let vs = views(root)?;
     let problems = load_log(root).problems;
+    // A damaged record is the guard failing at its job, not a verdict.
+    let exit = if !problems.is_empty() {
+        2
+    } else {
+        i32::from(vs.iter().any(|v| needs_attention(v, strict)))
+    };
     if !problems.is_empty() {
         (io.err)(&format!(
-            "The run log failed verification; only runs before the break count:\n- {}",
+            "The local run log failed verification; only runs before the break count:\n- {}",
             problems.join("\n- ")
         ));
     }
     if as_json {
-        let nodes: Vec<Value> = vs
-            .iter()
-            .map(|v| {
-                let mut j = serde_json::to_value(v).unwrap_or(Value::Null);
-                j["state"] = json!(label(v));
-                j["needs_attention"] = json!(troubled(v));
-                j
-            })
-            .collect();
-        let risks: Vec<Value> = vs
-            .iter()
-            .flat_map(|v| {
-                v.accepts.iter().map(|a| {
-                    json!({ "node": v.id, "dependency": a.id, "reason": a.reason, "in_effect": a.in_effect })
-                })
-            })
-            .collect();
         (io.out)(
-            &json!({ "nodes": nodes, "accepted_risks": risks, "log_problems": problems })
-                .to_string(),
+            &to_json(&Report {
+                exit,
+                strict,
+                views: &vs,
+                guard: None,
+                run: None,
+                log_problems: &problems,
+                tool_error: (!problems.is_empty())
+                    .then_some("the local run log failed verification"),
+            })
+            .to_string(),
         );
     } else {
-        (io.out)(&table(&vs));
+        (io.out)(&table(&vs, strict));
     }
-    Ok(i32::from(vs.iter().any(troubled) || !problems.is_empty()))
+    Ok(exit)
 }
 
 pub(crate) fn context(root: &Path, io: &mut Io, args: &Args) -> Fallible<i32> {

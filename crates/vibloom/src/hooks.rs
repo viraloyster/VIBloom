@@ -3,7 +3,7 @@
 
 use crate::derive::{NodeView, label, troubled};
 use crate::forge::forge_filters;
-use crate::map::{LOG_PATH, RootsMap, covers};
+use crate::map::{RootsMap, covers};
 use regex::Regex;
 use serde_json::{Value, json};
 use std::sync::LazyLock;
@@ -467,10 +467,10 @@ pub fn stop_unreadable(input: &HookInput, problem: &str) -> HookOutput {
     }))
 }
 
-/// The log is appended by the guard, never committed as a guarded edit; its
-/// integrity is checked on its own.
+/// Proposals are suggestions any agent may file; everything else under
+/// `.vibloom/` is the verifier's. The run log is local and never staged.
 pub fn guarded_for_commit(map: &RootsMap, file: &str) -> bool {
-    file != LOG_PATH && file != crate::map::PROPOSALS_PATH && is_guarded(map, file)
+    file != crate::map::PROPOSALS_PATH && is_guarded(map, file)
 }
 
 #[cfg(test)]
@@ -517,6 +517,7 @@ pub(crate) mod tests {
             test_file: Some("test/C.t.sol".into()),
             sources: vec![],
             accepts: vec![],
+            unreviewed: vec![],
         }
     }
 
