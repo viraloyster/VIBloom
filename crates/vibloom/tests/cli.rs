@@ -1244,10 +1244,14 @@ fn does_nothing_in_a_project_without_a_map() {
     assert_eq!((r.code, r.out.as_str(), r.err.as_str()), (0, "", ""));
 }
 
-// Stands in for forge in a dapptools layout: tests in src/test/, the build
-// already in out/. A shell script, so these tests run where one can.
+// Stands in for forge in a dapptools layout: tests in src/test/, and what a
+// build writes kept in out/, copied to the `--out` it is given. A shell
+// script, so these tests run where one can.
 #[cfg(unix)]
 const FORGE: &str = r#"#!/bin/sh
+o=""; p=""
+for a in "$@"; do [ "$p" = --out ] && o="$a"; p="$a"; done
+[ -n "$o" ] && mkdir -p "$o" && cp -R out/. "$o"
 case "$1 $2" in
   "test --list") echo '{"src/test/vat.t.sol":{"VatTest":["invariant_debt","test_frob"]}}' ;;
   "config --json") echo '{"src":"src","test":"test","script":"script","out":"out"}' ;;
@@ -1554,25 +1558,48 @@ fn the_persons_notes_are_kept_from_the_builder_and_committed_by_the_verifier() {
 
 #[cfg(unix)]
 #[test]
-fn survey_rebuilds_syntax_trees_that_a_test_run_left_out() {
+fn survey_builds_on_its_own_so_a_test_run_never_forces_a_rebuild() {
     let dir = dapptools();
     assert_eq!(with_forge(&dir, &["init"]).code, 0);
-    // As after `forge test` recompiled vat.sol: the artifact has no tree, and
-    // a plain `forge build --ast` finds nothing to do.
+    // As after `forge test` recompiled vat.sol: its artifact in out/ has no
+    // tree. Only a build with trees into its own folder and cache has one.
     let art = dir.join("out/vat.sol/Vat.json");
     let full = fs::read_to_string(&art).expect("artifact");
     fs::write(dir.join("Vat.full.json"), &full).expect("write");
     let mut bare: Value = serde_json::from_str(&full).expect("json");
     bare.as_object_mut().expect("object").remove("ast");
     fs::write(&art, bare.to_string()).expect("write");
-    let forge = FORGE.replace(
-        "esac",
-        "  \"build --ast\") [ \"$3\" = --force ] && cp Vat.full.json out/vat.sol/Vat.json ;;\nesac",
-    );
+    let forge = r#"#!/bin/sh
+o=""; c=""; ast=""; p=""
+for a in "$@"; do
+  [ "$p" = --out ] && o="$a"; [ "$p" = --cache-path ] && c="$a"; [ "$a" = --ast ] && ast=1; p="$a"
+done
+echo "$*" >> forge.log
+case "$1" in build) [ -n "$o" ] && [ -n "$c" ] && [ -n "$ast" ] && mkdir -p "$o/vat.sol" && cp Vat.full.json "$o/vat.sol/Vat.json" ;; esac
+case "$1 $2" in
+  "config --json") echo '{"src":"src","test":"test","script":"script","out":"out"}' ;;
+esac
+"#;
     fs::write(dir.join("bin/forge"), forge).expect("write");
-    let survey = with_forge(&dir, &["survey"]);
-    assert_eq!(survey.code, 0, "{}", survey.err);
-    assert!(survey.out.contains("Vat (src/vat.sol)"), "{}", survey.out);
+    for _ in 0..2 {
+        let survey = with_forge(&dir, &["survey"]);
+        assert_eq!(survey.code, 0, "{}", survey.err);
+        assert!(survey.out.contains("Vat (src/vat.sol)"), "{}", survey.out);
+        assert!(
+            survey.err.starts_with(
+                "Building with forge to read the syntax trees (a first build of a large project can take minutes)..."
+            ),
+            "{}",
+            survey.err
+        );
+    }
+    let log = fs::read_to_string(dir.join("forge.log")).expect("log");
+    assert!(!log.contains("--force"), "{log}");
+    // The project's own build output is left as the test run wrote it.
+    assert_eq!(
+        fs::read_to_string(&art).expect("artifact"),
+        bare.to_string()
+    );
 }
 
 #[test]
@@ -2067,7 +2094,7 @@ fn survey_names_contracts_and_research_stays_short() {
     assert_eq!(none.code, 2);
     assert_eq!(
         none.err,
-        "No contract Nope in the survey. The contracts are: Vat."
+        "Building with forge to read the syntax trees (a first build of a large project can take minutes)...\nNo contract Nope in the survey. The contracts are: Vat."
     );
     let brief = with_forge(&dir, &["research"]);
     assert_eq!(brief.code, 0, "{}", brief.err);

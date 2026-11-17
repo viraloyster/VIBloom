@@ -82,7 +82,7 @@ invariant runs and depth are set. Weakening a handler or lowering `runs`
 weakens an invariant without touching its test, so only the person may.
 
 What a test imports is read from forge itself: `init` runs `forge build --ast`
-and follows each invariant test's `ImportDirective.absolutePath` in the
+into vibloom's own build folder (see below) and follows each invariant test's `ImportDirective.absolutePath` in the
 compiler's syntax trees, where remappings are resolved. Of the files reached,
 test code (handlers, bases, mocks) goes to `protect`, and every project file
 reached becomes that invariant's `watch`; library files (`lib/`,
@@ -703,7 +703,7 @@ from a blank page:
    in `.vibloom/notes.md`. Nothing reads it but the research brief below; an
    agent cannot edit it, and you commit it from your own terminal.
 2. **Survey.** `vibloom survey` runs `forge build --ast` and reads the
-   compiler's syntax trees: for each contract, who may call each
+   compiler's syntax trees (see "Where vibloom builds" below): for each contract, who may call each
    state-changing function (the gates), the other modifiers, the state
    variables and which functions write them, what gates an upgrade, the calls
    into other contracts and the low-level calls; then assumption and
@@ -826,7 +826,14 @@ the bases that are missing.
   away (`require(!blacklisted[msg.sender])`) trusts nobody and is not one. A
   call to code that checks the caller is reported at the line of the call
   (`upgradeToAndCall` calls the `_authorizeUpgrade` that the contract
-  overrides).
+  overrides). A call to an internal or private function whose returned
+  value uses the caller by the same rule counts as the caller in a
+  condition: Morpho's `require(_isSenderAuthorized(onBehalf))`, which
+  returns `msg.sender == onBehalf || isAuthorized[onBehalf][msg.sender]`, is
+  a check at the line of the `require`. The same exclusions apply to what it
+  returns: a helper returning `balance[msg.sender] >= x` or
+  `!blacklisted[msg.sender]` is no check, and neither is
+  `require(!_isBlacklisted(msg.sender))`.
 - State variables are the project's own, with namespaced (ERC-7201) storage
   read as `Struct.field`. A variable is written by an entry point when code
   it runs assigns it, applies `++`, `--` or `delete` to it, or calls `push`
@@ -877,6 +884,18 @@ What the survey does not see:
 - Anything outside the project's source folder, unverified or not compiled by
   `forge build --ast`, and the chain itself.
 
+### Where vibloom builds
+
+`init`, `scan`, `survey`, `gaps`, `research` and the `survey` MCP tool read
+syntax trees from a build of vibloom's own: `forge build --ast` with `--out`
+and `--cache-path` pointing at a `forge/` folder in the project's local state
+(next to the run log, never committed). The project's own `out/` and `cache/`
+are not touched, so a `forge test`, which rewrites `out/` without syntax
+trees, does not make the next survey recompile everything: only the first
+build is full, later ones are incremental. vibloom prints one line to stderr
+before each build and, when it took more than 10 s, how long it took. Halmos
+still reads the project's own `out/` (see above).
+
 ### Network and keys
 
 `vibloom` itself never touches the network and stores no key (`forge` may
@@ -893,7 +912,11 @@ Three pieces work the same whatever writes the code:
   detail only for the nodes that name the file (they watch it exactly, it is
   their test, or they cite it in evidence), one line for nodes that only watch
   its folder or are connected to those, the reason for any trouble elsewhere,
-  and a count of the rest.
+  and a count of the rest. A watch list longer than four entries is shown as
+  `watches: <the file>, and N other files its test imports`, and nodes that
+  watch the same list say so once after the group
+  (`All 6 above watch the same 28 files.`); `status --json` keeps every list
+  in full.
 - **The commit check**: `vibloom install-hook` puts `vibloom precommit` in this
   clone's `.git/hooks/pre-commit` (git does not share hooks, so each clone
   installs its own). It refuses a builder's commit that changes a protected

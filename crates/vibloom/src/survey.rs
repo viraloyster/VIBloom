@@ -263,7 +263,7 @@ fn is_zero(mut e: &Value) -> bool {
 
 // The caller itself: `msg.sender`, `tx.origin`, `_msgSender()`, or a local
 // (or a parameter given the caller) that holds one of them.
-fn is_caller(e: &Value, aliases: &BTreeSet<i64>) -> bool {
+fn is_caller(e: &Value, who: &Who) -> bool {
     let e = unwrap_address(e);
     let on = e.pointer("/expression/name").and_then(Value::as_str);
     match s(e, "nodeType") {
@@ -271,6 +271,7 @@ fn is_caller(e: &Value, aliases: &BTreeSet<i64>) -> bool {
             (on, s(e, "memberName")),
             (Some("msg"), "sender") | (Some("tx"), "origin")
         ),
+        "FunctionCall" if who.calls.contains_key(&ptr(e)) => true,
         "FunctionCall" => {
             let f = e.get("expression").unwrap_or(&Value::Null);
             matches!(
@@ -282,7 +283,7 @@ fn is_caller(e: &Value, aliases: &BTreeSet<i64>) -> bool {
                 "_msgSender" | "msgSender"
             )
         }
-        "Identifier" => referenced(e).is_some_and(|id| aliases.contains(&id)),
+        "Identifier" => referenced(e).is_some_and(|id| who.aliases.contains(&id)),
         _ => false,
     }
 }
@@ -314,11 +315,11 @@ fn changes_other_contract(call: &Value) -> bool {
 // (`require(gem.transferFrom(msg.sender, ...))`): it asks that contract to
 // act, not whether the caller may. A `view` or `pure` one (`hasRole(r,
 // msg.sender)`) answers the question, so it counts.
-fn uses_caller(e: &Value, aliases: &BTreeSet<i64>) -> bool {
+fn uses_caller(e: &Value, who: &Who) -> bool {
     match e {
-        Value::Array(items) => items.iter().any(|x| uses_caller(x, aliases)),
+        Value::Array(items) => items.iter().any(|x| uses_caller(x, who)),
         Value::Object(map) => {
-            if is_caller(e, aliases) {
+            if is_caller(e, who) {
                 return true;
             }
             if changes_other_contract(e) {
@@ -330,15 +331,15 @@ fn uses_caller(e: &Value, aliases: &BTreeSet<i64>) -> bool {
                 match s(e, "operator") {
                     "<" | ">" | "<=" | ">=" => return false,
                     "==" | "!="
-                        if (is_caller(l, aliases) && is_zero(r))
-                            || (is_caller(r, aliases) && is_zero(l)) =>
+                        if (is_caller(l, who) && is_zero(r))
+                            || (is_caller(r, who) && is_zero(l)) =>
                     {
                         return false;
                     }
                     _ => {}
                 }
             }
-            map.values().any(|x| uses_caller(x, aliases))
+            map.values().any(|x| uses_caller(x, who))
         }
         _ => false,
     }
@@ -349,7 +350,7 @@ fn uses_caller(e: &Value, aliases: &BTreeSet<i64>) -> bool {
 // (Celo). The zero exclusion in `uses_caller` is for values the caller only
 // passed on, such as a parameter that a sanity check tests.
 fn caller_vs_zero(cond: &Value) -> bool {
-    let none = BTreeSet::new();
+    let none = Who::default();
     match s(cond, "nodeType") {
         "TupleExpression" => match items(cond, "components") {
             [one] => caller_vs_zero(one),
@@ -367,9 +368,9 @@ fn caller_vs_zero(cond: &Value) -> bool {
     }
 }
 
-// The locals of a body that stand for the caller: the `seeds` (parameters
-// given the caller), locals assigned exactly from it, or bools computed from it.
-fn caller_aliases(body: &Value, seeds: &BTreeSet<i64>) -> BTreeSet<i64> {
+// Adds to `who` the locals of a body that stand for the caller: locals
+// assigned exactly from it, or bools computed from it.
+fn caller_aliases(body: &Value, who: &mut Who) {
     let mut is_bool: BTreeMap<i64, bool> = BTreeMap::new();
     let mut from: Vec<(i64, &Value)> = Vec::new();
     walk(body, &mut |x| match s(x, "nodeType") {
@@ -396,19 +397,35 @@ fn caller_aliases(body: &Value, seeds: &BTreeSet<i64>) -> BTreeSet<i64> {
         }
         _ => {}
     });
-    let mut out = seeds.clone();
     loop {
-        let before = out.len();
+        let before = who.aliases.len();
         for (id, e) in &from {
             let Some(b) = is_bool.get(id) else { continue };
-            if !out.contains(id) && (is_caller(e, &out) || (*b && uses_caller(e, &out))) {
-                out.insert(*id);
+            if !who.aliases.contains(id) && (is_caller(e, who) || (*b && uses_caller(e, who))) {
+                who.aliases.insert(*id);
             }
         }
-        if out.len() == before {
-            return out;
+        if who.aliases.len() == before {
+            return;
         }
     }
+}
+
+/// Whether a result only excludes callers when a check passes on it being
+/// true, and on it being false.
+type Excludes = [bool; 2];
+
+/// A function, and which of its parameters hold the caller.
+type Tainted = (Ptr, Vec<usize>);
+
+/// What stands for the caller in one body: locals that hold it (see
+/// `caller_aliases`), and calls to internal code whose result is computed
+/// from it (see `Ctx::returns_caller`), each with whether that result only
+/// excludes callers when a check passes on it being true and being false.
+#[derive(Default)]
+struct Who {
+    aliases: BTreeSet<i64>,
+    calls: BTreeMap<Ptr, Excludes>,
 }
 
 fn reverts(branch: &Value) -> bool {
@@ -465,13 +482,13 @@ fn assembly_checks_caller(asm: &Value) -> bool {
 /// by a revert in the same block, counts too. The caller is `msg.sender`,
 /// `tx.origin`, `_msgSender()` or `msgSender()`, or one of `aliases` (see
 /// `caller_aliases`).
-fn own_checks<'a>(body: &'a Value, aliases: &BTreeSet<i64>) -> Vec<(&'a Value, Option<&'a Value>)> {
+fn own_checks<'a>(body: &'a Value, who: &Who) -> Vec<(&'a Value, Option<&'a Value>)> {
     let mut out = Vec::new();
     walk(body, &mut |x| match s(x, "nodeType") {
         "FunctionCall" if matches!(callee_name(x), "require" | "assert") => {
             if let Some(cond) = args_of(x).first()
-                && (uses_caller(cond, aliases) || caller_vs_zero(cond))
-                && !only_excludes(cond, false, aliases)
+                && (uses_caller(cond, who) || caller_vs_zero(cond))
+                && !only_excludes(cond, false, who)
             {
                 out.push((x, Some(cond)));
             }
@@ -489,8 +506,8 @@ fn own_checks<'a>(body: &'a Value, aliases: &BTreeSet<i64>) -> Vec<(&'a Value, O
                     || branch("falseBody")
                     || only("trueBody", "falseBody")
                     || only("falseBody", "trueBody"))
-                && (uses_caller(cond, aliases) || caller_vs_zero(cond))
-                && !only_excludes(cond, pass_on_false, aliases)
+                && (uses_caller(cond, who) || caller_vs_zero(cond))
+                && !only_excludes(cond, pass_on_false, who)
             {
                 out.push((x, Some(cond)));
             }
@@ -505,8 +522,8 @@ fn own_checks<'a>(body: &'a Value, aliases: &BTreeSet<i64>) -> Vec<(&'a Value, O
                     && st.get("trueBody").is_some_and(returns)
                     && let Some(cond) = st.get("condition")
                     && stmts[i + 1..].iter().any(always_reverts)
-                    && (uses_caller(cond, aliases) || caller_vs_zero(cond))
-                    && !only_excludes(cond, false, aliases)
+                    && (uses_caller(cond, who) || caller_vs_zero(cond))
+                    && !only_excludes(cond, false, who)
                 {
                     out.push((st, Some(cond)));
                 }
@@ -521,12 +538,12 @@ fn own_checks<'a>(body: &'a Value, aliases: &BTreeSet<i64>) -> Vec<(&'a Value, O
 // `require(!blacklisted[msg.sender])`. It stops some callers and trusts
 // nobody, so it is no caller check. `negated` is set when the check passes
 // on the condition being false (`if (cond) revert`).
-fn only_excludes(cond: &Value, negated: bool, aliases: &BTreeSet<i64>) -> bool {
+fn only_excludes(cond: &Value, negated: bool, who: &Who) -> bool {
     match (s(cond, "nodeType"), s(cond, "operator")) {
         ("UnaryOperation", "!") => only_excludes(
             cond.get("subExpression").unwrap_or(&Value::Null),
             !negated,
-            aliases,
+            who,
         ),
         ("BinaryOperation", op @ ("==" | "!=")) => {
             let l = cond.get("leftExpression").unwrap_or(&Value::Null);
@@ -534,14 +551,20 @@ fn only_excludes(cond: &Value, negated: bool, aliases: &BTreeSet<i64>) -> bool {
             // `msg.sender == owner` names who passes; so does a lookup that
             // must be set (`wards[msg.sender] == 1`, `minters[msg.sender] != 0`).
             let names_who_passes =
-                is_caller(l, aliases) || is_caller(r, aliases) || !(is_zero(l) || is_zero(r));
+                is_caller(l, who) || is_caller(r, who) || !(is_zero(l) || is_zero(r));
             let needs_equal = (op == "==") != negated;
             needs_equal != names_who_passes
         }
         ("BinaryOperation", _) => false,
         ("TupleExpression", _) => match items(cond, "components") {
-            [one] => only_excludes(one, negated, aliases),
+            [one] => only_excludes(one, negated, who),
             _ => false,
+        },
+        // A call whose result is computed from the caller excludes as what
+        // it returns does.
+        ("FunctionCall", _) => match who.calls.get(&ptr(cond)) {
+            Some(excludes) => excludes[usize::from(negated)],
+            _ => negated,
         },
         _ => negated,
     }
@@ -1043,6 +1066,7 @@ struct Ctx<'i, 'a> {
     ix: &'i Index<'a>,
     lin: Rc<Lin>,
     checked: RefCell<BTreeMap<(Ptr, Vec<usize>), bool>>,
+    returned: RefCell<BTreeMap<Tainted, Option<Excludes>>>,
     unknown: RefCell<BTreeMap<Ptr, bool>>,
     effects: RefCell<BTreeMap<Ptr, Rc<Effects>>>,
     reads: RefCell<BTreeMap<Ptr, Rc<BTreeSet<VarKey>>>>,
@@ -1057,6 +1081,7 @@ impl<'i, 'a> Ctx<'i, 'a> {
             ix,
             lin: ix.lin(target),
             checked: RefCell::new(BTreeMap::new()),
+            returned: RefCell::new(BTreeMap::new()),
             unknown: RefCell::new(BTreeMap::new()),
             effects: RefCell::new(BTreeMap::new()),
             reads: RefCell::new(BTreeMap::new()),
@@ -1313,18 +1338,88 @@ impl<'i, 'a> Ctx<'i, 'a> {
             || self.ix.is_library(d)
     }
 
-    fn aliases(&self, d: &Def, taint: &[usize]) -> BTreeSet<i64> {
+    /// What stands for the caller in `d` when the parameters at `taint`
+    /// hold it. Aliases and calls feed each other (`bool ok = _isAuth(a)`,
+    /// `_isAuth(u)` with `u` an alias), so both grow until neither changes.
+    fn who(&self, d: &Def<'a>, taint: &[usize]) -> Who {
         let loc = self.ix.locals(d.node);
-        let seeds = taint
-            .iter()
-            .filter_map(|j| loc.params.get(*j).copied())
-            .collect();
-        caller_aliases(d.node.get("body").unwrap_or(&Value::Null), &seeds)
+        let body = d.node.get("body").unwrap_or(&Value::Null);
+        let mut who = Who {
+            aliases: taint
+                .iter()
+                .filter_map(|j| loc.params.get(*j).copied())
+                .collect(),
+            calls: BTreeMap::new(),
+        };
+        loop {
+            caller_aliases(body, &mut who);
+            let mut calls = BTreeMap::new();
+            for (x, c) in self.calls(d).iter() {
+                if let Callee::Def(cd, args) = c
+                    && self.followed(cd)
+                    && s(cd.node, "nodeType") == "FunctionDefinition"
+                    && let Some(excludes) = self.returns_caller(cd, &Self::taint(args, &who))
+                {
+                    calls.insert(ptr(x), excludes);
+                }
+            }
+            if calls == who.calls {
+                return who;
+            }
+            who.calls = calls;
+        }
     }
 
-    fn taint(args: &[&Value], aliases: &BTreeSet<i64>) -> Vec<usize> {
+    /// Whether what `d` returns is computed from the caller under the rule
+    /// of `uses_caller`, when the parameters at `taint` hold it, and if so
+    /// whether it only excludes callers (`only_excludes`) when a check passes
+    /// on it being true and on it being false. With several returns, it
+    /// excludes only when each one that uses the caller does.
+    fn returns_caller(&self, d: &Def<'a>, taint: &[usize]) -> Option<Excludes> {
+        let key = (ptr(d.node), taint.to_vec());
+        if let Some(known) = self.returned.borrow().get(&key) {
+            return *known;
+        }
+        // A recursive call says nothing about the caller of its own.
+        self.returned.borrow_mut().insert(key.clone(), None);
+        let who = self.who(d, taint);
+        let named: BTreeSet<i64> = d
+            .node
+            .get("returnParameters")
+            .map_or(&[][..], |p| items(p, "parameters"))
+            .iter()
+            .filter_map(node_id)
+            .collect();
+        let mut values = Vec::new();
+        walk(d.node.get("body").unwrap_or(&Value::Null), &mut |x| {
+            match s(x, "nodeType") {
+                "Return" => values.extend(x.get("expression").filter(|e| e.is_object())),
+                // `returns (bool ok) { ok = ...; }`
+                "Assignment"
+                    if s(x, "operator") == "="
+                        && x.get("leftHandSide")
+                            .and_then(referenced)
+                            .is_some_and(|id| named.contains(&id)) =>
+                {
+                    values.extend(x.get("rightHandSide"));
+                }
+                _ => {}
+            }
+        });
+        let mut found: Option<Excludes> = None;
+        for v in values.into_iter().filter(|v| uses_caller(v, &who)) {
+            let here = [only_excludes(v, false, &who), only_excludes(v, true, &who)];
+            let all = found.get_or_insert(here);
+            all[0] &= here[0];
+            all[1] &= here[1];
+        }
+        self.returned.borrow_mut().insert(key, found);
+        found
+    }
+
+    fn taint(args: &[&Value], who: &Who) -> Vec<usize> {
         (0..args.len())
-            .filter(|j| is_caller(args[*j], aliases))
+            .filter(|j| is_caller(args[*j], who))
             .collect()
     }
 
@@ -1337,27 +1432,24 @@ impl<'i, 'a> Ctx<'i, 'a> {
         }
         // A recursive call is not a check of its own.
         self.checked.borrow_mut().insert(key.clone(), false);
-        let aliases = self.aliases(d, taint);
+        let who = self.who(d, taint);
         let body = d.node.get("body").unwrap_or(&Value::Null);
-        let found = !own_checks(body, &aliases).is_empty()
+        let found = !own_checks(body, &who).is_empty()
             || self
                 .modifiers(d)
                 .iter()
-                .any(|(m, c)| self.is_gate_call(m, c, &aliases))
-            || self
-                .calls(d)
-                .iter()
-                .any(|(_, c)| self.call_checks(c, &aliases));
+                .any(|(m, c)| self.is_gate_call(m, c, &who))
+            || self.calls(d).iter().any(|(_, c)| self.call_checks(c, &who));
         self.checked.borrow_mut().insert(key, found);
         found
     }
 
     // A call that checks the caller. A `_checkRole` or `_checkOwner` whose
     // source was not found is one: the standard libraries check it there.
-    fn call_checks(&self, c: &Callee<'a>, aliases: &BTreeSet<i64>) -> bool {
+    fn call_checks(&self, c: &Callee<'a>, who: &Who) -> bool {
         match c {
             Callee::Def(cd, args) => {
-                self.followed(cd) && self.has_check(cd, &Self::taint(args, aliases))
+                self.followed(cd) && self.has_check(cd, &Self::taint(args, who))
             }
             Callee::Unknown(n) => matches!(n.as_str(), "_checkRole" | "_checkOwner"),
             Callee::Other => false,
@@ -1366,10 +1458,10 @@ impl<'i, 'a> Ctx<'i, 'a> {
 
     /// A modifier restricts who may call when it checks the caller. Only
     /// when code it runs could not be found does its name decide.
-    fn is_gate_call(&self, inv: &Value, c: &Callee<'a>, aliases: &BTreeSet<i64>) -> bool {
+    fn is_gate_call(&self, inv: &Value, c: &Callee<'a>, who: &Who) -> bool {
         match c {
             Callee::Def(m, args) => {
-                self.has_check(m, &Self::taint(args, aliases))
+                self.has_check(m, &Self::taint(args, who))
                     || (self.reaches_unknown(m) && is_gate(s(m.node, "name")))
             }
             Callee::Unknown(_) => is_gate(&modifier_text(inv)),
@@ -1398,15 +1490,15 @@ impl<'i, 'a> Ctx<'i, 'a> {
     /// The lines of the caller checks a function runs in its own body: its
     /// own, and its calls to code that checks.
     fn check_lines(&self, d: &Def<'a>) -> Vec<usize> {
-        let aliases = self.aliases(d, &[]);
+        let who = self.who(d, &[]);
         let body = d.node.get("body").unwrap_or(&Value::Null);
-        let mut out: Vec<usize> = own_checks(body, &aliases)
+        let mut out: Vec<usize> = own_checks(body, &who)
             .iter()
             .map(|(x, _)| self.ix.line(d.unit, x))
             .chain(
                 self.calls(d)
                     .iter()
-                    .filter(|(_, c)| self.call_checks(c, &aliases))
+                    .filter(|(_, c)| self.call_checks(c, &who))
                     .map(|(x, _)| self.ix.line(d.unit, x)),
             )
             .collect();
@@ -1593,18 +1685,18 @@ impl<'i, 'a> Ctx<'i, 'a> {
         if !seen.insert(ptr(d.node)) {
             return;
         }
-        let aliases = self.aliases(d, taint);
+        let who = self.who(d, taint);
         let body = d.node.get("body").unwrap_or(&Value::Null);
-        for (_, cond) in own_checks(body, &aliases) {
+        for (_, cond) in own_checks(body, &who) {
             if let Some(cond) = cond {
                 self.reads_in(d, cond, out);
             }
         }
         for (inv, c) in self.modifiers(d).iter().chain(self.calls(d).iter()) {
             if let Callee::Def(cd, args) = c {
-                let t = Self::taint(args, &aliases);
+                let t = Self::taint(args, &who);
                 let checks = if s(inv, "nodeType") == "ModifierInvocation" {
-                    self.is_gate_call(inv, c, &aliases)
+                    self.is_gate_call(inv, c, &who)
                 } else {
                     self.followed(cd) && self.has_check(cd, &t)
                 };
@@ -1709,7 +1801,7 @@ fn analyse(ix: &Index, t: usize, project: &dyn Fn(usize) -> bool) -> Contract {
         let mut others = Vec::new();
         for (inv, c) in cx.modifiers(d) {
             let text = modifier_text(inv);
-            if !cx.is_gate_call(inv, &c, &BTreeSet::new()) {
+            if !cx.is_gate_call(inv, &c, &Who::default()) {
                 if !matches!(c, Callee::Other) {
                     others.push(text);
                 }
@@ -1720,7 +1812,7 @@ fn analyse(ix: &Index, t: usize, project: &dyn Fn(usize) -> bool) -> Contract {
                 let name = s(m.node, "name").to_string();
                 if !guard_reads.iter().any(|(g, _)| *g == name) {
                     let mut reads = BTreeSet::new();
-                    let t = Ctx::taint(args, &BTreeSet::new());
+                    let t = Ctx::taint(args, &Who::default());
                     cx.check_reads(m, &t, &mut BTreeSet::new(), &mut reads);
                     guard_reads.push((name, reads));
                 }
@@ -1891,7 +1983,7 @@ fn analyse(ix: &Index, t: usize, project: &dyn Fn(usize) -> bool) -> Contract {
         let gates: Vec<String> = cx
             .modifiers(&d)
             .iter()
-            .filter(|(inv, c)| cx.is_gate_call(inv, c, &BTreeSet::new()))
+            .filter(|(inv, c)| cx.is_gate_call(inv, c, &Who::default()))
             .map(|(inv, _)| modifier_text(inv))
             .collect();
         let who = if !gates.is_empty() {
@@ -3061,6 +3153,89 @@ mod tests {
         assert!(report.contains("src/vat.sol:12 file - auth\n  src/vat.sol:13 file - auth"));
         assert!(
             report.contains("state wards - written by rely, deny\n"),
+            "{report}"
+        );
+    }
+
+    fn ret(e: Value) -> Value {
+        json!({ "nodeType": "Return", "expression": e })
+    }
+
+    // Morpho-like: a helper whose result, not its body, checks the caller.
+    #[test]
+    fn a_call_whose_result_is_computed_from_the_caller_is_a_check() {
+        let none = json!([]);
+        let helper = |fid: i64, name: &str, ps: &[(i64, &str, bool)], e: Value| {
+            with_params(
+                func(
+                    fid,
+                    name,
+                    "internal",
+                    fid as usize - 60,
+                    none.clone(),
+                    body(vec![ret(e)]),
+                ),
+                ps,
+            )
+        };
+        let entry = |fid: i64, name: &str, line: usize, stmts: Vec<Value>| {
+            with_params(
+                func(fid, name, "external", line, none.clone(), body(stmts)),
+                &[(fid + 100, "onBehalf", false)],
+            )
+        };
+        let on = |fid: i64| id("onBehalf", fid + 100);
+        let c = read_one(
+            vec![
+                json!({ "nodeType": "ContractDefinition", "name": "Morpho", "contractKind": "contract", "nodes": [
+            { "nodeType": "VariableDeclaration", "id": 3, "name": "isAuthorized", "src": at(2) },
+            { "nodeType": "VariableDeclaration", "id": 4, "name": "balance", "src": at(3) },
+            { "nodeType": "VariableDeclaration", "id": 5, "name": "blacklisted", "src": at(4) },
+            // return msg.sender == onBehalf || isAuthorized[onBehalf][msg.sender];
+            helper(65, "_isSenderAuthorized", &[(200, "onBehalf", false)],
+                   bin("||", bin("==", sender(), id("onBehalf", 200)),
+                       index(index(id("isAuthorized", 3), id("onBehalf", 200)), sender()))),
+            // An amount: return balance[msg.sender] >= x;
+            helper(66, "_enough", &[(201, "x", false)],
+                   bin(">=", index(id("balance", 4), sender()), id("x", 201))),
+            // A deny-list: return !blacklisted[msg.sender];
+            helper(67, "_notBlocked", &[], not(index(id("blacklisted", 5), sender()))),
+            helper(68, "_isBlocked", &[(202, "a", false)], index(id("blacklisted", 5), id("a", 202))),
+            // Through another helper, with the caller handed in.
+            helper(69, "_mayAct", &[(203, "a", false), (204, "u", false)],
+                   call(id("_isSenderAuthorized", 65), vec![id("a", 203)], 9)),
+            entry(20, "withdraw", 20, vec![require(call(id("_isSenderAuthorized", 65), vec![on(20)], 21), 21)]),
+            entry(22, "borrow", 22, vec![local(80, "bool", call(id("_isSenderAuthorized", 65), vec![on(22)], 23)),
+                                         require(id("ok", 80), 24)]),
+            entry(25, "repay", 25, vec![revert_if(not(call(id("_mayAct", 69), vec![on(25), sender()], 26)), 26)]),
+            entry(27, "take", 27, vec![require(call(id("_enough", 66), vec![lit("1")], 28), 28)]),
+            entry(29, "send", 29, vec![require(call(id("_notBlocked", 67), vec![], 30), 30)]),
+            entry(31, "pass", 31, vec![require(not(call(id("_isBlocked", 68), vec![sender()], 32)), 32),
+                                       revert_if(call(id("_isBlocked", 68), vec![sender()], 33), 33)]),
+        ] }),
+            ],
+            "Morpho",
+        );
+        let checks = |n: &str| {
+            c.functions
+                .iter()
+                .find(|f| f.name == n)
+                .map(|f| f.checks.clone())
+                .expect("function")
+        };
+        assert_eq!(checks("withdraw"), vec![21]);
+        assert_eq!(checks("borrow"), vec![24]);
+        assert_eq!(checks("repay"), vec![26]);
+        assert_eq!(checks("take"), Vec::<usize>::new());
+        assert_eq!(checks("send"), Vec::<usize>::new());
+        assert_eq!(checks("pass"), Vec::<usize>::new());
+        let report = c.report();
+        assert!(
+            report.contains("src/vat.sol:20 withdraw - anyone, checks the caller at :21\n"),
+            "{report}"
+        );
+        assert!(
+            report.contains("src/vat.sol:27 take - anyone\n"),
             "{report}"
         );
     }

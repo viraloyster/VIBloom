@@ -26,7 +26,75 @@ fn why(v: &NodeView) -> String {
     out.join("\n")
 }
 
-fn full(v: &NodeView, by_id: &HashMap<&str, &NodeView>) -> String {
+// What a node watches, without files a watched folder already covers.
+fn watched(v: &NodeView) -> Vec<&str> {
+    v.watch
+        .iter()
+        .filter(|w| {
+            !v.watch
+                .iter()
+                .any(|d| d.ends_with('/') && *w != d && covers(d, w))
+        })
+        .map(String::as_str)
+        .collect()
+}
+
+// Past this many, a watch list is the file at hand and a count: an import
+// closure repeats the same dozens of files under every node.
+const WATCH_IN_FULL: usize = 4;
+
+fn watch_line(v: &NodeView, path: &str) -> Option<String> {
+    let watch = watched(v);
+    if watch.is_empty() {
+        return None;
+    }
+    if watch.len() <= WATCH_IN_FULL {
+        return Some(format!("  watches: {}", watch.join(", ")));
+    }
+    let what = if v.test_file.is_some() {
+        "files its test imports"
+    } else {
+        "files"
+    };
+    Some(if watch.contains(&path) {
+        format!("  watches: {path}, and {} other {what}", watch.len() - 1)
+    } else {
+        format!("  watches: {} {what}", watch.len())
+    })
+}
+
+// Nodes of one group that watch the same long list, said once after it.
+fn same_watch(vs: &[&NodeView]) -> Vec<String> {
+    let mut sets: Vec<(Vec<&str>, Vec<&str>)> = Vec::new();
+    for v in vs {
+        let mut w = watched(v);
+        if w.len() <= WATCH_IN_FULL {
+            continue;
+        }
+        w.sort_unstable();
+        match sets.iter_mut().find(|(s, _)| *s == w) {
+            Some((_, ids)) => ids.push(&v.id),
+            None => sets.push((w, vec![&v.id])),
+        }
+    }
+    let mut out: Vec<String> = sets
+        .iter()
+        .filter(|(_, ids)| ids.len() > 1)
+        .map(|(w, ids)| {
+            if ids.len() == vs.len() {
+                format!("All {} above watch the same {} files.", ids.len(), w.len())
+            } else {
+                format!("{} watch the same {} files.", ids.join(", "), w.len())
+            }
+        })
+        .collect();
+    if !sets.is_empty() {
+        out.push("`vibloom status --json` lists every file each one watches.".into());
+    }
+    out
+}
+
+fn full(v: &NodeView, by_id: &HashMap<&str, &NodeView>, path: &str) -> String {
     let mut out = vec![line(v)];
     if let Some(d) = &v.detail {
         out.push(format!("  {d}"));
@@ -37,19 +105,7 @@ fn full(v: &NodeView, by_id: &HashMap<&str, &NodeView>) -> String {
             if v.protected { " (protected)" } else { "" }
         ));
     }
-    let watch: Vec<&str> = v
-        .watch
-        .iter()
-        .filter(|w| {
-            !v.watch
-                .iter()
-                .any(|d| d.ends_with('/') && *w != d && covers(d, w))
-        })
-        .map(String::as_str)
-        .collect();
-    if !watch.is_empty() {
-        out.push(format!("  watches: {}", watch.join(", ")));
-    }
+    out.extend(watch_line(v, path));
     if !v.sources.is_empty() {
         out.push(format!("  from: {}", v.sources.join("; ")));
     }
@@ -165,7 +221,9 @@ pub fn context(views: &[NodeView], path: Option<&str>) -> String {
         } else {
             if !about.is_empty() {
                 out.push(format!("About {p}:"));
-                out.extend(pick(&about).into_iter().map(|v| full(v, &by_id)));
+                let vs = pick(&about);
+                out.extend(vs.iter().map(|v| full(v, &by_id, p)));
+                out.extend(same_watch(&vs));
             }
             if !connected.is_empty() {
                 out.push(format!(
@@ -320,6 +378,56 @@ mod tests {
         assert!(text[elsewhere..rest].contains("- inv.other [BROKEN]"));
         assert!(text[elsewhere..rest].contains("why: drift"));
         assert!(!text.contains("asm.far"));
+    }
+
+    #[test]
+    fn a_long_watch_list_is_the_file_and_a_count_and_shared_ones_are_said_once() {
+        let closure: Vec<String> = [
+            "src/Vault.sol",
+            "src/A.sol",
+            "src/B.sol",
+            "src/C.sol",
+            "test/H.sol",
+        ]
+        .iter()
+        .map(|f| (*f).to_string())
+        .collect();
+        let inv = |id: &str, watch: &[String]| {
+            let mut v = node(id, Kind::Invariant, Evidence::Holds);
+            v.watch = watch.to_vec();
+            v.test_file = Some("test/Vault.t.sol".into());
+            v
+        };
+        let mut wider = closure.clone();
+        wider.push("src/D.sol".into());
+        let short = vec!["src/Vault.sol".to_string(), "src/A.sol".to_string()];
+        let mut vs = vec![inv("inv.a", &closure), inv("inv.b", &closure)];
+        let text = context(&vs, Some("src/Vault.sol"));
+        assert!(
+            text.contains("  watches: src/Vault.sol, and 4 other files its test imports\n"),
+            "{text}"
+        );
+        assert!(!text.contains("src/B.sol"), "{text}");
+        assert!(
+            text.contains("All 2 above watch the same 5 files.\n`vibloom status --json` lists every file each one watches."),
+            "{text}"
+        );
+        vs.push(inv("inv.c", &wider));
+        vs.push(inv("inv.d", &short));
+        let text = context(&vs, Some("src/Vault.sol"));
+        assert!(
+            text.contains("inv.a, inv.b watch the same 5 files."),
+            "{text}"
+        );
+        assert!(
+            text.contains("and 5 other files its test imports"),
+            "{text}"
+        );
+        assert!(
+            text.contains("  watches: src/Vault.sol, src/A.sol\n"),
+            "{text}"
+        );
+        assert!(!text.contains("All "), "{text}");
     }
 
     #[test]

@@ -2,6 +2,32 @@
 
 Changes to the `vibloom` binary. The web app is not versioned.
 
+## 0.10.1
+
+Fixes found running vibloom on Morpho Blue.
+
+### Fixed
+
+- The survey reported `withdraw`, `borrow` and `withdrawCollateral` of
+  Morpho as open to anyone: their check,
+  `require(_isSenderAuthorized(onBehalf))`, is in what the helper returns,
+  not in its body. A call to an internal or private function whose returned
+  value uses the caller now counts as the caller in a condition, with the
+  same exclusions (amounts compared with `<` or `>`, the zero address,
+  deny-lists such as `!blacklisted[msg.sender]` or `!_isBlacklisted(...)`).
+- Every `survey`, `gaps` or `research` after a `forge test` recompiled the
+  whole project, since `forge test` rewrites `out/` without syntax trees.
+  vibloom now builds into its own `--out` and `--cache-path` folder in the
+  project's local state, never committed, so its builds are incremental and
+  the project's `out/` is no longer touched. `init` lists the tests into the
+  same folder, so it builds once.
+- A forge build ran for minutes with no output. vibloom now says on stderr
+  when it starts one and, past 10 s, how long it took.
+- `vibloom context <file>` repeated a long import closure under every node.
+  A watch list of more than four entries is now the file at hand and a
+  count, and nodes of a group with the same list say so once; `status
+--json` keeps the full lists.
+
 ## 0.10.0
 
 An open format, evidence from other tools with its kind of guarantee in

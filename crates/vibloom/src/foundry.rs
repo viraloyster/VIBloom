@@ -3,14 +3,64 @@
 
 use crate::cli::Fallible;
 use crate::map::{RootsMap, test_name};
-use crate::proc::{last_json, run_child};
+use crate::proc::{Finished, last_json, run_child};
 use crate::scan::Found;
 use crate::setup::{Plan, Stack, is_test_code, plan};
-use crate::store::files_under;
+use crate::store::{files_under, state_dir};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
+
+// vibloom's own build with syntax trees, in the project's local state:
+// `forge test` rewrites the project's `out/` without them, so sharing it
+// would force a full rebuild after every test run.
+fn ast_build(root: &Path) -> PathBuf {
+    state_dir(root).join("forge")
+}
+
+pub(crate) fn ast_out(root: &Path) -> PathBuf {
+    ast_build(root).join("out")
+}
+
+fn ast_args(root: &Path) -> Vec<String> {
+    let dir = ast_build(root);
+    vec![
+        "--ast".into(),
+        "--out".into(),
+        dir.join("out").to_string_lossy().into_owned(),
+        "--cache-path".into(),
+        dir.join("cache").to_string_lossy().into_owned(),
+    ]
+}
+
+fn is_forge(exe: &str) -> bool {
+    exe.rsplit(['/', '\\'])
+        .next()
+        .is_some_and(|e| e.starts_with("forge"))
+}
+
+// A first build of a large project takes minutes with nothing on screen, so
+// every build says so before it starts, and how long it took when it was long.
+fn forge_build(exe: &str, args: &[String], root: &Path, limit: u64) -> Result<Finished, String> {
+    let _ = writeln!(
+        std::io::stderr(),
+        "Building with forge to read the syntax trees (a first build of a large project can take minutes)..."
+    );
+    let started = std::time::Instant::now();
+    let done = run_child(exe, args, root, limit);
+    let secs = started.elapsed().as_secs();
+    if secs > 10 {
+        let _ = writeln!(
+            std::io::stderr(),
+            "The build took {}m{:02}s.",
+            secs / 60,
+            secs % 60
+        );
+    }
+    done
+}
 
 // What the project is and how its tests run, asking forge for its own
 // folders when it is a Foundry project.
@@ -32,8 +82,15 @@ pub(crate) fn forge_list(root: &Path, map: &RootsMap) -> Option<Value> {
         return None;
     }
     let exe = map.runner.first().map_or("forge", String::as_str);
-    let args = ["test".to_string(), "--list".into(), "--json".into()];
-    last_json(&run_child(exe, &args, root, 600).ok()?.stdout)
+    let mut args = vec!["test".to_string(), "--list".into(), "--json".into()];
+    // forge compiles to list; into vibloom's own build, the trees come too.
+    let listed = if is_forge(exe) {
+        args.extend(ast_args(root));
+        forge_build(exe, &args, root, 600)
+    } else {
+        run_child(exe, &args, root, 600)
+    };
+    last_json(&listed.ok()?.stdout)
 }
 
 pub(crate) fn forge_invariants(listed: &Value) -> Option<Vec<Found>> {
@@ -84,9 +141,9 @@ pub(crate) fn artifact_dirs(dir: &Path, out: &mut BTreeMap<String, Vec<PathBuf>>
 // The syntax trees of the project's own sources and of every file they
 // import, each read once. A file forge wrote no artifact for (only free
 // functions or structs) is left out: what it defines is then unresolved.
-pub(crate) fn units(root: &Path, sources: &[String], out_dir: &str) -> Vec<crate::survey::Unit> {
+pub(crate) fn units(root: &Path, sources: &[String], out_dir: &Path) -> Vec<crate::survey::Unit> {
     let mut dirs = BTreeMap::new();
-    artifact_dirs(&root.join(out_dir), &mut dirs);
+    artifact_dirs(out_dir, &mut dirs);
     let own: BTreeSet<&str> = sources.iter().map(String::as_str).collect();
     let mut queue: Vec<String> = sources.to_vec();
     let mut seen: BTreeSet<String> = queue.iter().cloned().collect();
@@ -170,9 +227,9 @@ pub(crate) fn units(root: &Path, sources: &[String], out_dir: &str) -> Vec<crate
 }
 
 // Whether a source of the project has an artifact without a syntax tree.
-pub(crate) fn lacks_ast(root: &Path, sources: &[String], out_dir: &str) -> bool {
+pub(crate) fn lacks_ast(sources: &[String], out_dir: &Path) -> bool {
     let mut dirs = BTreeMap::new();
-    artifact_dirs(&root.join(out_dir), &mut dirs);
+    artifact_dirs(out_dir, &mut dirs);
     sources.iter().any(|file| {
         let base = file.rsplit('/').next().unwrap_or(file);
         dirs.get(base).into_iter().flatten().any(|dir| {
@@ -189,7 +246,6 @@ pub(crate) fn lacks_ast(root: &Path, sources: &[String], out_dir: &str) -> bool 
 
 pub(crate) struct FoundryDirs {
     pub(crate) src: String,
-    pub(crate) out: String,
     pub(crate) script: String,
     /// Where dependencies live (`lib`): never the project's own files.
     pub(crate) libs: Vec<String>,
@@ -221,14 +277,13 @@ pub(crate) fn foundry_dirs(root: &Path) -> FoundryDirs {
         .unwrap_or_else(|| vec!["lib".to_string()]);
     FoundryDirs {
         src: dir("src", "src"),
-        out: dir("out", "out"),
         script: dir("script", "script"),
         libs,
     }
 }
 
-// The project's own contracts, read from the compiler's syntax trees. It
-// builds with `--ast`, which a plain `forge build` or `forge test` leaves out.
+// The project's own contracts, read from the compiler's syntax trees of
+// vibloom's own build.
 pub(crate) fn compiled(
     root: &Path,
     map: &RootsMap,
@@ -240,24 +295,26 @@ pub(crate) fn compiled(
         ));
     }
     let build = |force: bool| {
-        let mut args = vec!["build".to_string(), "--ast".into()];
+        let mut args = vec!["build".to_string()];
+        args.extend(ast_args(root));
         if force {
             args.push("--force".into());
         }
-        run_child("forge", &args, root, map.timeout)
+        forge_build("forge", &args, root, map.timeout)
     };
     let mut built = build(false)?;
     let dirs = foundry_dirs(root);
     let mut sources = Vec::new();
     files_under(root, &dirs.src, &mut sources);
     sources.retain(|f| f.ends_with(".sol") && !is_test_code(f, &map.tests, &dirs.script));
-    // `forge test` recompiles a changed file without its syntax tree, and a
-    // later `forge build --ast` sees nothing to do: the tree must be forced.
-    if lacks_ast(root, &sources, &dirs.out) {
+    let out = ast_out(root);
+    // Only vibloom builds there, always with trees; an artifact without one
+    // (written by hand or by an older vibloom) is rebuilt.
+    if lacks_ast(&sources, &out) {
         built = build(true)?;
     }
     let own: BTreeSet<String> = sources.iter().cloned().collect();
-    let contracts = crate::survey::read(&units(root, &sources, &dirs.out), &|f| own.contains(f));
+    let contracts = crate::survey::read(&units(root, &sources, &out), &|f| own.contains(f));
     if contracts.is_empty() {
         let said = if built.stderr.trim().is_empty() {
             &built.stdout
@@ -360,29 +417,27 @@ pub(crate) fn import_closures(
 ) -> Option<BTreeMap<String, Closure>> {
     let exe = map.runner.first().map_or("forge", String::as_str);
     if map.report.is_some()
-        || !exe
-            .rsplit(['/', '\\'])
-            .next()
-            .is_some_and(|e| e.starts_with("forge"))
+        || !is_forge(exe)
         || !root.join("foundry.toml").is_file()
         || test_files.is_empty()
     {
         return None;
     }
     let build = |force: bool| {
-        let mut args = vec!["build".to_string(), "--ast".into()];
+        let mut args = vec!["build".to_string()];
+        args.extend(ast_args(root));
         if force {
             args.push("--force".into());
         }
-        run_child(exe, &args, root, map.timeout).ok()
+        forge_build(exe, &args, root, map.timeout).ok()
     };
     build(false)?;
     let dirs = foundry_dirs(root);
-    // `forge test` leaves the trees out of what it recompiled.
-    if lacks_ast(root, test_files, &dirs.out) {
+    let out = ast_out(root);
+    if lacks_ast(test_files, &out) {
         build(true)?;
     }
-    let units = units(root, test_files, &dirs.out);
+    let units = units(root, test_files, &out);
     closures(&units, test_files, &map.tests, &dirs, &|f| {
         root.join(f).is_file()
     })
@@ -426,7 +481,6 @@ mod tests {
         ];
         let dirs = FoundryDirs {
             src: "src".into(),
-            out: "out".into(),
             script: "script".into(),
             libs: vec!["lib".into()],
         };
