@@ -36,6 +36,7 @@ hypothetical                     asm.rounding-favours-the-vault  Rounding in wit
 Not yet reviewed (yours to decide: adopt it or switch it off):
 - asm.handler-is-the-only-actor: vibloom edit asm.handler-is-the-only-actor --stance adopted   (or --stance off)
 - asm.rounding-favours-the-vault: vibloom edit asm.rounding-favours-the-vault --stance adopted   (or --stance off)
+Check failed: 2 nodes need attention, 1 failing test no node rests on.
 ```
 
 To start from nothing instead, follow [docs/quickstart.md](../docs/quickstart.md)

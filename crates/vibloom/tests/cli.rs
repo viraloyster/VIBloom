@@ -322,6 +322,13 @@ fn check_against_the_base_refuses_a_gutted_invariant_and_a_leak() {
     ] {
         assert!(r.out.contains(want), "{want}: {}", r.out);
     }
+    assert!(
+        r.out
+            .trim_end()
+            .ends_with("Check failed: 4 guard changes not approved."),
+        "{}",
+        r.out
+    );
     let j: Value =
         serde_json::from_str(&cli(&dir, &["check", "--base", "main", "--json"]).out).expect("json");
     assert_eq!(j["exit"], 1);
@@ -1725,6 +1732,13 @@ printf '{"test/C.t.sol:CT":{"test_results":{"invariant_sum()":{"status":"Success
         out.out.contains(
             "Run 1: 2 test results recorded, 1 failed.\n1 failing test no node rests on, which still fails the check: CT.test_other."
         ),
+        "{}",
+        out.out
+    );
+    assert!(
+        out.out
+            .trim_end()
+            .ends_with("1 failing test no node rests on."),
         "{}",
         out.out
     );

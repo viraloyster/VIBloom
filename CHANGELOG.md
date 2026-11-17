@@ -8,6 +8,9 @@ Fixes found running vibloom on Morpho Blue.
 
 ### Fixed
 
+- `check` ends with one line saying why it failed when the reason is outside
+  the nodes (a guard change not approved, a failing test no node rests on):
+  on Morpho the table read "0 need attention" while the check failed.
 - The survey reported `withdraw`, `borrow` and `withdrawCollateral` of
   Morpho as open to anyone: their check,
   `require(_isSenderAuthorized(onBehalf))`, is in what the helper returns,

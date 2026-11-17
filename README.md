@@ -49,6 +49,7 @@ BROKEN   inv.assets-match-flows             invariant_assetsMatchFlows
 AT RISK  int.nobody-can-take-out-more-than  Nobody can take out more than their shares are worth
 holds    inv.shares-are-backed              invariant_sharesAreBacked
 adopted  asm.the-handler-covers-every-way   The handler covers every way assets enter or leave the vault
+Check failed: 2 nodes need attention, 1 failing test no node rests on.
 ```
 
 An agent sent to fix it cannot edit the invariant's test or the map:

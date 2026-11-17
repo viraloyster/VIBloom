@@ -143,6 +143,36 @@ pub(crate) fn check(root: &Path, io: &mut Io, o: &CheckOpts, extra: &[String]) -
         (io.out)(&guard_text(g));
     }
     print_run(io, &map, &report, vs, strict, &was);
+    // The table above can read "0 need attention" while the check fails for
+    // a reason outside the nodes; the last line says which.
+    let mut outside = Vec::new();
+    if guard_fails {
+        let n = guard.as_ref().map_or(0, |g| g.changes.len());
+        outside.push(format!(
+            "{n} guard {} not approved",
+            if n == 1 { "change" } else { "changes" }
+        ));
+    }
+    if !fails.untracked.is_empty() {
+        let n = fails.untracked.len();
+        outside.push(format!(
+            "{n} failing {} no node rests on",
+            if n == 1 { "test" } else { "tests" }
+        ));
+    }
+    if exit == 1 && !outside.is_empty() {
+        let n = vs.iter().filter(|v| needs_attention(v, strict)).count();
+        if n > 0 {
+            outside.insert(
+                0,
+                format!(
+                    "{n} {} attention",
+                    if n == 1 { "node needs" } else { "nodes need" }
+                ),
+            );
+        }
+        (io.out)(&format!("Check failed: {}.", outside.join(", ")));
+    }
     if o.format == Format::Github {
         let pre = prefix(root).unwrap_or_default();
         for line in annotations(root, &map, vs, strict, guard.as_ref(), error, &pre) {
