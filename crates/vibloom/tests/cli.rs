@@ -2540,11 +2540,13 @@ fn an_echidna_report_without_a_command_counts_only_while_it_is_fresh() {
     );
 
     fs::create_dir_all(dir.join("out")).expect("dir");
-    fs::copy(
-        format!("{FIXTURES}/echidna/passed.json"),
+    // Written, not copied: a copy keeps the fixture's old mtime on macOS
+    // and Windows, which would make the report look stale.
+    fs::write(
         dir.join("out/echidna.json"),
+        fs::read(format!("{FIXTURES}/echidna/passed.json")).expect("fixture"),
     )
-    .expect("copy");
+    .expect("write");
     let fresh = cli(&dir, &["check"]);
     assert_eq!(fresh.code, 0, "{}", fresh.out);
     assert!(
@@ -2566,11 +2568,13 @@ fn an_echidna_report_without_a_command_counts_only_while_it_is_fresh() {
         "{why}"
     );
 
-    fs::copy(
-        format!("{FIXTURES}/echidna/solved.json"),
+    // Written, not copied: a copy keeps the fixture's old mtime on macOS
+    // and Windows, which would make the report look stale.
+    fs::write(
         dir.join("out/echidna.json"),
+        fs::read(format!("{FIXTURES}/echidna/solved.json")).expect("fixture"),
     )
-    .expect("copy");
+    .expect("write");
     let solved = cli(&dir, &["check"]);
     assert_eq!(solved.code, 1);
     assert!(
