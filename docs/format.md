@@ -122,9 +122,14 @@ A node's `test` names one result. Without `tool` it comes from the project's
 - `halmos`: the file `halmos --json-output <file>` writes. A result is found
   by `file` and `contract` (its `test_results` key is `file:Contract`) and
   `name` (the function, parameters dropped).
-- `echidna`: what `echidna --format json` prints, saved to the file
-  (`sh -c "echidna ... --format json > <file>"`). A result is found by
-  `contract` and `name`; `file` is the test's source in the project.
+- `echidna`: what `echidna --format text` prints, saved to the file
+  (`sh -c "echidna . --contract C --format text > <file>"`); the summary
+  after the last `[status]` line is read. A result is found by `name` (the
+  property's function, or the assertion's with its parameters dropped) and
+  `contract`, which is the `--contract` the command passes: the summary
+  names none, so leave `contract` out when the command does too. `file` is
+  the test's source in the project. A `--format json` report is refused
+  while Echidna names every test in it `"name"`.
 - `junit`: JUnit XML of a second runner, read like `report`.
 
 With `command`, `vibloom check` deletes the report, runs the command (with
@@ -144,17 +149,17 @@ Each run is recorded with every test result and, for each node with a test, a
 digest of the files it watches when the run started. From the latest result
 for a node's test:
 
-| Result                                                                                                                         | Node state     |
-| ------------------------------------------------------------------------------------------------------------------------------ | -------------- |
-| passed, watched files unchanged since that run                                                                                 | holds          |
-| passed, a watched file changed since                                                                                           | pending review |
-| failed (Halmos COUNTEREXAMPLE, Echidna solved)                                                                                 | BROKEN         |
-| passed but nothing exercised (every call or path reverted, Halmos REVERT_ALL)                                                  | VACUOUS        |
-| the tool did not finish (Halmos TIMEOUT, STUCK, EXCEPTION; Echidna fuzzing, shrinking, error), or a report older than the code | pending review |
-| skipped                                                                                                                        | skipped        |
-| never ran                                                                                                                      | untested       |
-| ran before, absent from the latest whole run                                                                                   | MISSING        |
-| a protected test or guarded file differs from the last commit                                                                  | TEST CHANGED   |
+| Result                                                                                                                              | Node state     |
+| ----------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| passed (Echidna passing, passed!, verified), watched files unchanged since that run                                                 | holds          |
+| passed, a watched file changed since                                                                                                | pending review |
+| failed (Halmos COUNTEREXAMPLE, Echidna failed!)                                                                                     | BROKEN         |
+| passed but nothing exercised (every call or path reverted, Halmos REVERT_ALL)                                                       | VACUOUS        |
+| no verdict (Halmos TIMEOUT, STUCK, EXCEPTION; Echidna could not evaluate, an optimization maximum), or a report older than the code | pending review |
+| skipped                                                                                                                             | skipped        |
+| never ran                                                                                                                           | untested       |
+| ran before, absent from the latest whole run                                                                                        | MISSING        |
+| a protected test or guarded file differs from the last commit                                                                       | TEST CHANGED   |
 
 A node that rests on something broken, off or unsupported is UNSUPPORTED (AT
 RISK for an intention); on something pending, it is pending review. A node

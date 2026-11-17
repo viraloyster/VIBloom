@@ -1,7 +1,7 @@
 # Examples
 
-Two small projects set up with `vibloom`, each with its map. The run log is
-local, so a fresh clone starts untested; CI runs `vibloom check` in both with
+Three small projects set up with `vibloom`, each with its map. The run log is
+local, so a fresh clone starts untested; CI runs `vibloom check` in each with
 the real test runners.
 
 - [foundry-vault](foundry-vault/): a share vault in Solidity with two
@@ -11,6 +11,10 @@ the real test runners.
   handler.
 - [pytest-ledger](pytest-ledger/): a Python ledger checked through a JUnit
   report, the route for any runner that is not Foundry.
+- [hardhat-counter](hardhat-counter/): a Solidity counter tested with
+  Hardhat 2 and mocha, read through `mocha-junit-reporter`. Run `npm ci`
+  first; each node names its test by its full title (`Counter starts at
+zero`).
 
 Try it in `foundry-vault`: comment out `totalAssets -= assets;` in
 `src/Vault.sol` and run `vibloom check`. The invariant on the vault's books

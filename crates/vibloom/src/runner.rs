@@ -1,6 +1,6 @@
 //! Running the tests and recording the run in the local log.
 
-use crate::checks::{echidna_how, flag_number, parse_echidna, parse_halmos};
+use crate::checks::{flag_number, parse_echidna, parse_halmos};
 use crate::cli::Fallible;
 use crate::derive::{Evidence, NodeView, Snapshot, derive, matches, node_digest};
 use crate::forge::{Outcome, RunnerOutputError, Status, parse_forge};
@@ -227,7 +227,7 @@ fn check_outcomes(root: &Path, map: &RootsMap, c: &Check) -> Fallible<Vec<Outcom
                 .as_deref()
                 .and_then(|cmd| flag_number(cmd, "--loop")),
         ),
-        Tool::Echidna => parse_echidna(&text, echidna_how(c.command.as_deref().unwrap_or(&[]))),
+        Tool::Echidna => parse_echidna(&text, c.command.as_deref().unwrap_or(&[])),
         Tool::Junit => parse_junit(&text, &root.to_string_lossy()).map(|os| {
             os.into_iter()
                 .map(|o| Outcome {

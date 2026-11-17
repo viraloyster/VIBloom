@@ -40,6 +40,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: foundry-rs/foundry-toolchain@v1
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -53,3 +56,8 @@ jobs:
       - name: Pytest ledger
         working-directory: examples/pytest-ledger
         run: vibloom check
+      - name: Hardhat counter
+        working-directory: examples/hardhat-counter
+        run: |
+          npm ci
+          vibloom check

@@ -2593,6 +2593,23 @@ fn an_echidna_report_without_a_command_counts_only_while_it_is_fresh() {
         fs::read(format!("{FIXTURES}/echidna/passed.json")).expect("fixture"),
     )
     .expect("write");
+    let unnamed = cli(&dir, &["check"]);
+    assert_eq!(unnamed.code, 2, "{}", unnamed.out);
+    assert!(
+        format!("{}{}", unnamed.out, unnamed.err)
+            .contains("the Echidna report does not name its tests"),
+        "{}{}",
+        unnamed.out,
+        unnamed.err
+    );
+
+    // Echidna's report with its tests named, as its text output names them.
+    let named = |status: &str| {
+        format!(
+            r#"{{"success":true,"error":null,"tests":[{{"contract":"VaultEchidna","name":"echidna_assets_match_flows","status":"{status}","error":null,"reason":null,"events":[],"type":"property","transactions":[{{"contract":"","function":"deposit","arguments":["1"],"gas":"1","gasprice":"0","value":"0"}}]}}],"seed":1,"coverage":{{}}}}"#
+        )
+    };
+    fs::write(dir.join("out/echidna.json"), named("fuzzing")).expect("write");
     let fresh = cli(&dir, &["check"]);
     assert_eq!(fresh.code, 0, "{}", fresh.out);
     assert!(
@@ -2614,19 +2631,147 @@ fn an_echidna_report_without_a_command_counts_only_while_it_is_fresh() {
         "{why}"
     );
 
-    // Written, not copied: a copy keeps the fixture's old mtime on macOS
-    // and Windows, which would make the report look stale.
-    fs::write(
-        dir.join("out/echidna.json"),
-        fs::read(format!("{FIXTURES}/echidna/solved.json")).expect("fixture"),
-    )
-    .expect("write");
+    fs::write(dir.join("out/echidna.json"), named("solved")).expect("write");
     let solved = cli(&dir, &["check"]);
     assert_eq!(solved.code, 1);
     assert!(
         solved.out.contains("inv.flows: pending review -> BROKEN"),
         "{}",
         solved.out
+    );
+}
+
+// Echidna's text summary as lib/Echidna/UI/Report.hs (ppTests, ppFail) at
+// crytic/echidna fb0fd78b prints it; see the fixture in src/checks.rs.
+const ECHIDNA_STATUS: &str = "[2026-11-17 10:00:03.05] [status] tests: 0/2, fuzzing: 5000/5000, values: [], cov: 812, corpus: 3, gas/s: 0\n";
+const ECHIDNA_FOOTER: &str = "\nUnique instructions: 812\nUnique codehashes: 2\nCorpus size: 3\nSeed: 42\nTotal calls: 5000\n\n";
+
+#[test]
+fn reads_echidna_s_text_summary_from_its_command() {
+    let dir = project();
+    with_runner(&dir);
+    fs::write(dir.join("src/C.sol"), "contract C { }").expect("write");
+    fs::write(
+        dir.join("test/VaultEchidna.sol"),
+        "contract VaultEchidna {}",
+    )
+    .expect("write");
+    let passing = format!(
+        "{ECHIDNA_STATUS}echidna_assets_match_flows: passing\nwithdraw(uint256): passing\n{ECHIDNA_FOOTER}"
+    );
+    let failed = format!(
+        "{ECHIDNA_STATUS}echidna_assets_match_flows: failed!\u{1F4A5}  \n  Reason: ReturnFalse\n  Call sequence:\n    VaultEchidna.deposit(1)\n    VaultEchidna.withdraw(2)\n\nTraces: \ncall VaultEchidna::echidna_assets_match_flows() (test/VaultEchidna.sol:3)\n\nwithdraw(uint256): passing\n{ECHIDNA_FOOTER}"
+    );
+    fs::write(dir.join("passing.txt"), passing).expect("write");
+    fs::write(dir.join("failed.txt"), failed).expect("write");
+    // Stands in for echidna: prints the summary, exits 1 when falsified.
+    fs::write(
+        dir.join("echidna.sh"),
+        "if grep -q drift src/C.sol; then cat failed.txt; exit 1; fi\ncat passing.txt\n",
+    )
+    .expect("write");
+    edit_map(&dir, |m| {
+        m["checks"] = json!([{ "tool": "echidna", "report": "out/echidna.txt",
+            "command": ["sh", "-c", "mkdir -p out && sh echidna.sh . --contract VaultEchidna --format text > out/echidna.txt"] }]);
+        let nodes = m["nodes"].as_array_mut().expect("nodes");
+        for (id, contract, name) in [
+            (
+                "inv.flows",
+                json!("VaultEchidna"),
+                "echidna_assets_match_flows",
+            ),
+            ("inv.other", json!("Other"), "echidna_assets_match_flows"),
+            ("inv.withdraw", Value::Null, "withdraw(uint256)"),
+        ] {
+            let mut test =
+                json!({ "tool": "echidna", "file": "test/VaultEchidna.sol", "name": name });
+            if !contract.is_null() {
+                test["contract"] = contract;
+            }
+            nodes.push(json!({ "id": id, "kind": "invariant", "title": id,
+                "test": test, "watch": ["src/C.sol"] }));
+        }
+    });
+    let first = cli(&dir, &["check"]);
+    assert!(
+        line_of(&first.out, "inv.flows").contains("holds, fuzzed"),
+        "{}",
+        first.out
+    );
+    assert!(
+        line_of(&first.out, "inv.withdraw").contains("holds, fuzzed"),
+        "{}",
+        first.out
+    );
+    // The command tests VaultEchidna: a node on another contract gets nothing.
+    assert!(
+        line_of(&first.out, "inv.other").contains("untested"),
+        "{}",
+        first.out
+    );
+
+    fs::write(dir.join("src/C.sol"), "contract C { /* drift */ }").expect("write");
+    let broken = cli(&dir, &["check"]);
+    assert_eq!(broken.code, 1);
+    assert!(
+        broken.out.contains("inv.flows: pending review -> BROKEN"),
+        "{}",
+        broken.out
+    );
+    let why = cli(&dir, &["status", "--json"]).out;
+    assert!(
+        why.contains("falsified by: VaultEchidna.deposit(1) -> VaultEchidna.withdraw(2)"),
+        "{why}"
+    );
+}
+
+#[test]
+fn nextest_s_config_is_guarded() {
+    let dir = project();
+    fs::write(dir.join("Cargo.toml"), "[package]\nname = \"vault\"\n").expect("write");
+    fs::create_dir_all(dir.join(".config")).expect("dir");
+    fs::write(
+        dir.join(".config/nextest.toml"),
+        "[profile.ci.junit]\npath = \"junit.xml\"\n",
+    )
+    .expect("write");
+    let init = vibloom(&dir, &["init"], "", true);
+    assert_eq!(init.code, 0, "{}", init.out);
+    assert!(
+        init.out
+            .contains("Guarded besides the tests: .config/nextest.toml."),
+        "{}",
+        init.out
+    );
+    // A map made before the file was: scan adds it.
+    edit_map(&dir, |m| m["protect"] = json!([]));
+    let scan = vibloom(&dir, &["scan"], "", true);
+    assert!(
+        scan.out.contains("Now guarded: .config/nextest.toml."),
+        "{}",
+        scan.out
+    );
+    fs::write(dir.join("junit.sh"), JUNIT_RUNNER).expect("write");
+    fs::write(dir.join("src/C.sol"), "contract C { }").expect("write");
+    edit_map(&dir, |m| {
+        m["runner"] = json!(["sh", "junit.sh"]);
+        m["report"] = json!("out/junit.xml");
+    });
+    git(&dir, &["init", "-q"]);
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "start"]);
+    fs::write(
+        dir.join(".config/nextest.toml"),
+        "[profile.ci]\nretries = 5\n[profile.ci.junit]\npath = \"junit.xml\"\n",
+    )
+    .expect("write");
+    let base = cli(&dir, &["check", "--base", "HEAD"]);
+    assert_eq!(base.code, 1, "{}", base.out);
+    assert!(
+        base.out
+            .contains("- .config/nextest.toml: guarded file changed"),
+        "{}",
+        base.out
     );
 }
 

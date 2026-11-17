@@ -87,7 +87,8 @@ The person runs it in their own terminal: vibloom edit inv.assets-match-flows --
 - **It knows only what the map says.** Passing tests do not prove a global
   property, and the guard does not discover a dependency nobody wrote down.
 - **It uses other tools' results, it does not replace them.** It reads
-  Foundry's JSON, JUnit XML, Halmos and Echidna reports, and shows the kind
+  Foundry's JSON, JUnit XML, Halmos reports and Echidna's text summary (its
+  reader follows Echidna's source and was not run against Echidna), and shows the kind
   of guarantee each gives (`holds, fuzzed 64x32`, `holds, symbolic
 (bounded)`): a fuzz pass is never shown as a proof. It finds no
   vulnerabilities, assigns no severity and proves nothing itself.

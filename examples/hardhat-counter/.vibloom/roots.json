@@ -1,0 +1,44 @@
+{
+  "$schema": "https://raw.githubusercontent.com/viraloyster/VIBloom/main/schema/roots.v1.schema.json",
+  "version": 1,
+  "runner": [
+    "npx",
+    "hardhat",
+    "test"
+  ],
+  "report": "cache/vibloom-junit.xml",
+  "tests": "test/",
+  "protect": [
+    "hardhat.config.ts"
+  ],
+  "nodes": [
+    {
+      "id": "inv.a-new-counter-starts-at-zero",
+      "kind": "invariant",
+      "title": "A new counter starts at zero",
+      "stance": "adopted",
+      "test": {
+        "file": "test/counter.mjs",
+        "name": "Counter starts at zero"
+      },
+      "watch": [
+        "contracts/Counter.sol"
+      ],
+      "protected": true
+    },
+    {
+      "id": "inv.each-increment-adds-exactly-one",
+      "kind": "invariant",
+      "title": "Each increment adds exactly one",
+      "stance": "adopted",
+      "test": {
+        "file": "test/counter.mjs",
+        "name": "Counter goes up by one"
+      },
+      "watch": [
+        "contracts/Counter.sol"
+      ],
+      "protected": true
+    }
+  ]
+}

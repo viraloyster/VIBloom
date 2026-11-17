@@ -26,6 +26,7 @@ impl Stack {
             "hardhat.config.ts",
             "hardhat.config.js",
             "hardhat.config.cjs",
+            "hardhat.config.cts",
         ]
         .iter()
         .any(|f| has(f))
@@ -115,13 +116,17 @@ pub fn plan(stack: Stack, forge_config: Option<&Value>, has: &dyn Fn(&str) -> bo
                 "hardhat.config.ts",
                 "hardhat.config.js",
                 "hardhat.config.cjs",
+                "hardhat.config.cts",
             ]
             .iter()
             .filter(|f| has(f))
             .map(|f| (*f).to_string())
             .collect(),
             notes: strs(&[
-                "Hardhat needs a JUnit reporter: npm i -D mocha-junit-reporter, then in the Hardhat config set mocha: { reporter: \"mocha-junit-reporter\", reporterOptions: { mochaFile: \"cache/vibloom-junit.xml\" } }.",
+                // Without mocha pinned, npm gives the reporter its own newer
+                // mocha, whose Base class it cannot call: Hardhat 2.29 fails
+                // with "Class constructor Base cannot be invoked without 'new'".
+                "Hardhat needs a JUnit reporter: npm i -D mocha-junit-reporter mocha@11 (the mocha Hardhat 2 runs), then in the Hardhat config set mocha: { reporter: \"mocha-junit-reporter\", reporterOptions: { mochaFile: \"cache/vibloom-junit.xml\" } }. A test's name is then its full title, as \"Counter starts at zero\".",
             ]),
         },
         Stack::Cargo => Plan {
@@ -129,7 +134,7 @@ pub fn plan(stack: Stack, forge_config: Option<&Value>, has: &dyn Fn(&str) -> bo
             report: Some("target/nextest/ci/junit.xml".into()),
             tests: "tests/".into(),
             src: Some("src/".into()),
-            protect: vec![],
+            protect: runner_configs(&strs(&["cargo", "nextest"]), has),
             notes: strs(&[
                 "cargo-nextest writes the report: cargo install cargo-nextest, then add to .config/nextest.toml:\n  [profile.ci.junit]\n  path = \"junit.xml\"",
             ]),
@@ -275,6 +280,20 @@ pub fn unmentioned(names: &[String], tests: &str) -> Vec<String> {
         .collect()
 }
 
+/// The runner's own configuration, when it exists: retries, filters or a
+/// changed junit path in `.config/nextest.toml` weaken results unnoticed.
+pub fn runner_configs(runner: &[String], has: &dyn Fn(&str) -> bool) -> Vec<String> {
+    let nextest = runner
+        .iter()
+        .flat_map(|a| a.split_whitespace())
+        .any(|w| w == "nextest" || w.ends_with("cargo-nextest"));
+    [".config/nextest.toml"]
+        .into_iter()
+        .filter(|f| nextest && has(f))
+        .map(str::to_string)
+        .collect()
+}
+
 /// The configuration files of the checks' tools: those a command names
 /// (`--config echidna.yaml`) and Halmos's own `halmos.toml`. Like
 /// `foundry.toml`, they set how hard the tool tries.
@@ -327,6 +346,30 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn guards_nextest_s_config_when_nextest_runs_the_tests() {
+        let has = |f: &str| f == ".config/nextest.toml";
+        assert_eq!(
+            plan(Stack::Cargo, None, &has).protect,
+            vec![".config/nextest.toml"]
+        );
+        assert!(plan(Stack::Cargo, None, &|_| false).protect.is_empty());
+        let runner = |s: &[&str]| strs(s);
+        assert_eq!(
+            runner_configs(
+                &runner(&["sh", "-c", "cargo nextest run --profile ci"]),
+                &has
+            ),
+            vec![".config/nextest.toml"]
+        );
+        assert_eq!(
+            runner_configs(&runner(&["/usr/bin/cargo-nextest", "run"]), &has).len(),
+            1
+        );
+        assert!(runner_configs(&runner(&["cargo", "test"]), &has).is_empty());
+        assert!(runner_configs(&runner(&["pytest", "-q"]), &has).is_empty());
+    }
+
+    #[test]
     fn detects_the_stack_from_the_files_at_the_root() {
         let with = |files: &'static [&'static str]| move |f: &str| files.contains(&f);
         assert_eq!(
@@ -334,6 +377,11 @@ mod tests {
             Stack::Foundry
         );
         assert_eq!(Stack::detect(&with(&["hardhat.config.js"])), Stack::Hardhat);
+        // Hardhat 2 also loads hardhat.config.cts (internal/core/project-structure.js).
+        assert_eq!(
+            Stack::detect(&with(&["hardhat.config.cts"])),
+            Stack::Hardhat
+        );
         assert_eq!(Stack::detect(&with(&["Cargo.toml"])), Stack::Cargo);
         assert_eq!(Stack::detect(&with(&["pyproject.toml"])), Stack::Pytest);
         assert_eq!(Stack::detect(&with(&[])), Stack::Unknown);
@@ -362,7 +410,18 @@ mod tests {
         let p = plan(Stack::Pytest, None, &none);
         assert_eq!(p.report.as_deref(), Some(".pytest_cache/vibloom-junit.xml"));
         assert!(p.runner[2].ends_with(".pytest_cache/vibloom-junit.xml"));
-        assert_eq!(plan(Stack::Hardhat, None, &none).notes.len(), 1);
+        let h = plan(Stack::Hardhat, None, &none);
+        assert_eq!(h.report.as_deref(), Some("cache/vibloom-junit.xml"));
+        assert_eq!(h.notes.len(), 1);
+        // The steps that made `npx hardhat test` write the report with
+        // Hardhat 2.29.2 and mocha-junit-reporter 2.2.1.
+        for want in [
+            "npm i -D mocha-junit-reporter mocha@11",
+            "reporter: \"mocha-junit-reporter\"",
+            "mochaFile: \"cache/vibloom-junit.xml\"",
+        ] {
+            assert!(h.notes[0].contains(want), "{want}");
+        }
     }
 
     #[test]

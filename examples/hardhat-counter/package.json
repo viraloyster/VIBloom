@@ -1,0 +1,15 @@
+{
+  "name": "hardhat-counter",
+  "private": true,
+  "description": "A counter tested with Hardhat and guarded by vibloom through a JUnit report.",
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ethers": "3.1.3",
+    "ethers": "6.17.0",
+    "hardhat": "2.29.2",
+    "mocha": "11.8.0",
+    "mocha-junit-reporter": "2.2.1",
+    "ts-node": "10.9.2",
+    "typescript": "5.9.3"
+  }
+}

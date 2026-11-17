@@ -247,6 +247,7 @@ pub(crate) fn scan(
     }
     let has = |f: &str| root.join(f).is_file();
     helper_files.extend(crate::setup::check_configs(&map.checks, &has));
+    helper_files.extend(crate::setup::runner_configs(&map.runner, &has));
     helper_files.sort();
     helper_files.dedup();
     let mut guarded = Vec::new();

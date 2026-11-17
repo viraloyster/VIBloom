@@ -1,1 +1,2 @@
-{"success":true,"error":null,"tests":[{"contract":"VaultEchidna","name":"echidna_assets_match_flows","status":"passed","error":null,"events":[],"type":"property","transactions":null},{"contract":"VaultEchidna","name":"echidna_shares_backed","status":"verified","error":null,"events":[],"type":"property","transactions":null}],"seed":42,"coverage":{},"gas_info":[]}
+[2026-11-17 10:00:03.01] [status] tests: 0/2, fuzzing: 5000/5000, values: [], cov: 812, corpus: 3
+{"success":true,"error":null,"tests":[{"contract":"","name":"name","status":"fuzzing","error":null,"reason":null,"events":[],"type":"property","transactions":null},{"contract":"","name":"name","status":"fuzzing","error":null,"reason":null,"events":[],"type":"property","transactions":null}],"seed":42,"coverage":{}}

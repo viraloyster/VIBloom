@@ -2,6 +2,63 @@
 
 Changes to the `vibloom` binary. The web app is not versioned.
 
+## 0.10.2
+
+Runners checked for real: Hardhat and cargo-nextest end to end, Echidna
+against its source.
+
+### Added
+
+- The survey reports `selfdestruct` (and `suicide`) at its line, with a
+  candidate `asm.<c>.selfdestruct` that names the entry points reaching it
+  and their gates.
+- Ether sent with `.transfer`, `.send` on an address and `call{value: ...}`
+  is reported as `sends ether (...)`, one candidate `asm.<c>.sends-ether`
+  per contract. A `call{value:}` is listed once, as sending ether; one whose
+  value is zero, also when library code is always passed zero
+  (`functionCall`), stays a low-level call. A contract's own `transfer` is
+  still a call into that contract.
+- Slots written through OpenZeppelin's `StorageSlot` are state lines,
+  `state slot IMPLEMENTATION_SLOT - written by upgradeToAndCall`, by the
+  constant they are written with (`an unnamed slot` otherwise), so the
+  ERC-1967 slots say who writes them, and a gate reading one says who
+  decides it.
+- Echidna's text summary (`--format text > <report>`, also its output when
+  stdout is no terminal) is read: `passing`, `passed!` and `verified` hold,
+  `failed!` is BROKEN with the call sequence, `could not evaluate` and
+  optimization maximums are pending review, and anything else is refused. A
+  result's contract is the command's `--contract`. The reader follows
+  Echidna's source at `fb0fd78b` and was not run against Echidna.
+- With a nextest runner, `init` and `scan` guard `.config/nextest.toml`, so
+  retries or filters added there are a guard change for `check --base`.
+
+### Fixed
+
+- An Echidna property never falsified was pending review with "echidna did
+  not finish": Echidna leaves it at `fuzzing` when a normal campaign ends and
+  counts it as a success. It now holds; `shrinking` (falsified, not yet
+  shrunk) is BROKEN, not pending.
+- Echidna's `--format json` names every test `"name"` with no contract, so
+  its results matched no node. Such a report is now refused (exit 2) instead
+  of read, with a pointer to `--format text`; the fixtures follow Echidna's
+  source at `fb0fd78b`.
+- `init --stack hardhat` told the person to install `mocha-junit-reporter`
+  alone: npm then gives it mocha 12, and `npx hardhat test` fails with
+  "Class constructor Base cannot be invoked without 'new'". It now says
+  `npm i -D mocha-junit-reporter mocha@11`.
+- `hardhat.config.cts` is detected and guarded like the other Hardhat
+  configs.
+- The survey said `set at deployment` of state an upgradeable contract's
+  constructor or initial value sets, though behind a proxy that never reaches
+  the proxy's storage. It now says
+  `set in the implementation's constructor (not in the proxy's storage)`;
+  `constant` and `immutable` are unchanged.
+
+### Changed
+
+- The guide says how mocha-junit-reporter and nextest name tests, and
+  `examples/hardhat-counter` runs in CI.
+
 ## 0.10.1
 
 Fixes found running vibloom on Morpho Blue.

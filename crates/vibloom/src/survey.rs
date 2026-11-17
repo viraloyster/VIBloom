@@ -45,6 +45,8 @@ pub struct Function {
     pub checks: Vec<usize>,
     /// Code it runs writes storage with `sstore` or `tstore`.
     pub asm_store: bool,
+    /// Code it runs can reach `selfdestruct`.
+    pub selfdestruct: bool,
 }
 
 /// A state variable and what can change it.
@@ -94,6 +96,13 @@ pub struct Contract {
     /// The gate on `_authorizeUpgrade` and its `file:line`, when upgradeable.
     pub upgrade_gate: Option<(String, String)>,
     pub low_level: Vec<(String, String)>,
+    /// Ether sent by `transfer`, `send` or `call{value: ...}`, by kind.
+    pub sends: Vec<(String, String)>,
+    /// `selfdestruct` (or `suicide`) in code it runs, by how it is written.
+    pub selfdestructs: Vec<(String, String)>,
+    /// Behind a proxy: it has an upgrade gate or an upgradeable base, so its
+    /// constructor never writes the proxy's storage.
+    pub upgradeable: bool,
     pub guards: Vec<Guard>,
     /// What its candidate ids start with: its name, and its file too when
     /// another contract of the project has the same name.
@@ -439,6 +448,16 @@ struct Who {
     handed: BTreeSet<Ptr>,
 }
 
+// `selfdestruct(x)`, and `suicide(x)` before solc 0.5: the builtins, not a
+// function of the same name.
+fn is_selfdestruct(call: &Value) -> bool {
+    matches!(callee_name(call), "selfdestruct" | "suicide")
+        && call
+            .get("expression")
+            .and_then(referenced)
+            .is_none_or(|id| id < 0)
+}
+
 fn reverts(branch: &Value) -> bool {
     let mut found = false;
     walk(branch, &mut |x| {
@@ -650,6 +669,29 @@ fn slot_member(x: &Value) -> Option<(String, String)> {
     .then(|| (struct_of(ty), s(x, "memberName").to_string()))
 }
 
+// The slot of `StorageSlot.getAddressSlot(SLOT).value` (or `SLOT.getAddressSlot()`
+// with `using StorageSlot for bytes32`), for any `StorageSlot*` library.
+fn storage_slot_of(x: &Value) -> Option<&Value> {
+    let call = x.get("expression")?;
+    let getter = call.get("expression")?;
+    let name = s(getter, "memberName");
+    let lib = struct_of(type_string(call));
+    if s(x, "nodeType") != "MemberAccess"
+        || s(x, "memberName") != "value"
+        || s(call, "nodeType") != "FunctionCall"
+        || !(lib.starts_with("StorageSlot") && lib.contains('.'))
+        || !(name.starts_with("get") && name.ends_with("Slot"))
+    {
+        return None;
+    }
+    let base = getter.get("expression")?;
+    if type_string(base).starts_with("type(library ") {
+        args_of(call).first()
+    } else {
+        Some(base)
+    }
+}
+
 fn roots_of(expr: &Value, out: &mut Vec<Root>) {
     match s(expr, "nodeType") {
         "Identifier" => out.push(Root {
@@ -751,12 +793,18 @@ impl Locals {
 enum VarKey {
     Var(usize, String),
     Slot(String, String),
+    /// A slot written through `StorageSlot`: the constant's name (empty
+    /// when it is no named constant), and where it is declared or, unnamed,
+    /// written, with the contract there.
+    Raw(String, String, usize, String),
 }
 
 impl VarKey {
     fn name(&self) -> &str {
         match self {
             Self::Var(_, n) | Self::Slot(_, n) => n,
+            Self::Raw(n, ..) if n.is_empty() => "an unnamed slot",
+            Self::Raw(n, ..) => n,
         }
     }
 }
@@ -769,6 +817,7 @@ struct Effects {
     /// Its `storage` parameters it writes through.
     params: BTreeSet<usize>,
     asm_store: bool,
+    selfdestruct: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -856,6 +905,8 @@ struct Index<'a> {
     usings: Vec<Vec<&'a Value>>,
     /// Functions and modifiers by id, per file.
     decls: Vec<BTreeMap<i64, &'a Value>>,
+    /// Constants by id, per file.
+    consts: Vec<BTreeMap<i64, &'a Value>>,
     owner: BTreeMap<Ptr, usize>,
     lins: RefCell<BTreeMap<usize, Rc<Lin>>>,
     locals: RefCell<BTreeMap<Ptr, Rc<Locals>>>,
@@ -872,6 +923,7 @@ impl<'a> Index<'a> {
             imports: Vec::new(),
             usings: Vec::new(),
             decls: Vec::new(),
+            consts: Vec::new(),
             owner: BTreeMap::new(),
             lins: RefCell::new(BTreeMap::new()),
             locals: RefCell::new(BTreeMap::new()),
@@ -912,19 +964,24 @@ impl<'a> Index<'a> {
                 }
             }
             let mut decls = BTreeMap::new();
+            let mut consts = BTreeMap::new();
             walk(&unit.ast, &mut |x| {
-                if matches!(
-                    s(x, "nodeType"),
-                    "FunctionDefinition" | "ModifierDefinition"
-                ) && let Some(id) = node_id(x)
-                {
-                    decls.insert(id, x);
+                let Some(id) = node_id(x) else { return };
+                match s(x, "nodeType") {
+                    "FunctionDefinition" | "ModifierDefinition" => {
+                        decls.insert(id, x);
+                    }
+                    "VariableDeclaration" if x.get("constant") == Some(&Value::Bool(true)) => {
+                        consts.insert(id, x);
+                    }
+                    _ => {}
                 }
             });
             ix.local.push(local);
             ix.imports.push(imports);
             ix.usings.push(usings);
             ix.decls.push(decls);
+            ix.consts.push(consts);
         }
         ix
     }
@@ -1546,6 +1603,58 @@ impl<'i, 'a> Ctx<'i, 'a> {
         })
     }
 
+    // The constant a slot expression in `d` names: `IMPLEMENTATION_SLOT`
+    // or `ERC1967Utils.IMPLEMENTATION_SLOT`. Anything else, a parameter or
+    // a `keccak256(...)`, names none.
+    fn slot_const(&self, d: &Def, e: &Value) -> Option<(usize, &'a Value)> {
+        if let Some(v) = referenced(e).and_then(|id| self.ix.consts[d.unit].get(&id)) {
+            return Some((d.unit, *v));
+        }
+        let (space, name) = match s(e, "nodeType") {
+            "Identifier" => (self.space(d), s(e, "name")),
+            "MemberAccess" => {
+                let base = e.get("expression").unwrap_or(&Value::Null);
+                if s(base, "nodeType") != "Identifier" {
+                    return None;
+                }
+                (
+                    self.ix
+                        .resolve(d.unit, s(base, "name"))
+                        .into_iter()
+                        .collect(),
+                    s(e, "memberName"),
+                )
+            }
+            _ => return None,
+        };
+        space.iter().find_map(|c| {
+            let con = &self.ix.cons[*c];
+            con.members("VariableDeclaration")
+                .find(|v| s(v, "name") == name && v.get("constant") == Some(&Value::Bool(true)))
+                .map(|v| (con.unit, v))
+        })
+    }
+
+    // The storage a `StorageSlot` write or read at `site` in `d` stands for.
+    fn raw_slot(&self, d: &Def, slot: &Value, site: &Value) -> VarKey {
+        let name =
+            |c: Option<&usize>| c.map_or(String::new(), |c| self.ix.cons[*c].name.to_string());
+        match self.slot_const(d, slot) {
+            Some((unit, v)) => VarKey::Raw(
+                s(v, "name").to_string(),
+                self.ix.units[unit].path.clone(),
+                self.ix.line(unit, v),
+                name(self.ix.owner.get(&ptr(v))),
+            ),
+            None => VarKey::Raw(
+                String::new(),
+                self.ix.units[d.unit].path.clone(),
+                self.ix.line(d.unit, site),
+                name(d.con.as_ref()),
+            ),
+        }
+    }
+
     // What storage a root in `d` stands for: a state variable, or one of
     // `d`'s own `storage` parameters.
     fn place(
@@ -1594,12 +1703,17 @@ impl<'i, 'a> Ctx<'i, 'a> {
         let loc = self.ix.locals(d.node);
         let mut out = Effects::default();
         let mut roots = Vec::new();
+        let mut raw = Vec::new();
+        let mut target = |e: &Value, roots: &mut Vec<Root>| match storage_slot_of(e) {
+            Some(slot) => raw.push(self.raw_slot(d, slot, e)),
+            None => roots_of(e, roots),
+        };
         walk(
             d.node.get("body").unwrap_or(&Value::Null),
             &mut |x| match s(x, "nodeType") {
-                "Assignment" => roots_of(x.get("leftHandSide").unwrap_or(&Value::Null), &mut roots),
+                "Assignment" => target(x.get("leftHandSide").unwrap_or(&Value::Null), &mut roots),
                 "UnaryOperation" if matches!(s(x, "operator"), "delete" | "++" | "--") => {
-                    roots_of(x.get("subExpression").unwrap_or(&Value::Null), &mut roots);
+                    target(x.get("subExpression").unwrap_or(&Value::Null), &mut roots);
                 }
                 "FunctionCall" => {
                     if let Some(e) = x.get("expression")
@@ -1608,15 +1722,17 @@ impl<'i, 'a> Ctx<'i, 'a> {
                     {
                         roots_of(e.get("expression").unwrap_or(&Value::Null), &mut roots);
                     }
+                    out.selfdestruct |= is_selfdestruct(x);
                 }
                 "InlineAssembly" => {
                     let names = yul_calls(x);
                     out.asm_store |= names.contains("sstore") || names.contains("tstore");
+                    out.selfdestruct |= names.contains("selfdestruct");
                 }
                 _ => {}
             },
         );
-        let mut places = Vec::new();
+        let mut places: Vec<Result<VarKey, usize>> = raw.into_iter().map(Ok).collect();
         for r in &roots {
             self.place(d, &loc, r, 8, &mut places);
         }
@@ -1627,6 +1743,7 @@ impl<'i, 'a> Ctx<'i, 'a> {
             let e = self.effects(cd);
             out.vars.extend(e.vars.iter().cloned());
             out.asm_store |= e.asm_store;
+            out.selfdestruct |= e.selfdestruct;
             // A callee that writes through a `storage` parameter writes
             // whatever was passed for it: `set.add(x)` writes `set`.
             for j in &e.params {
@@ -1665,7 +1782,9 @@ impl<'i, 'a> Ctx<'i, 'a> {
                 }
             }
             "MemberAccess" => {
-                if let Some((slot, m)) = slot_member(x) {
+                if let Some(slot) = storage_slot_of(x) {
+                    out.insert(self.raw_slot(d, slot, x));
+                } else if let Some((slot, m)) = slot_member(x) {
                     out.insert(VarKey::Slot(slot, m));
                 } else if let Some(base) = x.get("expression")
                     && let Some(ty) = referenced(base).and_then(|id| loc.slots.get(&id))
@@ -1857,6 +1976,7 @@ fn analyse(ix: &Index, t: usize, project: &dyn Fn(usize) -> bool) -> Contract {
             others,
             checks: cx.check_lines(d),
             asm_store: cx.effects(d).asm_store,
+            selfdestruct: cx.effects(d).selfdestruct,
         });
     }
     let writers_of = |keys: &BTreeSet<VarKey>| -> Vec<String> {
@@ -1976,6 +2096,55 @@ fn analyse(ix: &Index, t: usize, project: &dyn Fn(usize) -> bool) -> Contract {
             });
         }
     }
+    // Slots written through `StorageSlot` (the ERC-1967 implementation and
+    // admin), wherever the code that writes them comes from.
+    let raws: BTreeSet<VarKey> = entries
+        .iter()
+        .chain(&constructors)
+        .chain(&inner)
+        .flat_map(|d| cx.effects(d).vars.iter().cloned().collect::<Vec<_>>())
+        .filter(|k| matches!(k, VarKey::Raw(..)))
+        .collect();
+    for key in raws {
+        let VarKey::Raw(named, file, line, contract) = &key else {
+            continue;
+        };
+        let keys = BTreeSet::from([key.clone()]);
+        let writers = writers_of(&keys);
+        let hooks = if writers.is_empty() {
+            uniq(
+                inner
+                    .iter()
+                    .filter(|d| cx.effects(d).vars.contains(&key))
+                    .map(|d| s(d.node, "name")),
+            )
+            .into_iter()
+            .map(str::to_string)
+            .collect()
+        } else {
+            vec![]
+        };
+        state.push(StateVar {
+            name: if named.is_empty() {
+                key.name().to_string()
+            } else {
+                format!("slot {named}")
+            },
+            file: file.clone(),
+            line: *line,
+            contract: if contract.is_empty() {
+                con.name.to_string()
+            } else {
+                contract.clone()
+            },
+            fixed: "",
+            writers,
+            hooks,
+            at_deployment: constructors
+                .iter()
+                .any(|d| cx.effects(d).vars.contains(&key)),
+        });
+    }
     // Gates that read the same state are decided by the same writers.
     let mut guards: Vec<Guard> = Vec::new();
     for (gate, reads) in guard_reads {
@@ -2017,8 +2186,8 @@ fn analyse(ix: &Index, t: usize, project: &dyn Fn(usize) -> bool) -> Contract {
         };
         Some((who, ix.at(k.unit, f)))
     });
-    let mut calls = BTreeMap::new();
-    let mut low_level: Vec<(String, String)> = Vec::new();
+    let mut runs = Found::default();
+    let none = BTreeSet::new();
     for c in &order {
         let k = &ix.cons[*c];
         if matches!(k.kind, "library" | "interface") {
@@ -2031,7 +2200,7 @@ fn analyse(ix: &Index, t: usize, project: &dyn Fn(usize) -> bool) -> Contract {
             )
         }) {
             walk(n.get("body").unwrap_or(&Value::Null), &mut |x| {
-                note_call(ix, k.unit, x, &mut calls, &mut low_level);
+                note_call(ix, k.unit, x, &none, &mut runs);
             });
         }
     }
@@ -2057,16 +2226,67 @@ fn analyse(ix: &Index, t: usize, project: &dyn Fn(usize) -> bool) -> Contract {
         }
     }
     let mut seen: BTreeSet<Ptr> = BTreeSet::new();
+    let mut reached: Vec<Def> = Vec::new();
+    let mut edges: Vec<(Def, Def, Vec<&Value>)> = Vec::new();
     while let Some(d) = todo.pop() {
         for (_, callee) in cx.modifiers(&d).iter().chain(cx.calls(&d).iter()) {
-            let Callee::Def(cd, _) = callee else { continue };
-            if (cd.con.is_none() || ix.is_library(cd)) && seen.insert(ptr(cd.node)) {
-                walk(cd.node.get("body").unwrap_or(&Value::Null), &mut |x| {
-                    note_call(ix, cd.unit, x, &mut calls, &mut low_level);
-                });
-                todo.push(*cd);
+            let Callee::Def(cd, args) = callee else {
+                continue;
+            };
+            if cd.con.is_none() || ix.is_library(cd) {
+                edges.push((d, *cd, args.clone()));
+                if seen.insert(ptr(cd.node)) {
+                    reached.push(*cd);
+                    todo.push(*cd);
+                }
             }
         }
+    }
+    // A value every call passes as zero sends nothing: `functionCall` runs
+    // `functionCallWithValue(target, data, 0, ...)`, whose `call{value: value}`
+    // is then only a low-level call. Zero can come through a parameter too.
+    let mut zero: BTreeMap<Ptr, Vec<bool>> = reached
+        .iter()
+        .map(|d| (ptr(d.node), vec![true; params(d.node).len()]))
+        .collect();
+    loop {
+        let mut changed = false;
+        for (from, to, args) in &edges {
+            let from_params = &ix.locals(from.node).params;
+            for (j, a) in args.iter().enumerate() {
+                let passed_zero = is_zero(a)
+                    || (s(a, "nodeType") == "Identifier"
+                        && referenced(a)
+                            .and_then(|id| from_params.iter().position(|p| *p == id))
+                            .is_some_and(|i| {
+                                zero.get(&ptr(from.node))
+                                    .is_some_and(|z| z.get(i) == Some(&true))
+                            }));
+                if !passed_zero
+                    && let Some(z) = zero.get_mut(&ptr(to.node))
+                    && z.get(j) == Some(&true)
+                {
+                    z[j] = false;
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    for cd in &reached {
+        let zeros: BTreeSet<i64> = ix
+            .locals(cd.node)
+            .params
+            .iter()
+            .zip(zero.get(&ptr(cd.node)).into_iter().flatten())
+            .filter(|(_, z)| **z)
+            .map(|(p, _)| *p)
+            .collect();
+        walk(cd.node.get("body").unwrap_or(&Value::Null), &mut |x| {
+            note_call(ix, cd.unit, x, &zeros, &mut runs);
+        });
     }
     let found: BTreeSet<&str> = functions.iter().map(|f| f.name.as_str()).collect();
     let abi = ix.units[con.unit]
@@ -2103,48 +2323,95 @@ fn analyse(ix: &Index, t: usize, project: &dyn Fn(usize) -> bool) -> Contract {
         state,
         functions,
         not_found,
-        calls,
+        calls: runs.calls,
+        upgradeable: upgrade_gate.is_some()
+            || order[1..]
+                .iter()
+                .map(|c| ix.cons[*c].name)
+                .chain(cx.lin.unresolved.iter().map(String::as_str))
+                .any(|b| b.ends_with("Upgradeable") || b.ends_with("Initializable")),
         upgrade_gate,
-        low_level,
+        low_level: runs.low_level,
+        sends: runs.sends,
+        selfdestructs: runs.selfdestructs,
         guards,
         key: id_part(con.name),
         inherited_by: vec![],
     }
 }
 
-// Records a call into another contract, or a low-level call, at node `x`.
-fn note_call(
-    ix: &Index,
-    unit: usize,
-    x: &Value,
-    calls: &mut BTreeMap<String, String>,
-    low_level: &mut Vec<(String, String)>,
-) {
+/// What the code a contract runs calls, sends and destroys, each with its line.
+#[derive(Default)]
+struct Found {
+    /// `Type.member` of every call into another contract, first line only.
+    calls: BTreeMap<String, String>,
+    low_level: Vec<(String, String)>,
+    sends: Vec<(String, String)>,
+    selfdestructs: Vec<(String, String)>,
+}
+
+fn push_once(list: &mut Vec<(String, String)>, kind: &str, at: String) {
+    let entry = (kind.to_string(), at);
+    if !list.contains(&entry) {
+        list.push(entry);
+    }
+}
+
+// Records a call into another contract, a low-level call, ether sent or a
+// `selfdestruct` at node `x`. `zeros` are the parameters every call passes
+// as zero: a `call{value: v}` with one of them as `v` sends nothing.
+fn note_call(ix: &Index, unit: usize, x: &Value, zeros: &BTreeSet<i64>, found: &mut Found) {
     if s(x, "nodeType") == "InlineAssembly" {
         let names = yul_calls(x);
         for kind in ["call", "delegatecall", "staticcall"] {
-            let entry = (format!("{kind} (assembly)"), ix.at(unit, x));
-            if names.contains(kind) && !low_level.contains(&entry) {
-                low_level.push(entry);
+            if names.contains(kind) {
+                push_once(
+                    &mut found.low_level,
+                    &format!("{kind} (assembly)"),
+                    ix.at(unit, x),
+                );
             }
+        }
+        if names.contains("selfdestruct") {
+            push_once(
+                &mut found.selfdestructs,
+                "selfdestruct (assembly)",
+                ix.at(unit, x),
+            );
         }
         return;
     }
     if s(x, "nodeType") != "FunctionCall" {
         return;
     }
+    if is_selfdestruct(x) {
+        push_once(&mut found.selfdestructs, "selfdestruct", ix.at(unit, x));
+        return;
+    }
     let Some(mut e) = x.get("expression") else {
         return;
     };
+    let mut value: Option<&Value> = None;
     // `t.call{value: v}(data)`, and before solc 0.6.2 `t.call.value(v)(data)`.
     loop {
         let inner = e.get("expression").unwrap_or(&Value::Null);
         match s(e, "nodeType") {
-            "FunctionCallOptions" => e = inner,
+            "FunctionCallOptions" => {
+                if let Some(j) = items(e, "names")
+                    .iter()
+                    .position(|n| n.as_str() == Some("value"))
+                {
+                    value = value.or(items(e, "options").get(j));
+                }
+                e = inner;
+            }
             "FunctionCall"
                 if s(inner, "nodeType") == "MemberAccess"
                     && matches!(s(inner, "memberName"), "value" | "gas") =>
             {
+                if s(inner, "memberName") == "value" {
+                    value = value.or(args_of(e).first());
+                }
                 e = inner.get("expression").unwrap_or(&Value::Null);
             }
             _ => break,
@@ -2155,6 +2422,23 @@ fn note_call(
     }
     let member = s(e, "memberName");
     let mut on = type_string(e.get("expression").unwrap_or(&Value::Null));
+    // A library function attached to `address` is no builtin.
+    let builtin = on.starts_with("address")
+        && !type_id(e).contains("$bound_to$")
+        && !type_id(e).contains("$attached_to$");
+    if builtin && matches!(member, "transfer" | "send") {
+        push_once(&mut found.sends, member, ix.at(unit, x));
+        return;
+    }
+    let sends = value.is_some_and(|v| {
+        !is_zero(v)
+            && !(s(v, "nodeType") == "Identifier"
+                && referenced(v).is_some_and(|id| zeros.contains(&id)))
+    });
+    if builtin && member == "call" && sends {
+        push_once(&mut found.sends, "call", ix.at(unit, x));
+        return;
+    }
     // `SafeERC20.safeTransfer(token, ...)` calls the token.
     if on.starts_with("type(library ")
         && let Some(first) = args_of(x).first()
@@ -2166,12 +2450,13 @@ fn note_call(
         .strip_prefix("contract ")
         .filter(|t| !t.starts_with("super "))
     {
-        calls
+        found
+            .calls
             .entry(format!("{target}.{member}"))
             .or_insert_with(|| ix.at(unit, x));
     } else if matches!(member, "call" | "delegatecall" | "staticcall") && on.starts_with("address")
     {
-        low_level.push((member.to_string(), ix.at(unit, x)));
+        found.low_level.push((member.to_string(), ix.at(unit, x)));
     }
 }
 
@@ -2512,6 +2797,41 @@ impl Contract {
                 evidence: at,
             });
         }
+        if !self.selfdestructs.is_empty() {
+            let by: Vec<String> = self
+                .functions
+                .iter()
+                .filter(|f| f.selfdestruct)
+                .map(|f| format!("{} ({})", f.name, f.who()))
+                .collect();
+            out.push(Candidate {
+                invariant: false,
+                id: format!("asm.{k}.selfdestruct"),
+                title: format!("{c}: whoever reaches selfdestruct can remove its code (or, after Cancun, send away its ether)"),
+                detail: if by.is_empty() {
+                    "No entry point of its own was found to reach it: check the constructor and any code that runs it by delegatecall.".into()
+                } else {
+                    format!(
+                        "Entry points that reach it: {}. Before Cancun it deletes the code and storage and sends all its ether to the address given; since Cancun it deletes them only in the transaction that created the contract, and otherwise only sends the ether.",
+                        uniq(by.iter().map(String::as_str)).join("; ")
+                    )
+                },
+                evidence: self.selfdestructs.iter().map(|(_, at)| at.clone()).collect(),
+            });
+        }
+        if !self.sends.is_empty() {
+            let kinds = uniq(self.sends.iter().map(|(k, _)| k.as_str()));
+            out.push(Candidate {
+                invariant: false,
+                id: format!("asm.{k}.sends-ether"),
+                title: format!("{c}: the addresses it sends ether to can receive it (and cannot reenter harmfully)"),
+                detail: format!(
+                    "It sends ether with {}. A receiver that reverts makes transfer revert and send return false; transfer and send forward 2300 gas, call forwards the rest, so a receiver reached by call runs its own code and can call back into this contract before the function ends.",
+                    kinds.join(", ")
+                ),
+                evidence: self.sends.iter().map(|(_, at)| at.clone()).collect(),
+            });
+        }
         if self.has_base("ERC20") {
             out.push(Candidate {
                 invariant: true,
@@ -2667,6 +2987,13 @@ impl Contract {
                 )
             });
         }
+        // Behind a proxy a constructor and initial values only ever write
+        // the implementation's own storage.
+        let deployed = if self.upgradeable {
+            "set in the implementation's constructor (not in the proxy's storage)"
+        } else {
+            "set at deployment"
+        };
         for v in &self.state {
             let mut how = if !v.fixed.is_empty() {
                 v.fixed.to_string()
@@ -2678,7 +3005,7 @@ impl Contract {
                     v.hooks.join(", ")
                 )
             } else if v.at_deployment {
-                "set at deployment, never after".to_string()
+                format!("{deployed}, never after")
             } else {
                 "never written by this contract's own code".to_string()
             };
@@ -2686,7 +3013,7 @@ impl Contract {
                 && v.fixed.is_empty()
                 && (!v.writers.is_empty() || !v.hooks.is_empty())
             {
-                how.push_str(", set at deployment");
+                how.push_str(&format!(", {deployed}"));
             }
             let from = if v.contract == self.name {
                 String::new()
@@ -2706,6 +3033,12 @@ impl Contract {
         }
         for (kind, at) in &self.low_level {
             out.push(format!("  {at} low-level {kind}"));
+        }
+        for (kind, at) in &self.sends {
+            out.push(format!("  {at} sends ether ({kind})"));
+        }
+        for (kind, at) in &self.selfdestructs {
+            out.push(format!("  {at} {kind}"));
         }
         out.join("\n")
     }
@@ -4351,6 +4684,500 @@ mod tests {
             report.contains("  lib/Sig.sol:3 low-level staticcall"),
             "{report}"
         );
+    }
+
+    // `on.member` with `on` typed as the compiler types it.
+    fn member_of(on: &str, ty: &str, member: &str) -> Value {
+        json!({ "nodeType": "MemberAccess", "memberName": member,
+                "expression": { "nodeType": "Identifier", "name": on, "typeDescriptions": { "typeString": ty } } })
+    }
+    fn yul(builtin: &str, line: usize) -> Value {
+        json!({ "nodeType": "InlineAssembly", "src": at(line), "AST": { "nodeType": "YulBlock",
+            "statements": [{ "nodeType": "YulFunctionCall", "functionName": { "name": builtin } }] } })
+    }
+
+    #[test]
+    fn reports_selfdestruct_with_the_entry_points_that_reach_it() {
+        let wards = |key: Value| index(id("wards", 1), key);
+        let kill = call(id("selfdestruct", -21), vec![address(sender())], 5);
+        let old = call(id("suicide", -21), vec![sender()], 9);
+        // A function of the project that happens to share the name is no builtin.
+        let own = call(id("selfdestruct", 30), vec![], 11);
+        let c = contract(
+            "Vat",
+            &[],
+            vec![
+                json!({ "nodeType": "VariableDeclaration", "id": 1, "name": "wards", "src": at(1) }),
+                modifier(
+                    2,
+                    "auth",
+                    &[],
+                    body(vec![
+                        require(bin("==", wards(sender()), lit("1")), 2),
+                        placeholder(),
+                    ]),
+                ),
+                func(3, "_end", "internal", 4, json!([]), body(vec![stmt(kill)])),
+                func(
+                    4,
+                    "cage",
+                    "external",
+                    6,
+                    json!([uses("auth", 2)]),
+                    body(vec![stmt(call(id("_end", 3), vec![], 7))]),
+                ),
+                func(
+                    5,
+                    "wipe",
+                    "external",
+                    8,
+                    json!([]),
+                    body(vec![stmt(old), yul("selfdestruct", 10)]),
+                ),
+                func(6, "move", "external", 12, json!([]), body(vec![stmt(own)])),
+            ],
+        );
+        let vat = read_one(vec![c], "Vat");
+        let report = vat.report();
+        for line in [
+            "  src/vat.sol:5 selfdestruct",
+            "  src/vat.sol:9 selfdestruct",
+            "  src/vat.sol:10 selfdestruct (assembly)",
+        ] {
+            assert!(report.contains(line), "{report}");
+        }
+        assert!(!report.contains("src/vat.sol:11 selfdestruct"), "{report}");
+        let reach: Vec<(&str, bool)> = vat
+            .functions
+            .iter()
+            .map(|f| (f.name.as_str(), f.selfdestruct))
+            .collect();
+        assert_eq!(reach, vec![("cage", true), ("wipe", true), ("move", false)]);
+        let cand = vat
+            .candidates()
+            .into_iter()
+            .find(|c| c.id == "asm.vat.selfdestruct")
+            .expect("selfdestruct");
+        assert_eq!(
+            cand.title,
+            "Vat: whoever reaches selfdestruct can remove its code (or, after Cancun, send away its ether)"
+        );
+        assert!(
+            cand.detail
+                .contains("Entry points that reach it: cage (auth); wipe (anyone)."),
+            "{}",
+            cand.detail
+        );
+        assert_eq!(
+            cand.evidence,
+            vec!["src/vat.sol:5", "src/vat.sol:9", "src/vat.sol:10"]
+        );
+    }
+
+    #[test]
+    fn reports_ether_sent_once_and_tells_it_from_a_token_transfer() {
+        let options = |e: Value, name: &str, v: Value| json!({ "nodeType": "FunctionCallOptions", "expression": e, "names": [name], "options": [v] });
+        // `addr.transfer(x)` from a library attached to `address` is no builtin.
+        let mut attached = member_of("to", "address", "transfer");
+        attached["typeDescriptions"] = json!({ "typeIdentifier":
+            "t_function_internal_nonpayable$_t_address_$_t_uint256_$returns$__$attached_to$_t_address_$" });
+        // Before solc 0.6.2: `to.call.value(v)(data)`.
+        let old = json!({ "nodeType": "FunctionCall", "arguments": [id("wad", 9)],
+            "expression": { "nodeType": "MemberAccess", "memberName": "value",
+                            "expression": member_of("to", "address", "call") } });
+        // `functionCall` passes zero for the value; `sendValue` passes an amount.
+        let target = || {
+            json!({ "nodeType": "Identifier", "name": "target", "referencedDeclaration": 41,
+                                "typeDescriptions": { "typeString": "address" } })
+        };
+        let with_value = call(
+            options(
+                json!({ "nodeType": "MemberAccess", "memberName": "call", "expression": target() }),
+                "value",
+                id("value", 42),
+            ),
+            vec![],
+            3,
+        );
+        let address_lib = json!({ "nodeType": "ContractDefinition", "name": "Address", "contractKind": "library", "nodes": [
+            with_params(func(40, "functionCallWithValue", "internal", 2, json!([]), body(vec![stmt(with_value)])),
+                        &[(41, "target", false), (42, "value", false)]),
+            with_params(func(43, "functionCall", "internal", 4, json!([]),
+                             body(vec![stmt(call(id("functionCallWithValue", 40), vec![id("target", 44), id("zero", 45)], 5))])),
+                        &[(44, "target", false), (45, "zero", false)]),
+            with_params(func(46, "functionCallZero", "internal", 6, json!([]),
+                             body(vec![stmt(call(id("functionCall", 43), vec![id("target", 47), lit("0")], 7))])),
+                        &[(47, "target", false)]),
+        ] });
+        let lib = |f: &str| member_of("Address", "type(library Address)", f);
+        let c = contract(
+            "Pay",
+            &[],
+            vec![func(
+                1,
+                "pay",
+                "external",
+                10,
+                json!([]),
+                body(vec![
+                    stmt(call(
+                        member_of("to", "address payable", "transfer"),
+                        vec![id("wad", 9)],
+                        11,
+                    )),
+                    stmt(call(
+                        member_of("to", "address payable", "send"),
+                        vec![id("wad", 9)],
+                        12,
+                    )),
+                    stmt(call(
+                        member_of("token", "contract IERC20", "transfer"),
+                        vec![id("to", 8), id("wad", 9)],
+                        13,
+                    )),
+                    stmt(call(
+                        options(member_of("to", "address", "call"), "value", id("wad", 9)),
+                        vec![],
+                        14,
+                    )),
+                    stmt(call(
+                        options(member_of("to", "address", "call"), "value", lit("0")),
+                        vec![],
+                        15,
+                    )),
+                    stmt(call(
+                        options(member_of("to", "address", "call"), "gas", id("wad", 9)),
+                        vec![],
+                        16,
+                    )),
+                    stmt(call(old, vec![], 17)),
+                    stmt(call(attached, vec![id("wad", 9)], 18)),
+                    stmt(call(lib("functionCallZero"), vec![id("to", 8)], 19)),
+                ]),
+            )],
+        );
+        let cs = read(
+            &[
+                file("src/Pay.sol", vec![import("lib/Address.sol", &[], ""), c]),
+                file("lib/Address.sol", vec![address_lib]),
+            ],
+            &project,
+        );
+        let pay = named(&cs, "Pay");
+        let pairs = |v: &[(&str, &str)]| -> Vec<(String, String)> {
+            v.iter()
+                .map(|(a, b)| ((*a).to_string(), (*b).to_string()))
+                .collect()
+        };
+        assert_eq!(
+            pay.sends,
+            pairs(&[
+                ("transfer", "src/Pay.sol:11"),
+                ("send", "src/Pay.sol:12"),
+                ("call", "src/Pay.sol:14"),
+                ("call", "src/Pay.sol:17"),
+            ])
+        );
+        assert_eq!(
+            pay.low_level,
+            pairs(&[
+                ("call", "src/Pay.sol:15"),
+                ("call", "src/Pay.sol:16"),
+                ("call", "lib/Address.sol:3"),
+            ])
+        );
+        assert_eq!(
+            pay.calls.keys().collect::<Vec<_>>(),
+            vec!["IERC20.transfer"]
+        );
+        let report = pay.report();
+        assert!(
+            report.contains("  src/Pay.sol:11 sends ether (transfer)\n"),
+            "{report}"
+        );
+        assert!(
+            report.contains("  src/Pay.sol:14 sends ether (call)\n"),
+            "{report}"
+        );
+        assert!(!report.contains("src/Pay.sol:14 low-level"), "{report}");
+        let cands = pay.candidates();
+        let ether = cands
+            .iter()
+            .find(|c| c.id == "asm.pay.sends-ether")
+            .expect("sends ether");
+        assert_eq!(
+            ether.title,
+            "Pay: the addresses it sends ether to can receive it (and cannot reenter harmfully)"
+        );
+        assert!(
+            ether.detail.contains("with transfer, send, call."),
+            "{}",
+            ether.detail
+        );
+        assert_eq!(
+            ether.evidence,
+            vec![
+                "src/Pay.sol:11",
+                "src/Pay.sol:12",
+                "src/Pay.sol:14",
+                "src/Pay.sol:17"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_library_value_that_is_not_always_zero_sends_ether() {
+        let target = json!({ "nodeType": "Identifier", "name": "target", "referencedDeclaration": 41,
+                             "typeDescriptions": { "typeString": "address" } });
+        let with_value = call(
+            json!({ "nodeType": "FunctionCallOptions", "names": ["value"], "options": [id("value", 42)],
+                    "expression": { "nodeType": "MemberAccess", "memberName": "call", "expression": target } }),
+            vec![],
+            3,
+        );
+        let address_lib = json!({ "nodeType": "ContractDefinition", "name": "Address", "contractKind": "library", "nodes": [
+            with_params(func(40, "sendValue", "internal", 2, json!([]), body(vec![stmt(with_value)])),
+                        &[(41, "target", false), (42, "value", false)]),
+        ] });
+        let lib = member_of("Address", "type(library Address)", "sendValue");
+        let c = contract(
+            "Pay",
+            &[],
+            vec![func(
+                1,
+                "pay",
+                "external",
+                10,
+                json!([]),
+                body(vec![
+                    stmt(call(lib.clone(), vec![id("to", 8), lit("0")], 11)),
+                    stmt(call(lib, vec![id("to", 8), id("wad", 9)], 12)),
+                ]),
+            )],
+        );
+        let cs = read(
+            &[
+                file("src/Pay.sol", vec![import("lib/Address.sol", &[], ""), c]),
+                file("lib/Address.sol", vec![address_lib]),
+            ],
+            &project,
+        );
+        let pay = named(&cs, "Pay");
+        assert_eq!(
+            pay.sends,
+            vec![("call".to_string(), "lib/Address.sol:3".to_string())]
+        );
+        assert!(pay.low_level.is_empty(), "{:?}", pay.low_level);
+    }
+
+    // `StorageSlot.getAddressSlot(slot)`, typed as solc types it.
+    fn slot_call(lib: &str, getter: &str, slot: Value, line: usize) -> Value {
+        let mut c = call(
+            member_of(lib, &format!("type(library {lib})"), getter),
+            vec![slot],
+            line,
+        );
+        c["typeDescriptions"] =
+            json!({ "typeString": "struct StorageSlot.AddressSlot storage pointer" });
+        c
+    }
+    fn slot_value(c: Value) -> Value {
+        json!({ "nodeType": "MemberAccess", "memberName": "value", "src": c["src"], "expression": c })
+    }
+
+    #[test]
+    fn ties_storage_slot_writes_to_the_slot_constant_and_its_writers() {
+        let constant = |cid: i64, name: &str, line: usize| {
+            json!({ "nodeType": "VariableDeclaration", "id": cid, "name": name, "constant": true,
+                    "stateVariable": true, "src": at(line) })
+        };
+        let set = |cid: i64, name: &str, line: usize| {
+            stmt(
+                json!({ "nodeType": "Assignment", "operator": "=", "rightHandSide": id("x", 99),
+                "leftHandSide": slot_value(slot_call("StorageSlot", "getAddressSlot", id(name, cid), line)) }),
+            )
+        };
+        let utils = json!({ "nodeType": "ContractDefinition", "name": "ERC1967Utils", "contractKind": "library", "nodes": [
+            constant(50, "IMPLEMENTATION_SLOT", 1),
+            constant(51, "ADMIN_SLOT", 2),
+            func(52, "_setImplementation", "private", 3, json!([]), body(vec![set(50, "IMPLEMENTATION_SLOT", 4)])),
+            func(53, "upgradeToAndCall", "internal", 5, json!([]), body(vec![stmt(call(id("_setImplementation", 52), vec![], 6))])),
+            func(54, "getAdmin", "internal", 7, json!([]),
+                 body(vec![ret(slot_value(slot_call("StorageSlot", "getAddressSlot", id("ADMIN_SLOT", 51), 8)))])),
+            func(55, "changeAdmin", "internal", 9, json!([]), body(vec![set(51, "ADMIN_SLOT", 10)])),
+        ] });
+        let lib = |f: &str| member_of("ERC1967Utils", "type(library ERC1967Utils)", f);
+        // `using StorageSlot for bytes32; FLAG.getBooleanSlot().value = true`.
+        let mut bound = call(
+            json!({ "nodeType": "MemberAccess", "memberName": "getBooleanSlot", "expression":
+                { "nodeType": "Identifier", "name": "FLAG", "referencedDeclaration": 2,
+                  "typeDescriptions": { "typeString": "bytes32" } } }),
+            vec![],
+            15,
+        );
+        bound["typeDescriptions"] =
+            json!({ "typeString": "struct StorageSlot.BooleanSlot storage pointer" });
+        let keccak = call(id("keccak256", -8), vec![lit("1")], 17);
+        let p = contract(
+            "P",
+            &[],
+            vec![
+                constant(2, "FLAG", 1),
+                modifier(
+                    3,
+                    "onlyAdmin",
+                    &[],
+                    body(vec![
+                        require(bin("==", sender(), call(lib("getAdmin"), vec![], 2)), 2),
+                        placeholder(),
+                    ]),
+                ),
+                {
+                    let mut ctor = func(
+                        4,
+                        "",
+                        "public",
+                        3,
+                        json!([]),
+                        body(vec![stmt(call(lib("changeAdmin"), vec![], 4))]),
+                    );
+                    ctor["kind"] = json!("constructor");
+                    ctor
+                },
+                func(
+                    5,
+                    "upgradeTo",
+                    "external",
+                    5,
+                    json!([uses("onlyAdmin", 3)]),
+                    body(vec![stmt(call(lib("upgradeToAndCall"), vec![], 6))]),
+                ),
+                // The constant through the library's name, from another file.
+                func(
+                    6,
+                    "setAdmin",
+                    "external",
+                    7,
+                    json!([uses("onlyAdmin", 3)]),
+                    body(vec![stmt(json!({
+                    "nodeType": "Assignment", "operator": "=", "rightHandSide": id("x", 99),
+                    "leftHandSide": slot_value(slot_call("StorageSlot", "getAddressSlot",
+                        member_of("ERC1967Utils", "type(library ERC1967Utils)", "ADMIN_SLOT"), 8)) }))]),
+                ),
+                func(
+                    7,
+                    "flag",
+                    "external",
+                    14,
+                    json!([]),
+                    body(vec![stmt(json!({
+                    "nodeType": "Assignment", "operator": "=", "rightHandSide": lit("true"),
+                    "leftHandSide": slot_value(bound) }))]),
+                ),
+                func(
+                    8,
+                    "mark",
+                    "external",
+                    16,
+                    json!([]),
+                    body(vec![stmt(json!({
+                    "nodeType": "Assignment", "operator": "=", "rightHandSide": id("x", 99),
+                    "leftHandSide": slot_value(slot_call("StorageSlot", "getAddressSlot", keccak, 17)) }))]),
+                ),
+            ],
+        );
+        let cs = read(
+            &[
+                file(
+                    "src/P.sol",
+                    vec![import("lib/ERC1967Utils.sol", &[], ""), p],
+                ),
+                file("lib/ERC1967Utils.sol", vec![utils]),
+            ],
+            &project,
+        );
+        let p = named(&cs, "P");
+        let report = p.report();
+        for line in [
+            "  src/P.sol:1 state FLAG - constant\n",
+            "  lib/ERC1967Utils.sol:1 state slot IMPLEMENTATION_SLOT - written by upgradeTo (from ERC1967Utils)\n",
+            "  lib/ERC1967Utils.sol:2 state slot ADMIN_SLOT - written by setAdmin, set at deployment (from ERC1967Utils)\n",
+            "  src/P.sol:1 state slot FLAG - written by flag\n",
+            "  src/P.sol:17 state an unnamed slot - written by mark\n",
+        ] {
+            assert!(format!("{report}\n").contains(line), "{line}\n{report}");
+        }
+        // Who passes the gate is decided by who writes the slot it reads.
+        assert_eq!(p.guards.len(), 1);
+        assert_eq!(p.guards[0].vars, vec!["ADMIN_SLOT"]);
+        assert_eq!(p.guards[0].writers, vec!["setAdmin"]);
+    }
+
+    #[test]
+    fn state_set_by_an_upgradeable_contracts_constructor_is_not_the_proxys() {
+        let var = |vid: i64, name: &str, line: usize, extra: Value| {
+            let mut v = json!({ "nodeType": "VariableDeclaration", "stateVariable": true,
+                                "id": vid, "name": name, "src": at(line) });
+            for (k, x) in extra.as_object().into_iter().flatten() {
+                v[k] = x.clone();
+            }
+            v
+        };
+        let nodes = |name: &str| {
+            let mut ctor = func(
+                10,
+                "",
+                "public",
+                6,
+                json!([]),
+                body(vec![
+                    stmt(assign(id("owner", 1))),
+                    stmt(assign(id("limit", 2))),
+                    stmt(assign(id("token", 3))),
+                ]),
+            );
+            ctor["kind"] = json!("constructor");
+            contract(
+                name,
+                &["Initializable"],
+                vec![
+                    var(1, "owner", 1, json!({})),
+                    var(2, "limit", 2, json!({})),
+                    var(3, "token", 3, json!({ "mutability": "immutable" })),
+                    var(4, "ROLE", 4, json!({ "constant": true, "value": lit("1") })),
+                    var(5, "fee", 5, json!({ "value": lit("5") })),
+                    ctor,
+                    func(
+                        11,
+                        "setLimit",
+                        "external",
+                        7,
+                        json!([]),
+                        body(vec![stmt(assign(id("limit", 2)))]),
+                    ),
+                ],
+            )
+        };
+        let report = read_one(vec![nodes("Impl")], "Impl").report();
+        let behind = "set in the implementation's constructor (not in the proxy's storage)";
+        for line in [
+            format!("  src/vat.sol:1 state owner - {behind}, never after\n"),
+            format!("  src/vat.sol:2 state limit - written by setLimit, {behind}\n"),
+            "  src/vat.sol:3 state token - immutable\n".to_string(),
+            "  src/vat.sol:4 state ROLE - constant\n".to_string(),
+            format!("  src/vat.sol:5 state fee - {behind}, never after\n"),
+        ] {
+            assert!(format!("{report}\n").contains(&line), "{line}\n{report}");
+        }
+        // Without an upgradeable base or gate, deployment is the proxy's own.
+        let mut plain = nodes("Plain");
+        plain["baseContracts"] = json!([]);
+        let report = read_one(vec![plain], "Plain").report();
+        assert!(
+            report.contains("state owner - set at deployment, never after"),
+            "{report}"
+        );
+        assert!(!report.contains("implementation's constructor"), "{report}");
     }
 
     #[test]

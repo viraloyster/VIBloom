@@ -192,6 +192,109 @@ assertion failed: balance &gt;= 0</failure>
         assert_eq!(o[1].status, Status::Pass);
     }
 
+    // What mocha-junit-reporter 2.2.1 wrote under `npx hardhat test`
+    // (Hardhat 2.29.2), with the project path shortened to /repo.
+    const MOCHA: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="Mocha Tests" time="0.647" tests="2" failures="1">
+  <testsuite name="Root Suite" timestamp="2026-11-17T14:48:45" tests="0" time="0.000" failures="0">
+  </testsuite>
+  <testsuite name="Counter" timestamp="2026-11-17T14:48:45" tests="2" file="/repo/test/counter.js" time="0.646" failures="1">
+    <testcase name="Counter starts at zero" time="0.626" classname="starts at zero">
+    </testcase>
+    <testcase name="Counter goes up by one" time="0.017" classname="goes up by one">
+      <failure message="expected 1n to equal 2n" type="AssertionError"><![CDATA[AssertionError: expected 1n to equal 2n
+    at Context.<anonymous> (test/counter.js:13:32)
+      ]]></failure>
+    </testcase>
+  </testsuite>
+</testsuites>"#;
+
+    // The reporter puts the full title in `name` and the test's own title in
+    // `classname`, so a node names the full title and needs no contract.
+    #[test]
+    fn reads_mocha_junit_reporter_as_hardhat_writes_it() {
+        let o = parse_junit(MOCHA, "/repo").expect("report");
+        let got: Vec<_> = o
+            .iter()
+            .map(|c| {
+                (
+                    c.file.as_str(),
+                    c.contract.as_str(),
+                    c.name.as_str(),
+                    c.status,
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (
+                    "test/counter.js",
+                    "starts at zero",
+                    "Counter starts at zero",
+                    Status::Pass
+                ),
+                (
+                    "test/counter.js",
+                    "goes up by one",
+                    "Counter goes up by one",
+                    Status::Fail
+                ),
+            ]
+        );
+        assert_eq!(o[1].reason.as_deref(), Some("expected 1n to equal 2n"));
+    }
+
+    // What cargo-nextest 0.9.152 wrote with `[profile.ci.junit]` set, for a
+    // crate `vault` with a unit test and an integration test `tests/books.rs`
+    // (backtrace and captured output cut).
+    const NEXTEST_REAL: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="nextest-run" tests="3" skipped="0" failures="1" errors="0" uuid="92307ee5-978e-46d9-a2fb-649cb9475f40" timestamp="2026-11-17T14:54:16.056+00:00" time="0.282">
+    <testsuite name="vault" tests="1" skipped="0" errors="0" failures="0">
+        <testcase name="tests::deposit_adds" classname="vault" timestamp="2026-11-17T14:54:16.056+00:00" time="0.006"/>
+    </testsuite>
+    <testsuite name="vault::books" tests="2" skipped="0" errors="0" failures="1">
+        <testcase name="total_matches_deposits" classname="vault::books" timestamp="2026-11-17T14:54:16.056+00:00" time="0.006"/>
+        <testcase name="fails_on_purpose" classname="vault::books" timestamp="2026-11-17T14:54:16.056+00:00" time="0.280">
+            <failure message="thread &apos;fails_on_purpose&apos; (10202) panicked at tests/books.rs:8:5" type="test failure with exit code 101">thread &apos;fails_on_purpose&apos; (10202) panicked at tests/books.rs:8:5:
+assertion `left == right` failed</failure>
+            <system-out>
+running 1 test
+</system-out>
+        </testcase>
+    </testsuite>
+</testsuites>"#;
+
+    // nextest names no file; the classname is the crate for unit tests and
+    // `crate::binary` for an integration test, the name its path in there.
+    #[test]
+    fn reads_nextest_as_it_writes_unit_and_integration_tests() {
+        let o = parse_junit(NEXTEST_REAL, "/repo").expect("report");
+        let got: Vec<_> = o
+            .iter()
+            .map(|c| {
+                (
+                    c.file.as_str(),
+                    c.contract.as_str(),
+                    c.name.as_str(),
+                    c.status,
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("", "vault", "tests::deposit_adds", Status::Pass),
+                ("", "vault::books", "total_matches_deposits", Status::Pass),
+                ("", "vault::books", "fails_on_purpose", Status::Fail),
+            ]
+        );
+        assert_eq!(
+            o[2].reason.as_deref(),
+            Some("thread 'fails_on_purpose' (10202) panicked at tests/books.rs:8:5")
+        );
+    }
+
     #[test]
     fn refuses_what_is_not_a_junit_report() {
         assert!(parse_junit("<html><body/></html>", "/").is_err());

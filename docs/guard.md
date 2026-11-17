@@ -10,7 +10,8 @@ what each part is for, records every test run in a local log and derives from
 those runs whether each node still stands. An agent reads the map and
 proposes; it never sets a state. It reads Foundry (`forge test --json`),
 any runner that writes JUnit XML (cargo-nextest, pytest, Jest, mocha
-(Hardhat), Go and most others) and the reports of Halmos and Echidna, and
+(Hardhat), Go and most others), Halmos's reports and Echidna's text
+summary, and
 it says what kind of guarantee each result gives. No model is involved and it depends on no
 particular agent: Claude Code, Codex, Cursor, Aider or a person editing by
 hand all go through the same map, rules and commit check.
@@ -548,11 +549,57 @@ guard reads it:
 ```json
 { "runner": ["pytest", "-q", "--junitxml=out/junit.xml"], "report": "out/junit.xml" }
 { "runner": ["cargo", "nextest", "run", "--profile", "ci"], "report": "target/nextest/ci/junit.xml" }
-{ "runner": ["npx", "hardhat", "test"], "report": "out/junit.xml" }
+{ "runner": ["npx", "hardhat", "test"], "report": "cache/vibloom-junit.xml" }
 ```
 
 (cargo-nextest writes JUnit when its profile sets `junit.path`; Hardhat through
-a mocha reporter such as `mocha-junit-reporter` set in `hardhat.config`.)
+a mocha reporter set in `hardhat.config`.)
+
+With Hardhat 2 (checked with 2.29.2 and `mocha-junit-reporter` 2.2.1; Hardhat
+3 runs its tests differently and was not checked), install the reporter
+together with the mocha Hardhat runs, or npm gives the reporter a newer mocha
+it cannot start with ("Class constructor Base cannot be invoked without
+'new'"):
+
+```bash
+npm i -D mocha-junit-reporter mocha@11
+```
+
+```js
+// hardhat.config.js
+module.exports = {
+  solidity: "0.8.24",
+  mocha: {
+    reporter: "mocha-junit-reporter",
+    reporterOptions: { mochaFile: "cache/vibloom-junit.xml" },
+  },
+};
+```
+
+That reporter writes a test's full title (`describe` and `it` joined, as
+`Counter starts at zero`) as its `name`, its own title (`starts at zero`) as
+its `classname`, and the absolute path of its file, so a node needs only the
+file and the full title:
+`vibloom add invariant "..." --file test/counter.js --test "Counter starts at zero"`.
+See [examples/hardhat-counter](../examples/hardhat-counter/).
+
+cargo-nextest (checked with 0.9.152) writes `target/nextest/ci/junit.xml`
+once `.config/nextest.toml` holds:
+
+```toml
+[profile.ci.junit]
+path = "junit.xml"
+```
+
+It names no file. A unit test's `classname` is the crate (`vault`) and its
+`name` the path in it (`tests::deposit_adds`); an integration test in
+`tests/books.rs` has `classname` `vault::books` and its function as `name`:
+`vibloom add invariant "..." --file tests/books.rs --contract vault::books --test total_matches_deposits`.
+
+With a nextest runner, `init` and `scan` put `.config/nextest.toml` in
+`protect` when it exists, as they do `foundry.toml`: retries, a default
+filter or a changed `junit.path` there would weaken results unnoticed, so
+`check --base` counts a change to it as a guard change.
 
 - The report is deleted before each run: a report left by an earlier run is
   never read as the current one. A run that writes no report is an error.
@@ -583,11 +630,11 @@ one with `"tool"` in its test:
     },
     {
       "tool": "echidna",
-      "report": "echidna.json",
+      "report": "echidna.txt",
       "command": [
         "sh",
         "-c",
-        "echidna . --contract VaultEchidna --config echidna.yaml --format json > echidna.json"
+        "echidna . --contract VaultEchidna --config echidna.yaml --format text > echidna.txt"
       ]
     }
   ]
@@ -612,11 +659,32 @@ vibloom add invariant "Withdraw takes out exactly the assets it pays" --file tes
   are pending review with "halmos did not finish". Halmos reads forge's build
   output with its syntax trees; set `ast = true` in `foundry.toml`, or the
   build `forge test` leaves behind has none and Halmos finds no tests.
-- Echidna (`--format json`, written to the report by the command): passed and
-  verified hold; solved is BROKEN with the reproducing calls; fuzzing,
-  shrinking and error are pending review with "echidna did not finish".
-  This reader was written from Echidna's documented output and has not yet
-  been checked against a real campaign; the Halmos one was.
+- Echidna: the report is what the command printed, redirected to the file
+  (`--format text > echidna.txt`; without `--format`, Echidna prints the same
+  text when its output is no terminal). vibloom reads the summary printed
+  after the last `[status]` line, one test per entry as `<name>: <status>`,
+  and skips the log above it. `passing` (never falsified when the campaign
+  ends, which Echidna's exit code counts as a success), `passed!` and
+  `verified` hold; `failed!` is BROKEN with the call sequence in the reason
+  ("falsified by: VaultEchidna.deposit(1) -> VaultEchidna.withdraw(2)"; "not
+  fully shrunk" while Echidna still printed `shrinking n/m`). A test
+  Echidna `could not evaluate` is pending review, and so is an optimization
+  test (`max value: N`), since a maximum is no verdict. Any other line where a
+  status should be refuses the report (exit 2), and so does a summary that
+  is missing (`--format none` prints none) or names two tests alike. A test
+  is found by `name`: a property's function, or an assertion's function
+  (Echidna prints its signature; parameters are dropped as for Foundry). The
+  summary names no contract: a result's contract is the `--contract` the
+  command passes, so set a node's `contract` only when it does, to that
+  name. `--format json` is read too, but Echidna writes every test there as
+  `"name"` with no contract (`lib/Echidna/Output/JSON.hs`, a TODO upstream),
+  so such a report is refused ("the Echidna report does not name its
+  tests"), with a pointer to `--format text`. Echidna's `timeout` and
+  `stopOnFail` end a campaign early and leave the unbroken tests `passing`
+  too; the runs shown are `--test-limit`, not the calls made. Both readers
+  were checked against Echidna's source at commit `fb0fd78b`
+  (crytic/echidna, 2026-11-06), not run: no Echidna binary could be
+  downloaded where they were written. The Halmos reader was run.
 - `junit`: a second runner's JUnit XML, read like `report`.
 - Medusa is not supported: it writes no machine-readable test results (only
   coverage and revert reports, and an exit code), and its log is no format.
@@ -706,7 +774,8 @@ from a blank page:
    compiler's syntax trees (see "Where vibloom builds" below): for each contract, who may call each
    state-changing function (the gates), the other modifiers, the state
    variables and which functions write them, what gates an upgrade, the calls
-   into other contracts and the low-level calls; then assumption and
+   into other contracts, the low-level calls, the ether it sends and any
+   `selfdestruct`; then assumption and
    invariant candidates, and the next step. `vibloom survey Vat Dog` prints
    only those contracts; a name that is not there gets the nearest ones and
    the list.
@@ -768,7 +837,9 @@ The candidates, each with the lines it comes from:
   ownership transfer of an inherited `Ownable`, when the code did not show who
   writes them; an initializer nobody has to authorize, called first by the
   deployer; the gate of an upgrade; each contract it calls into, as trusted to
-  behave as its interface says; each kind of low-level call.
+  behave as its interface says; each kind of low-level call; the addresses it
+  sends ether to, as able to receive it without reentering harmfully; and a
+  `selfdestruct`, with the entry points that reach it and their gates.
 - Invariants (listed only): every restricted function reverts for a caller
   that should not get through; the contract's books stay consistent whatever
   the open functions do (an inherited function that checks the caller is not
@@ -843,9 +914,30 @@ the bases that are missing.
   `set at deployment, never after` (a constructor or an initial value is the
   only writer) or `never written by this contract's own code`; a variable
   with writers that is also set in a constructor adds `, set at deployment`.
-  Inline assembly with `sstore` or `tstore` is flagged
-  `writes storage in assembly`, and its `call`, `delegatecall` and
-  `staticcall` are reported as low-level calls `(assembly)`.
+  For an upgradeable contract (an `_authorizeUpgrade`, or a base whose name
+  ends in `Upgradeable` or `Initializable`) a constructor or an initial value
+  only writes the implementation's own storage, so these say
+  `set in the implementation's constructor (not in the proxy's storage)`;
+  `constant` and `immutable` live in the code and stay as they are.
+- A slot written through OpenZeppelin's `StorageSlot`
+  (`StorageSlot.getAddressSlot(SLOT).value = x`, any `get...Slot`, also
+  with `using StorageSlot for bytes32`) is a state line
+  `state slot SLOT - written by ...`, found through internal and library
+  calls like any other write, so the ERC-1967 implementation and admin slots
+  that `ERC1967Utils` writes show who writes them:
+
+  ```
+  node_modules/@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol:21 state slot IMPLEMENTATION_SLOT - written by upgradeToAndCall (from ERC1967Utils)
+  ```
+
+  The slot is known by the constant it is written with; any other slot
+  expression (a parameter, a `keccak256(...)`, which is not evaluated) is
+  `an unnamed slot` at the line of the write. A gate whose check reads a
+  slot is decided by who writes it, like a variable. Inline assembly with
+  `sstore` or `tstore` is flagged `writes storage in assembly`, and its
+  `call`, `delegatecall` and `staticcall` are reported as low-level calls
+  `(assembly)`.
+
 - Calls and low-level calls made by library and free functions that the
   contract's code runs are the contract's own: they run in its context
   (`SignatureChecker` asking a wallet with `staticcall`). A library function
@@ -860,9 +952,20 @@ the bases that are missing.
   it can be deployed alone, with an `inherited by:` line. Its candidates keep
   its own name in their ids; two contracts of one name get the file in the id
   too, so no two candidates share one.
-- Calls with `{value: ...}` options are seen. For a gate whose check reads the
-  contract's own state, the candidate says which functions decide who passes
-  it.
+- Ether sent with `.transfer(x)` or `.send(x)` on an `address` or
+  `address payable` (not a call named `transfer` on a contract-typed value,
+  which is a call into that contract) and with `call{value: v}` is reported
+  as `sends ether (transfer)`, `(send)` or `(call)`. A `call{value: v}` is
+  listed once, as sending ether, not also as a low-level call; one whose `v`
+  is a literal zero, or a parameter of library code that every call reaching
+  it passes as zero (OpenZeppelin's `functionCall` runs
+  `functionCallWithValue(target, data, 0)`), sends nothing and stays a
+  low-level call. For a gate whose check
+  reads the contract's own state, the candidate says which functions decide
+  who passes it.
+- `selfdestruct(x)`, and `suicide(x)` before solc 0.5, is reported at its
+  line (`selfdestruct (assembly)` in inline assembly); its candidate names
+  the entry points whose code reaches it, with their gates.
 
 Every fact the survey gives is read from the code, so it can be wrong about
 what the code means but not invent a line that is not there. Nothing it files
@@ -870,15 +973,18 @@ counts until the verifier accepts it.
 
 What the survey does not see:
 
-- `selfdestruct` is not reported.
-- Ether sent with `.transfer` or `.send` is not reported as a call.
-- Storage written through inline assembly is flagged, but not tied to a state
-  variable, so a slot a library defines and writes (`sstore` in a library
-  function) never appears among a variable's writers.
+- Storage written through inline assembly is flagged, but not tied to a
+  slot, so a slot written with `sstore` (Solady's `UUPSUpgradeable`, an
+  older proxy) never appears among the state lines. Neither does a
+  `StorageSlot` slot held in a local pointer before it is written.
+- Ether sent from inline assembly (a `call` with a value) stays a low-level
+  call `(assembly)`: the value is not read.
+- Whether a contract is behind a proxy is told by its upgrade gate and the
+  names of its bases; one deployed behind a proxy without either still reads
+  `set at deployment`.
 - The lists of writers over-approximate: a function is listed when any path
-  in its code can write the variable, whether or not it runs.
-- `set at deployment` is said of an implementation behind a proxy too; the
-  survey does not know a proxy's storage is not the implementation's.
+  in its code can write the variable, whether or not it runs. The same holds
+  for the entry points said to reach a `selfdestruct`.
 - Where an address comes from (fixed, set by an admin, given by the caller) is
   not read, and neither is whether a hand-written initializer guard works.
 - Anything outside the project's source folder, unverified or not compiled by
@@ -1178,8 +1284,9 @@ does with `git rm --cached .vibloom/log.jsonl` and a commit.
 - `.vibloom/proposals.jsonl` is not hash-chained: it holds suggestions, not
   evidence, and nothing in it counts until a person accepts it into the map.
 - The formats read are Foundry's JSON, JUnit XML, Halmos's `--json-output`
-  and Echidna's `--format json`. A tool that writes none of them needs a
-  parser that returns the same outcomes. The Echidna parser follows its
-  documented output and has not yet been run against the real binary here.
+  and Echidna's text summary (and its `--format json`, refused while it
+  names no test). A tool that writes none of them needs a parser that
+  returns the same outcomes. The Echidna readers follow Echidna's source at
+  commit `fb0fd78b` and have not been run against the real binary here.
 - After a test command, the Claude Code hook re-runs that subset once more. On
   a large suite, filter with `--match-path` or `--match-test`.
