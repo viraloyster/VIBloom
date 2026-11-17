@@ -323,7 +323,15 @@ fn dispatch(argv: &[String], io: &mut Io) -> Fallible<i32> {
     let root = find_root(&io.cwd).ok_or_else(|| {
         format!("No {MAP_PATH} here or above. Run `vibloom init` at the project root.")
     })?;
-    if let Some(note) = crate::store::migrate_log(&root) {
+    // Only a command that records a run moves an old committed log aside; a
+    // command that only reads must leave the project's files as they are.
+    crate::store::follow_git(&root);
+    let note = if matches!(cmd, "run" | "check") {
+        crate::store::migrate_log(&root)
+    } else {
+        crate::store::legacy_log_note(&root)
+    };
+    if let Some(note) = note {
         (io.err)(&note);
     }
     match cmd {

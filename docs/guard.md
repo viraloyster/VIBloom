@@ -1151,7 +1151,8 @@ Because the log is local, a fresh clone has no states: every node with a test
 is untested until `vibloom check` (or `run`) runs the tests there.
 
 Upgrading from 0.7.0, a committed `.vibloom/log.jsonl` is moved aside into the
-local folder (`log.committed.jsonl`) by the first command that finds it, and
+local folder (`log.committed.jsonl`) by the first `vibloom run` or `vibloom check` (commands that only read leave it
+where it is and say so), and
 never read. The command says once to take it out of git, which the person
 does with `git rm --cached .vibloom/log.jsonl` and a commit.
 

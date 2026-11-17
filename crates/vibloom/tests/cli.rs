@@ -467,13 +467,18 @@ fn a_committed_log_is_moved_aside_once_and_never_read() {
         fs::copy(fx.join(from), dir.join(to)).expect("copy");
     }
     // Its passes verify, yet nothing holds: whoever committed it wrote it.
+    // A command that only reads says so and leaves the file where it is.
     let first = cli(&dir, &["status"]);
     assert_eq!(first.code, 1, "{}", first.out);
     assert!(first.out.contains("untested"), "{}", first.out);
+    assert!(first.err.contains("never read"), "{}", first.err);
+    assert!(dir.join(".vibloom/log.jsonl").exists());
+    // A run moves it aside, once.
+    let run = cli(&dir, &["run"]);
     assert!(
-        first.err.contains("git rm --cached .vibloom/log.jsonl"),
+        run.err.contains("git rm --cached .vibloom/log.jsonl"),
         "{}",
-        first.err
+        run.err
     );
     assert!(!dir.join(".vibloom/log.jsonl").exists());
     assert!(dir.join(".vibloom/local/log.committed.jsonl").exists());

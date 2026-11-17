@@ -168,16 +168,7 @@ pub(crate) fn write_snapshot(root: &Path, snap: &Snapshot) -> Fallible<()> {
 /// a committed log is whatever the last committer wrote, so no state may
 /// come from it. The next run records the states again.
 pub(crate) fn migrate_log(root: &Path) -> Option<String> {
-    // Runs recorded before `git init` follow the project into the git folder.
     let dir = state_dir(root);
-    let before_git = root.join(LOCAL_DIR);
-    if dir != before_git && !dir.join("log.jsonl").exists() {
-        for f in ["log.jsonl", "state.json"] {
-            if before_git.join(f).is_file() {
-                let _ = fs::rename(before_git.join(f), dir.join(f));
-            }
-        }
-    }
     let old = root.join(LEGACY_LOG_PATH);
     if !old.is_file() {
         return None;
@@ -201,6 +192,30 @@ pub(crate) fn migrate_log(root: &Path) -> Option<String> {
         "VIBloom: the run log is local state now and a committed one is never read. Moved {LEGACY_LOG_PATH} aside to {}; `vibloom run` records the states again. Take it out of git once, from your own terminal: git rm --cached {LEGACY_LOG_PATH}",
         to.display()
     ))
+}
+
+/// Runs recorded before `git init` follow the project into the git folder.
+/// Local state only: nothing the project tracks is touched.
+pub(crate) fn follow_git(root: &Path) {
+    let dir = state_dir(root);
+    let before_git = root.join(LOCAL_DIR);
+    if dir != before_git && !dir.join("log.jsonl").exists() {
+        for f in ["log.jsonl", "state.json"] {
+            if before_git.join(f).is_file() {
+                let _ = fs::rename(before_git.join(f), dir.join(f));
+            }
+        }
+    }
+}
+
+/// What a reading command says about a run log committed by 0.7.0 or
+/// earlier, without touching it.
+pub(crate) fn legacy_log_note(root: &Path) -> Option<String> {
+    root.join(LEGACY_LOG_PATH).is_file().then(|| {
+        format!(
+            "VIBloom: {LEGACY_LOG_PATH} was committed by an older vibloom and is never read; `vibloom check` moves it aside and records the states again. Then take it out of git once, from your own terminal: git rm --cached {LEGACY_LOG_PATH}"
+        )
+    })
 }
 
 /// Holds the guard's lock while `f` runs, so two processes (two agents, a hook

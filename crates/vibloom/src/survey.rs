@@ -325,6 +325,14 @@ fn uses_caller(e: &Value, who: &Who) -> bool {
             if changes_other_contract(e) {
                 return false;
             }
+            // A bool computed from the caller still counts: the helper may
+            // only pass it on in assembly (`either(x, wish(u, msg.sender))`).
+            if who.handed.contains(&ptr(e)) {
+                return e.get("expression").is_some_and(|f| uses_caller(f, who))
+                    || args_of(e).iter().any(|a| {
+                        (!is_caller(a, who) || type_string(a) == "bool") && uses_caller(a, who)
+                    });
+            }
             if s(e, "nodeType") == "BinaryOperation" {
                 let l = e.get("leftExpression").unwrap_or(&Value::Null);
                 let r = e.get("rightExpression").unwrap_or(&Value::Null);
@@ -422,10 +430,13 @@ type Tainted = (Ptr, Vec<usize>);
 /// `caller_aliases`), and calls to internal code whose result is computed
 /// from it (see `Ctx::returns_caller`), each with whether that result only
 /// excludes callers when a check passes on it being true and being false.
+/// `handed` are calls to internal code that neither returns a value computed
+/// from the caller nor checks it: the caller as their argument says nothing.
 #[derive(Default)]
 struct Who {
     aliases: BTreeSet<i64>,
     calls: BTreeMap<Ptr, Excludes>,
+    handed: BTreeSet<Ptr>,
 }
 
 fn reverts(branch: &Value) -> bool {
@@ -1340,34 +1351,45 @@ impl<'i, 'a> Ctx<'i, 'a> {
 
     /// What stands for the caller in `d` when the parameters at `taint`
     /// hold it. Aliases and calls feed each other (`bool ok = _isAuth(a)`,
-    /// `_isAuth(u)` with `u` an alias), so both grow until neither changes.
+    /// `_isAuth(u)` with `u` an alias), so they are worked out again until
+    /// none changes.
     fn who(&self, d: &Def<'a>, taint: &[usize]) -> Who {
         let loc = self.ix.locals(d.node);
         let body = d.node.get("body").unwrap_or(&Value::Null);
-        let mut who = Who {
-            aliases: taint
-                .iter()
-                .filter_map(|j| loc.params.get(*j).copied())
-                .collect(),
-            calls: BTreeMap::new(),
-        };
-        loop {
+        let base: BTreeSet<i64> = taint
+            .iter()
+            .filter_map(|j| loc.params.get(*j).copied())
+            .collect();
+        let mut who = Who::default();
+        let list = self.calls(d);
+        // Aliases start over each round: one taken from a call only later
+        // found `handed` (`bool ok = _enough(msg.sender, x)`) must go. The
+        // bound only guards against a cycle; real code settles in a few rounds.
+        for _ in 0..list.len() + 2 {
+            let before = std::mem::replace(&mut who.aliases, base.clone());
             caller_aliases(body, &mut who);
             let mut calls = BTreeMap::new();
-            for (x, c) in self.calls(d).iter() {
+            let mut handed = BTreeSet::new();
+            for (x, c) in list.iter() {
                 if let Callee::Def(cd, args) = c
                     && self.followed(cd)
                     && s(cd.node, "nodeType") == "FunctionDefinition"
-                    && let Some(excludes) = self.returns_caller(cd, &Self::taint(args, &who))
                 {
-                    calls.insert(ptr(x), excludes);
+                    let t = Self::taint(args, &who);
+                    if let Some(excludes) = self.returns_caller(cd, &t) {
+                        calls.insert(ptr(x), excludes);
+                    } else if !t.is_empty() && !self.has_check(cd, &t) {
+                        handed.insert(ptr(x));
+                    }
                 }
             }
-            if calls == who.calls {
+            if calls == who.calls && handed == who.handed && before == who.aliases {
                 return who;
             }
             who.calls = calls;
+            who.handed = handed;
         }
+        who
     }
 
     /// Whether what `d` returns is computed from the caller under the rule
@@ -3238,6 +3260,66 @@ mod tests {
             report.contains("src/vat.sol:27 take - anyone\n"),
             "{report}"
         );
+    }
+
+    // Handing the caller to a helper is no check unless the helper checks it
+    // or returns a value computed from it.
+    #[test]
+    fn the_caller_handed_to_a_helper_that_only_compares_amounts_is_no_check() {
+        let none = json!([]);
+        let entry = |fid: i64, name: &str, stmts: Vec<Value>| {
+            func(
+                fid,
+                name,
+                "external",
+                fid as usize,
+                none.clone(),
+                body(stmts),
+            )
+        };
+        let enough = |line: usize| call(id("_enough", 60), vec![sender(), lit("1")], line);
+        let mut wish = call(id("_wish", 62), vec![sender()], 28);
+        wish["typeDescriptions"] = json!({ "typeString": "bool" });
+        let c = read_one(
+            vec![
+                json!({ "nodeType": "ContractDefinition", "name": "Vault", "contractKind": "contract", "nodes": [
+            { "nodeType": "VariableDeclaration", "id": 3, "name": "bal", "src": at(2) },
+            { "nodeType": "VariableDeclaration", "id": 4, "name": "owner", "src": at(3) },
+            // return bal[a] >= x;
+            with_params(func(60, "_enough", "internal", 5, none.clone(),
+                             body(vec![ret(bin(">=", index(id("bal", 3), id("a", 200)), id("x", 201)))])),
+                        &[(200, "a", false), (201, "x", false)]),
+            // require(a == owner); return true;
+            with_params(func(61, "_isOwner", "internal", 6, none.clone(),
+                             body(vec![require(bin("==", id("a", 202), id("owner", 4)), 6), ret(lit("true"))])),
+                        &[(202, "a", false)]),
+            entry(20, "take", vec![require(enough(21), 21)]),
+            entry(22, "keep", vec![local(80, "bool", enough(23)), require(id("ok", 80), 24)]),
+            entry(25, "admin", vec![require(call(id("_isOwner", 61), vec![sender()], 26), 26)]),
+            // return a == owner;
+            with_params(func(62, "_wish", "internal", 7, none.clone(),
+                             body(vec![ret(bin("==", id("a", 203), id("owner", 4)))])),
+                        &[(203, "a", false)]),
+            // assembly { z := or(x, y) }
+            with_params(func(63, "_either", "internal", 8, none.clone(),
+                             body(vec![json!({ "nodeType": "InlineAssembly", "operations": "{ z := or(x, y) }" })])),
+                        &[(204, "x", false), (205, "y", false)]),
+            entry(27, "consent", vec![require(call(id("_either", 63), vec![lit("false"), wish], 28), 28)]),
+        ] }),
+            ],
+            "Vault",
+        );
+        let checks = |n: &str| {
+            c.functions
+                .iter()
+                .find(|f| f.name == n)
+                .map(|f| f.checks.clone())
+                .expect("function")
+        };
+        assert_eq!(checks("take"), Vec::<usize>::new());
+        assert_eq!(checks("keep"), Vec::<usize>::new());
+        assert_eq!(checks("admin"), vec![26]);
+        assert_eq!(checks("consent"), vec![28]);
     }
 
     #[test]

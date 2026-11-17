@@ -8,6 +8,9 @@ Fixes found running vibloom on Morpho Blue.
 
 ### Fixed
 
+- A command that only reads (`survey`, `status`, `gaps`...) no longer moves a
+  run log committed by 0.7.0 or earlier: it says the log is not read, and
+  `run` or `check` moves it aside.
 - `check` ends with one line saying why it failed when the reason is outside
   the nodes (a guard change not approved, a failing test no node rests on):
   on Morpho the table read "0 need attention" while the check failed.
@@ -18,6 +21,11 @@ Fixes found running vibloom on Morpho Blue.
   value uses the caller now counts as the caller in a condition, with the
   same exclusions (amounts compared with `<` or `>`, the zero address,
   deny-lists such as `!blacklisted[msg.sender]` or `!_isBlacklisted(...)`).
+- `require(_enough(msg.sender, x))` counted as a caller check because the
+  caller is among the arguments, even when the helper only compares it in an
+  amount (`bal[a] >= x`). Handing the caller to an internal or private
+  function now counts only when that function checks it or returns a value
+  computed from it.
 - Every `survey`, `gaps` or `research` after a `forge test` recompiled the
   whole project, since `forge test` rewrites `out/` without syntax trees.
   vibloom now builds into its own `--out` and `--cache-path` folder in the
